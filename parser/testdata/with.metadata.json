@@ -1,18 +1,13 @@
 {
   "parse_todo": {
     "case_11": true,
-    "case_14": true,
-    "case_15": true,
-    "case_16": true,
     "case_18": true,
     "case_20": true,
     "case_21": true,
     "case_22": true,
     "case_23": true,
-    "case_25": true,
     "case_27": true,
-    "case_3": true,
-    "case_9": true
+    "case_3": true
   },
   "alternations": {
     "case_28": true

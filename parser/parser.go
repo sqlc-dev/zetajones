@@ -266,8 +266,64 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return &ast.QueryStatement{Span: span(tok.Pos, p.prevEnd()), Query: query}, nil
 	case isKeyword(tok, "ALTER"):
 		return p.parseAlterStatement()
+	case isKeyword(tok, "CREATE"):
+		return p.parseCreateStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseCreateStatement parses CREATE [OR REPLACE] [TEMP|TEMPORARY|PUBLIC|
+// PRIVATE] TABLE [IF NOT EXISTS] <path> [AS query]; see
+// create_table_statement in googlesql.tm. Other CREATE object kinds and the
+// remaining optional clauses (table elements, options, PARTITION BY, ...)
+// are not implemented yet.
+func (p *parser) parseCreateStatement() (ast.Statement, error) {
+	createTok := p.advance() // CREATE
+	stmt := &ast.CreateTableStatement{Span: span(createTok.Pos, 0)}
+	if isKeyword(p.peek(), "OR") && isKeyword(p.peekAt(1), "REPLACE") {
+		p.advance()
+		p.advance()
+		stmt.IsOrReplace = true
+	}
+	switch {
+	case isKeyword(p.peek(), "TEMP"), isKeyword(p.peek(), "TEMPORARY"):
+		p.advance()
+		stmt.Scope = "TEMP"
+	case isKeyword(p.peek(), "PUBLIC"):
+		p.advance()
+		stmt.Scope = "PUBLIC"
+	case isKeyword(p.peek(), "PRIVATE"):
+		p.advance()
+		stmt.Scope = "PRIVATE"
+	}
+	if _, err := p.expectKeyword("TABLE"); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	if isKeyword(p.peek(), "AS") {
+		p.advance()
+		query, err := p.parseQuery()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Query = query
+		// The statement covers all consumed tokens, which can exceed the
+		// query node's end: a parenthesized query keeps the location of the
+		// query inside the parentheses.
+		stmt.Stop = p.prevEnd()
+	}
+	return stmt, nil
 }
 
 // prevEnd returns the end offset of the most recently consumed token.
@@ -1708,43 +1764,29 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 	case token.LBRACKET:
 		return p.parseArrayConstructor(tok.Pos)
 	case token.LPAREN:
-		lparen := p.advance()
-		expr, err := p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-		// "(expr, expr, ...)" is a struct constructor; see struct_constructor
-		// in googlesql.tm.
-		if p.peek().Kind == token.COMMA {
-			s := &ast.StructConstructorWithParens{
-				Span:             span(lparen.Pos, 0),
-				FieldExpressions: []ast.Node{expr},
+		if p.lparenStartsQuery() {
+			save := p.pos
+			lparen := p.peek()
+			query, parenEnd, qerr := p.parseParenthesizedQuery()
+			if qerr == nil {
+				// The subquery's ExpressionSubquery node covers the
+				// parentheses; the inner query is not marked parenthesized
+				// because the subquery node already accounts for them (see
+				// expression_higher_prec_than_and in googlesql.tm).
+				query.Parenthesized = false
+				return &ast.ExpressionSubquery{Span: span(lparen.Pos, parenEnd), Query: query}, nil
 			}
-			for p.peek().Kind == token.COMMA {
-				p.advance()
-				field, err := p.parseExpression()
-				if err != nil {
-					return nil, err
-				}
-				s.FieldExpressions = append(s.FieldExpressions, field)
+			// A parenthesized expression can also start with a nested
+			// subquery (e.g. "((SELECT 1) + 2)"), so retry as an ordinary
+			// parenthesized expression and keep whichever error got further.
+			p.pos = save
+			expr, eerr := p.parseParenthesizedExpression()
+			if eerr != nil {
+				return nil, furthestError(qerr, eerr)
 			}
-			rparen, err := p.expect(token.RPAREN, `")" or ","`)
-			if err != nil {
-				return nil, err
-			}
-			s.Stop = rparen.End
-			return s, nil
+			return expr, nil
 		}
-		// After "( expression", the reference LALR parser's only live item on
-		// an unexpected token is the struct constructor's "," continuation, so
-		// its error suggests "," rather than ")".
-		if p.peek().Kind != token.RPAREN {
-			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," but got %s`, describeToken(p.peek()))
-		}
-		p.advance()
-		// Parenthesized expressions keep the span of the inner expression in
-		// ZetaSQL's parse tree; the parentheses only affect grouping.
-		return expr, nil
+		return p.parseParenthesizedExpression()
 	case token.IDENT, token.QUOTED_IDENT:
 		switch {
 		case isKeyword(tok, "NULL"):
@@ -1756,12 +1798,98 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACKET:
 			p.advance() // ARRAY; the constructor's span starts at the keyword.
 			return p.parseArrayConstructor(tok.Pos)
+		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LPAREN:
+			p.advance() // ARRAY; the subquery's span starts at the keyword.
+			return p.parseModifiedSubquery(tok.Pos, "ARRAY")
+		case isKeyword(tok, "EXISTS") && p.peekAt(1).Kind == token.LPAREN:
+			p.advance() // EXISTS; the subquery's span starts at the keyword.
+			return p.parseModifiedSubquery(tok.Pos, "EXISTS")
 		case isReserved(tok):
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
 		return p.parsePathOrCall()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// lparenStartsQuery reports whether the "(" at the current position opens a
+// parenthesized query rather than a parenthesized expression or struct
+// constructor: after skipping consecutive "("s, the next token must start a
+// query.
+func (p *parser) lparenStartsQuery() bool {
+	i := 0
+	for p.peekAt(i).Kind == token.LPAREN {
+		i++
+	}
+	tok := p.peekAt(i)
+	return isKeyword(tok, "SELECT") || isKeyword(tok, "WITH") || isKeyword(tok, "FROM")
+}
+
+// furthestError returns whichever parse error consumed more input, so the
+// message from the more successful of two alternative parses wins; a is
+// preferred on ties.
+func furthestError(a, b error) error {
+	var ea, eb *Error
+	if errors.As(a, &ea) && errors.As(b, &eb) && eb.Offset > ea.Offset {
+		return b
+	}
+	return a
+}
+
+// parseModifiedSubquery parses the "( query )" following an ARRAY or EXISTS
+// keyword (already consumed, starting at start); see
+// expression_subquery_with_keyword in googlesql.tm.
+func (p *parser) parseModifiedSubquery(start int, modifier string) (ast.Node, error) {
+	query, parenEnd, err := p.parseParenthesizedQuery()
+	if err != nil {
+		return nil, err
+	}
+	query.Parenthesized = false
+	return &ast.ExpressionSubquery{Span: span(start, parenEnd), Modifier: modifier, Query: query}, nil
+}
+
+// parseParenthesizedExpression parses "( expression )" or a struct
+// constructor "(expr, expr, ...)" with the opening parenthesis as the next
+// token; see struct_constructor and parenthesized_expression_not_a_query in
+// googlesql.tm.
+func (p *parser) parseParenthesizedExpression() (ast.Node, error) {
+	lparen := p.advance()
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	// "(expr, expr, ...)" is a struct constructor; see struct_constructor
+	// in googlesql.tm.
+	if p.peek().Kind == token.COMMA {
+		s := &ast.StructConstructorWithParens{
+			Span:             span(lparen.Pos, 0),
+			FieldExpressions: []ast.Node{expr},
+		}
+		for p.peek().Kind == token.COMMA {
+			p.advance()
+			field, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			s.FieldExpressions = append(s.FieldExpressions, field)
+		}
+		rparen, err := p.expect(token.RPAREN, `")" or ","`)
+		if err != nil {
+			return nil, err
+		}
+		s.Stop = rparen.End
+		return s, nil
+	}
+	// After "( expression", the reference LALR parser's only live item on
+	// an unexpected token is the struct constructor's "," continuation, so
+	// its error suggests "," rather than ")".
+	if p.peek().Kind != token.RPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," but got %s`, describeToken(p.peek()))
+	}
+	p.advance()
+	// Parenthesized expressions keep the span of the inner expression in
+	// ZetaSQL's parse tree; the parentheses only affect grouping.
+	return expr, nil
 }
 
 // parseArrayConstructor parses "[ [expression, ...] ]" with the opening

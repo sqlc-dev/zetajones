@@ -204,6 +204,31 @@ func nodeString(n ast.Node) string {
 			return "FunctionCall(distinct=true)"
 		}
 		return "FunctionCall"
+	case *ast.ExpressionSubquery:
+		if t.Modifier != "" {
+			return fmt.Sprintf("ExpressionSubquery(modifier=%s)", t.Modifier)
+		}
+		return "ExpressionSubquery"
+	case *ast.CreateTableStatement:
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreateTableStatement"
+		}
+		return fmt.Sprintf("CreateTableStatement(%s)", strings.Join(mods, ", "))
 	default:
 		return fmt.Sprintf("UNKNOWN_NODE(%T)", n)
 	}

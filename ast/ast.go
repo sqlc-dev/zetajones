@@ -761,6 +761,40 @@ func (n *OptionsEntry) Children() []Node {
 	return children(n.Name, n.Value)
 }
 
+// ExpressionSubquery is a subquery used as an expression: "( query )",
+// "ARRAY( query )", or "EXISTS( query )"; see ASTExpressionSubquery in
+// googlesql/parser/parse_tree.h. The span includes the parentheses (and the
+// modifier keyword, if any); the inner query keeps the span of the query
+// text inside the parentheses. Modifier is "", "ARRAY", "EXISTS", or
+// "VALUE".
+type ExpressionSubquery struct {
+	Span
+	Modifier string `json:"modifier,omitempty"`
+	Query    *Query `json:"query"`
+}
+
+func (n *ExpressionSubquery) Children() []Node {
+	return children(n.Query)
+}
+
+// CreateTableStatement is a CREATE TABLE statement, optionally with an AS
+// query; see ASTCreateTableStatement in googlesql/parser/parse_tree.h.
+// Scope is "", "TEMP", "PUBLIC", or "PRIVATE" (TEMPORARY normalizes to
+// "TEMP").
+type CreateTableStatement struct {
+	Span
+	Scope         string          `json:"scope,omitempty"`
+	IsOrReplace   bool            `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool            `json:"is_if_not_exists,omitempty"`
+	Name          *PathExpression `json:"name"`
+	Query         *Query          `json:"query,omitempty"`
+}
+
+func (n *CreateTableStatement) statementNode() {}
+func (n *CreateTableStatement) Children() []Node {
+	return children(n.Name, n.Query)
+}
+
 // FunctionCall is a function call expression.
 type FunctionCall struct {
 	Span
