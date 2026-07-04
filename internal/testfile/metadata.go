@@ -10,11 +10,13 @@ import (
 // it as <name>.metadata.json. It tracks which cases the parser does not
 // handle yet. The vendored .test files themselves are never modified.
 type Metadata struct {
-	// ParseTodo maps "case_N" to true for cases whose parse tree (or error)
-	// does not yet match the expected output.
+	// ParseTodo maps a case key to true when its parse tree (or error) does not
+	// yet match the expected output. Keys are "case_N" for ordinary cases and
+	// "case_N.alt_K" for the K-th expansion of an alternation case.
 	ParseTodo map[string]bool `json:"parse_todo,omitempty"`
-	// Alternations maps "case_N" to true for cases using {{...}} alternation
-	// groups, which the harness cannot expand yet.
+	// Alternations maps "case_N" to true for {{...}} alternation cases that the
+	// harness cannot confidently expand and therefore skips entirely.
+	// Expandable alternation cases are tracked per-expansion in ParseTodo.
 	Alternations map[string]bool `json:"alternations,omitempty"`
 	// Skip disables the whole file, with a reason (e.g. options the harness
 	// cannot model).

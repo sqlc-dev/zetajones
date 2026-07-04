@@ -1,11 +1,8 @@
 {
   "parse_todo": {
+    "case_1.alt_2": true,
     "case_10": true,
     "case_2": true,
     "case_6": true
-  },
-  "alternations": {
-    "case_1": true,
-    "case_7": true
   }
 }

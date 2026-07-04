@@ -21,6 +21,8 @@
     "case_36": true,
     "case_37": true,
     "case_38": true,
+    "case_39.alt_1": true,
+    "case_39.alt_2": true,
     "case_41": true,
     "case_42": true,
     "case_43": true,
@@ -33,10 +35,5 @@
     "case_50": true,
     "case_8": true,
     "case_9": true
-  },
-  "alternations": {
-    "case_33": true,
-    "case_39": true,
-    "case_4": true
   }
 }

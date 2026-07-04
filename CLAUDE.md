@@ -51,12 +51,28 @@ message), and the expected unparse output, separated by `--` lines. See
 
 Each `<name>.metadata.json` sidecar (ours, not vendored) tracks:
 
-- `parse_todo` — cases whose output doesn't match yet (`case_N` keys)
-- `alternations` — cases using `{{a|b}}` alternation groups, which the
-  harness cannot expand yet
+- `parse_todo` — cases whose output doesn't match yet. Keys are `case_N` for
+  ordinary cases and `case_N.alt_K` for the K-th expansion of an alternation
+  case (`{{a|b}}` groups; see below).
+- `alternations` — alternation cases the harness cannot confidently expand and
+  therefore skips entirely (currently none; kept for safety). Expandable
+  alternation cases are tracked per-expansion in `parse_todo` instead.
 - `skip` — reason string to skip the whole file
 
 A `.test` file with no sidecar passes completely.
+
+## Alternation Groups
+
+Cases whose SQL or option lines contain `{{a|b|c}}` groups expand into the
+cartesian product of the groups' alternatives (last group varies fastest),
+matching file_based_test_driver. `internal/testfile` substitutes each
+combination and matches it to its expected parse tree by the driver's
+`ALTERNATION GROUP` label; each expansion runs as its own sub-test
+(`case_N/alt_K`) with independent `parse_todo` tracking. Byte offsets in an
+expansion's expected tree are relative to that expansion's substituted SQL.
+Regenerate per-expansion todos the same way as ordinary cases, with
+`go test ./parser -check-parse` (it re-triages every expansion, harvesting
+ones that now pass and recording ones that still fail).
 
 ## Important Rules
 

@@ -1,17 +1,22 @@
 {
   "parse_todo": {
+    "case_1.alt_1": true,
+    "case_1.alt_2": true,
     "case_10": true,
     "case_11": true,
+    "case_2.alt_1": true,
+    "case_2.alt_2": true,
+    "case_3.alt_1": true,
+    "case_3.alt_2": true,
+    "case_4.alt_1": true,
+    "case_4.alt_2": true,
+    "case_5.alt_1": true,
+    "case_5.alt_2": true,
+    "case_6.alt_1": true,
+    "case_6.alt_2": true,
+    "case_7.alt_1": true,
+    "case_7.alt_2": true,
     "case_8": true,
     "case_9": true
-  },
-  "alternations": {
-    "case_1": true,
-    "case_2": true,
-    "case_3": true,
-    "case_4": true,
-    "case_5": true,
-    "case_6": true,
-    "case_7": true
   }
 }

@@ -80,34 +80,29 @@ func testFile(t *testing.T, path string) {
 	// Bootstrap mode: with -check-parse and no metadata file yet, record
 	// every failing case as todo.
 	bootstrap := *checkParse && !hasMeta
-	if bootstrap {
+	// Ensure the maps are writable (a loaded sidecar may omit either key).
+	// Empty maps are dropped on save via omitempty.
+	if meta.ParseTodo == nil {
 		meta.ParseTodo = map[string]bool{}
+	}
+	if meta.Alternations == nil {
 		meta.Alternations = map[string]bool{}
 	}
 
 	changed := false
-	for _, c := range cases {
-		name := fmt.Sprintf("case_%d", c.Index)
 
-		if c.HasAlternation {
-			if bootstrap {
-				meta.Alternations[name] = true
-				changed = true
-			}
-			continue
-		}
-
+	// check runs one named case with bootstrap/check-parse/normal semantics.
+	// Alternation expansions reuse this via names like "case_5.alt_2".
+	check := func(name string, c *testfile.Case) {
 		isTodo := meta.ParseTodo[name]
 		switch {
 		case bootstrap:
-			got := runCase(c)
-			if got != c.Expected {
+			if runCase(c) != c.Expected {
 				meta.ParseTodo[name] = true
 				changed = true
 			}
 		case isTodo && *checkParse:
-			got := runCase(c)
-			if got == c.Expected {
+			if runCase(c) == c.Expected {
 				t.Logf("PARSE PASSES NOW: %s %s", path, name)
 				delete(meta.ParseTodo, name)
 				changed = true
@@ -123,6 +118,68 @@ func testFile(t *testing.T, path string) {
 				}
 			})
 		}
+	}
+
+	for _, c := range cases {
+		name := fmt.Sprintf("case_%d", c.Index)
+
+		if c.HasAlternation {
+			// Cases the harness cannot confidently expand stay skipped and are
+			// recorded in the alternations map (never run, to avoid false
+			// passes).
+			if c.AltUnexpandable {
+				if (bootstrap || *checkParse) && !meta.Alternations[name] {
+					meta.Alternations[name] = true
+					changed = true
+				}
+				continue
+			}
+
+			// Bootstrap and -check-parse fully (re-)triage every expansion:
+			// harvest ones that now pass out of parse_todo and record ones that
+			// still fail as "case_N.alt_K" todos. Any legacy whole-case marker
+			// (alternations entry or stale case_N todo from before the case was
+			// expandable) is dropped. This is what replaces the old skipped
+			// "alternations" tracking with real per-expansion tracking.
+			if bootstrap || *checkParse {
+				if meta.Alternations[name] {
+					delete(meta.Alternations, name)
+					changed = true
+				}
+				if meta.ParseTodo[name] {
+					delete(meta.ParseTodo, name)
+					changed = true
+				}
+				for _, child := range c.AltCases {
+					cname := fmt.Sprintf("%s.alt_%d", name, child.Index)
+					pass := runCase(child) == child.Expected
+					switch {
+					case pass && meta.ParseTodo[cname]:
+						t.Logf("PARSE PASSES NOW: %s %s", path, cname)
+						delete(meta.ParseTodo, cname)
+						changed = true
+					case !pass && !meta.ParseTodo[cname]:
+						meta.ParseTodo[cname] = true
+						changed = true
+					}
+				}
+				continue
+			}
+
+			// Normal run: a case still marked in the alternations map has not
+			// been migrated yet (run `go test ./parser -check-parse`); skip it
+			// so the run does not regress. Otherwise run each expansion with the
+			// usual per-expansion todo semantics.
+			if meta.Alternations[name] {
+				continue
+			}
+			for _, child := range c.AltCases {
+				check(fmt.Sprintf("%s.alt_%d", name, child.Index), child)
+			}
+			continue
+		}
+
+		check(name, c)
 	}
 
 	if changed {

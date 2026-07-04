@@ -1,5 +1,6 @@
 {
-  "alternations": {
-    "case_28": true
+  "parse_todo": {
+    "case_28.alt_1": true,
+    "case_28.alt_2": true
   }
 }

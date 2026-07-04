@@ -39,6 +39,22 @@ type Case struct {
 	// HasAlternation is true if the case uses {{...|...}} alternations, which
 	// expand to multiple sub-tests with per-group expected output.
 	HasAlternation bool
+	// AltCases holds the concrete sub-cases for an alternation case, in the
+	// test driver's cartesian expansion order (the last group varies fastest).
+	// Each sub-case has its SQL substituted and Expected set to that
+	// expansion's parse tree (or error). Nil when the case has no alternations
+	// or could not be expanded (see AltUnexpandable). Each sub-case's Index is
+	// its 1-based expansion number and AltLabel is the driver's group label.
+	AltCases []*Case
+	// AltUnexpandable is set when a case uses alternations but the harness
+	// could not confidently expand it (e.g. the number of expected ALTERNATION
+	// GROUP blocks did not match the cartesian product, or a label did not
+	// match). Such cases are skipped rather than run, to avoid false passes.
+	AltUnexpandable bool
+	// AltLabel is the driver's alternation-group label for a sub-case (the
+	// comma-joined chosen alternatives, leading-empty components stripped, or
+	// "" for the all-empty combination that the driver prints as "<empty>").
+	AltLabel string
 }
 
 // HasOption reports whether the case has the given option (exact match).
@@ -132,16 +148,31 @@ func parseCase(lines []string, defaults *[]string) *Case {
 		}
 		i++
 	}
+	inheritedDefaults := append([]string(nil), *defaults...)
+	var optionLines []string
 	for i < len(part) {
 		trimmed := strings.TrimSpace(part[i])
 		if trimmed == "" {
 			i++
 			continue
 		}
-		opts, ok := parseOptionsLine(trimmed)
-		if !ok {
+		if _, ok := parseOptionsLine(trimmed); !ok {
 			break
 		}
+		optionLines = append(optionLines, trimmed)
+		i++
+	}
+	// Parse pure (non-alternation) option lines into effective options and
+	// inherited defaults. Option lines containing "{{" hold alternation groups
+	// and are expanded per-expansion instead (see expandAlternations); they are
+	// not treated as fixed options here.
+	optHasGroup := false
+	for _, line := range optionLines {
+		if strings.Contains(line, "{{") {
+			optHasGroup = true
+			continue
+		}
+		opts, _ := parseOptionsLine(line)
 		for _, opt := range opts {
 			if rest, isDefault := strings.CutPrefix(opt, "default "); isDefault {
 				*defaults = append(*defaults, rest)
@@ -149,7 +180,6 @@ func parseCase(lines []string, defaults *[]string) *Case {
 				c.Options = append(c.Options, opt)
 			}
 		}
-		i++
 	}
 	var sqlLines []string
 	for _, line := range part[i:] {
@@ -168,26 +198,17 @@ func parseCase(lines []string, defaults *[]string) *Case {
 		return nil
 	}
 
-	// joinPart extracts the payload text of an output part. Following
-	// ParseNextTestCase in file_based_test_driver.cc, blank lines and "#"
-	// comment lines at the start or end of a part are comment blocks
-	// attached to the part rather than payload, while blank lines in the
-	// middle belong to the payload.
-	joinPart := func(part []string) string {
-		var out, pending []string
-		for _, line := range part {
-			if line == "" || strings.HasPrefix(line, "#") {
-				if len(out) == 0 {
-					continue // leading comment block
-				}
-				pending = append(pending, line)
-				continue
-			}
-			out = append(out, pending...)
-			pending = pending[:0]
-			out = append(out, unescapeLine(line))
-		}
-		return strings.Join(out, "\n")
+	c.HasAlternation = optHasGroup || strings.Contains(c.SQL, "{{") ||
+		strings.Contains(joinAll(parts[1:]), "ALTERNATION GROUP")
+
+	if c.HasAlternation {
+		// Alternation cases have a non-standard body: the expected section is
+		// a sequence of "ALTERNATION GROUP(S):" blocks, each with its own
+		// parse tree/error, separated by "--". Expand them rather than using
+		// the normal three-part split (which would mangle the many "--"s).
+		// Groups may appear in the option lines and/or the SQL.
+		expandAlternations(c, inheritedDefaults, optionLines, parts[1:])
+		return c
 	}
 
 	if len(parts) > 1 {
@@ -202,9 +223,42 @@ func parseCase(lines []string, defaults *[]string) *Case {
 		}
 	}
 
-	c.HasAlternation = strings.Contains(c.SQL, "{{") ||
-		strings.Contains(c.Expected, "ALTERNATION GROUP")
 	return c
+}
+
+// joinAll concatenates the raw lines of all parts, used only for cheap
+// substring detection.
+func joinAll(parts [][]string) string {
+	var b strings.Builder
+	for _, part := range parts {
+		for _, line := range part {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// joinPart extracts the payload text of an output part. Following
+// ParseNextTestCase in file_based_test_driver.cc, blank lines and "#"
+// comment lines at the start or end of a part are comment blocks
+// attached to the part rather than payload, while blank lines in the
+// middle belong to the payload.
+func joinPart(part []string) string {
+	var out, pending []string
+	for _, line := range part {
+		if line == "" || strings.HasPrefix(line, "#") {
+			if len(out) == 0 {
+				continue // leading comment block
+			}
+			pending = append(pending, line)
+			continue
+		}
+		out = append(out, pending...)
+		pending = pending[:0]
+		out = append(out, unescapeLine(line))
+	}
+	return strings.Join(out, "\n")
 }
 
 // parseOptionsLine parses a line of one or more bracketed options like
