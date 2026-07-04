@@ -1579,6 +1579,26 @@ func (n *LikeExpression) Children() []Node {
 	return children(n.Lhs, n.LikeLocation, n.Op, n.Query, n.List, n.UnnestExpr)
 }
 
+// QuantifiedComparisonExpression is <lhs> <op> ANY|SOME|ALL <rhs> where op is
+// a comparison operator and rhs is exactly one of a value list, a subquery, or
+// an UNNEST expression; see ASTQuantifiedComparisonExpression in
+// googlesql/parser/parse_tree.h. Only the subquery form may carry a hint.
+type QuantifiedComparisonExpression struct {
+	Span
+	Op         string            `json:"op"` // "=", "!=", "<>", "<", "<=", ">", ">="
+	Lhs        Node              `json:"lhs"`
+	Location   *Location         `json:"location"`
+	Quantifier *AnySomeAllOp     `json:"quantifier"`
+	Hint       *Hint             `json:"hint,omitempty"`
+	Query      *Query            `json:"query,omitempty"`
+	List       *InList           `json:"in_list,omitempty"`
+	UnnestExpr *UnnestExpression `json:"unnest_expr,omitempty"`
+}
+
+func (n *QuantifiedComparisonExpression) Children() []Node {
+	return children(n.Lhs, n.Location, n.Quantifier, n.Hint, n.Query, n.List, n.UnnestExpr)
+}
+
 // StructConstructorWithParens is "(expr1, expr2 [, ... ])" with at least two
 // expressions; see ASTStructConstructorWithParens in parse_tree.h. The
 // single-expression form is a parenthesized expression, not a struct.

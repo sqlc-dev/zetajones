@@ -357,6 +357,8 @@ func nodeString(n ast.Node) string {
 			return "LikeExpression(NOT LIKE)"
 		}
 		return "LikeExpression(LIKE)"
+	case *ast.QuantifiedComparisonExpression:
+		return fmt.Sprintf("QuantifiedComparisonExpression(%s)", t.Op)
 	case *ast.AnySomeAllOp:
 		return fmt.Sprintf("AnySomeAllOp(%s)", t.Op)
 	case *ast.AndExpr:

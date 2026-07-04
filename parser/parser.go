@@ -4904,7 +4904,55 @@ func (p *parser) parseComparison() (ast.Node, error) {
 	default:
 		return lhs, nil
 	}
-	p.advance()
+	opTok := p.advance()
+
+	// Quantified comparison "<lhs> <op> ANY|SOME|ALL <rhs>"; see the
+	// any_some_all alternatives of expression_higher_prec_than_and in
+	// googlesql.tm.
+	if isKeyword(p.peek(), "ANY") || isKeyword(p.peek(), "SOME") || isKeyword(p.peek(), "ALL") {
+		quantTok := p.advance()
+		q := &ast.QuantifiedComparisonExpression{
+			Op:         op,
+			Lhs:        lhs,
+			Location:   &ast.Location{Span: span(opTok.Pos, opTok.End)},
+			Quantifier: &ast.AnySomeAllOp{Span: span(quantTok.Pos, quantTok.End), Op: strings.ToUpper(quantTok.Image)},
+		}
+		var hint *ast.Hint
+		if p.peek().Kind == token.ATSIGN {
+			hint, err = p.parseOptionalHint()
+			if err != nil {
+				return nil, err
+			}
+		}
+		var end int
+		switch {
+		case isKeyword(p.peek(), "UNNEST"):
+			if hint != nil {
+				return nil, p.errorf(hint.Pos(), "Syntax error: HINTs cannot be specified on ANY/SOME/ALL clause with UNNEST")
+			}
+			unnest, err := p.parseUnnestExpression()
+			if err != nil {
+				return nil, err
+			}
+			q.UnnestExpr = unnest
+			end = unnest.End()
+		case p.peek().Kind == token.LPAREN:
+			query, list, rhsEnd, err := p.parseInRhs(true)
+			if err != nil {
+				return nil, err
+			}
+			if list != nil && hint != nil {
+				return nil, p.errorf(hint.Pos(), "Syntax error: HINTs cannot be specified on ANY/SOME/ALL clause with value list")
+			}
+			q.Query, q.List, q.Hint = query, list, hint
+			end = rhsEnd
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+		}
+		q.Span = span(p.extStart(lhs), end)
+		return p.finishComparison(q)
+	}
+
 	rhs, err := p.parseBitwiseOr()
 	if err != nil {
 		return nil, err
@@ -4959,6 +5007,24 @@ func (p *parser) finishComparison(n ast.Node) (ast.Node, error) {
 	}
 	if opName == "" {
 		return n, nil
+	}
+
+	// A following comparison operator immediately succeeded by ANY/SOME/ALL is
+	// a quantified comparison. When its left operand is an IN/IS expression or
+	// a quantified (LIKE/comparison ANY/SOME/ALL) expression, the reference
+	// rejects the unparenthesized left operand with a dedicated message
+	// pointing at the comparison operator; a plain comparison/LIKE/BETWEEN
+	// left operand is an ordinary "Unexpected" conflict instead.
+	if opName == "comparison" &&
+		(isKeyword(p.peekAt(1), "ANY") || isKeyword(p.peekAt(1), "SOME") || isKeyword(p.peekAt(1), "ALL")) {
+		switch n.(type) {
+		case *ast.LikeExpression, *ast.QuantifiedComparisonExpression:
+			return nil, p.errorf(tok.Pos, "Syntax error: Expression to the left of the comparison operator must be parenthesized")
+		}
+		if isInOrIsExpr(n) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Expression to the left of the comparison operator must be parenthesized")
+		}
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 
 	if isInOrIsExpr(n) {
