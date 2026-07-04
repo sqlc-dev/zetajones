@@ -251,6 +251,23 @@ func nodeString(n ast.Node) string {
 		return "ColumnList"
 	case *ast.TableClause:
 		return "TableClause"
+	case *ast.ModelClause:
+		return "ModelClause"
+	case *ast.ConnectionClause:
+		return "ConnectionClause"
+	case *ast.DefaultLiteral:
+		return "DefaultLiteral"
+	case *ast.CallStatement:
+		return "CallStatement"
+	case *ast.ParameterExpr:
+		// Positional parameters show their 1-based position; see
+		// ASTParameterExpr::SingleNodeDebugString.
+		if t.Name == nil {
+			return fmt.Sprintf("ParameterExpr(%d)", t.Position)
+		}
+		return "ParameterExpr"
+	case *ast.SystemVariableExpr:
+		return "SystemVariableExpr"
 	case *ast.PipeSetOperation:
 		return "PipeSetOperation"
 	case *ast.Subpipeline:

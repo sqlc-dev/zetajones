@@ -62,6 +62,23 @@ func (n *QueryStatement) Children() []Node {
 	return children(n.Query)
 }
 
+// CallStatement is a "CALL procedure(args)" statement; see ASTCallStatement
+// in googlesql/parser/parse_tree.h.
+type CallStatement struct {
+	Span
+	Procedure *PathExpression `json:"procedure"`
+	Args      []*TVFArgument  `json:"args,omitempty"`
+}
+
+func (n *CallStatement) statementNode() {}
+func (n *CallStatement) Children() []Node {
+	out := children(n.Procedure)
+	for _, a := range n.Args {
+		out = append(out, a)
+	}
+	return out
+}
+
 // Query is a query expression with an optional WITH clause, optional ORDER
 // BY and LIMIT/OFFSET, optionally followed by |> pipe operators.
 type Query struct {
@@ -235,6 +252,9 @@ type TableSubquery struct {
 	Span
 	Query *Query `json:"query"`
 	Alias *Alias `json:"alias,omitempty"`
+	// IsLateral is true when the subquery is preceded by the LATERAL
+	// keyword; the span then includes the keyword.
+	IsLateral bool `json:"is_lateral,omitempty"`
 }
 
 func (n *TableSubquery) Children() []Node {
@@ -249,6 +269,9 @@ type TVF struct {
 	Name  *PathExpression `json:"name"`
 	Args  []*TVFArgument  `json:"args,omitempty"`
 	Alias *Alias          `json:"alias,omitempty"`
+	// IsLateral is true when the call is preceded by the LATERAL keyword;
+	// the span then includes the keyword.
+	IsLateral bool `json:"is_lateral,omitempty"`
 }
 
 func (n *TVF) Children() []Node {
@@ -1179,6 +1202,62 @@ type TableClause struct {
 }
 
 func (n *TableClause) Children() []Node {
+	return children(n.Path)
+}
+
+// ModelClause is a "MODEL path" table-valued function argument; see
+// ASTModelClause in googlesql/parser/parse_tree.h.
+type ModelClause struct {
+	Span
+	Path *PathExpression `json:"path"`
+}
+
+func (n *ModelClause) Children() []Node {
+	return children(n.Path)
+}
+
+// ConnectionClause is a "CONNECTION {path | DEFAULT}" table-valued function
+// argument; see ASTConnectionClause in googlesql/parser/parse_tree.h. Path
+// is either a *PathExpression or a *DefaultLiteral.
+type ConnectionClause struct {
+	Span
+	Path Node `json:"path"`
+}
+
+func (n *ConnectionClause) Children() []Node {
+	return children(n.Path)
+}
+
+// DefaultLiteral is the DEFAULT keyword used in place of a path expression;
+// see ASTDefaultLiteral in googlesql/parser/parse_tree.h.
+type DefaultLiteral struct {
+	Span
+}
+
+func (n *DefaultLiteral) Children() []Node { return nil }
+
+// ParameterExpr is a named query parameter "@name" or a positional query
+// parameter "?"; see ASTParameterExpr in googlesql/parser/parse_tree.h. For
+// positional parameters Name is nil and Position is the 1-based ordinal of
+// the "?" in the statement.
+type ParameterExpr struct {
+	Span
+	Name     *Identifier `json:"name,omitempty"`
+	Position int         `json:"position,omitempty"`
+}
+
+func (n *ParameterExpr) Children() []Node {
+	return children(n.Name)
+}
+
+// SystemVariableExpr is a system variable reference "@@path"; see
+// ASTSystemVariableExpr in googlesql/parser/parse_tree.h.
+type SystemVariableExpr struct {
+	Span
+	Path *PathExpression `json:"path"`
+}
+
+func (n *SystemVariableExpr) Children() []Node {
 	return children(n.Path)
 }
 

@@ -378,7 +378,8 @@ var reservedKeywords = map[string]bool{
 	"FROM": true,
 	"FULL": true, "GROUP": true, "HASH": true, "HAVING": true, "IN": true,
 	"INNER":     true,
-	"INTERSECT": true, "IS": true, "JOIN": true, "LEFT": true, "LIKE": true,
+	"INTERSECT": true, "IS": true, "JOIN": true, "LATERAL": true, "LEFT": true,
+	"LIKE":  true,
 	"LIMIT": true, "LOOKUP": true, "NATURAL": true, "NOT": true, "NULL": true,
 	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
@@ -453,10 +454,47 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return &ast.QueryStatement{Span: span(tok.Pos, p.prevEnd()), Query: query}, nil
 	case isKeyword(tok, "ALTER"):
 		return p.parseAlterStatement()
+	case isKeyword(tok, "CALL"):
+		return p.parseCallStatement()
 	case isKeyword(tok, "CREATE"):
 		return p.parseCreateStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseCallStatement parses "CALL path ( [tvf_argument, ...] )"; see
+// call_statement in googlesql.tm.
+func (p *parser) parseCallStatement() (ast.Statement, error) {
+	callTok := p.advance() // CALL
+	proc, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	// parsePathExpression stops at anything other than ".", so a missing
+	// argument list reports both continuations.
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or "." but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // (
+	stmt := &ast.CallStatement{Span: span(callTok.Pos, 0), Procedure: proc}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			arg, err := p.parseTVFArgument()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Args = append(stmt.Args, arg)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance() // ,
+		}
+	}
+	if tok := p.peek(); tok.Kind != token.RPAREN {
+		return nil, p.errorf(tok.Pos, `Syntax error: Expected ")" or "," but got %s`, describeToken(tok))
+	}
+	stmt.Stop = p.advance().End // )
+	return stmt, nil
 }
 
 // parseCreateStatement parses CREATE [OR REPLACE] [TEMP|TEMPORARY|PUBLIC|
@@ -1789,6 +1827,9 @@ func (p *parser) parseFromClause() (*ast.FromClause, error) {
 // parenthesized query used as a table subquery, a parenthesized join, or a
 // table path expression; see table_primary in googlesql.tm.
 func (p *parser) parseTablePrimary() (ast.Node, error) {
+	if isKeyword(p.peek(), "LATERAL") {
+		return p.parseLateralTablePrimary()
+	}
 	if p.peek().Kind == token.LPAREN {
 		if p.lparenStartsQuery() {
 			return p.parseTableSubquery()
@@ -1796,6 +1837,45 @@ func (p *parser) parseTablePrimary() (ast.Node, error) {
 		return p.parseParenthesizedJoin()
 	}
 	return p.parseTablePathExpression()
+}
+
+// parseLateralTablePrimary parses "LATERAL table_subquery" or "LATERAL tvf
+// [[AS] alias]"; see the LATERAL rules under table_primary in googlesql.tm.
+// LATERAL applies only to table subqueries and TVF calls, and the resulting
+// node's location starts at the LATERAL keyword.
+func (p *parser) parseLateralTablePrimary() (ast.Node, error) {
+	latTok := p.advance() // LATERAL
+	if p.peek().Kind == token.LPAREN {
+		node, err := p.parseTableSubquery()
+		if err != nil {
+			return nil, err
+		}
+		node.IsLateral = true
+		node.Start = latTok.Pos
+		return node, nil
+	}
+	// Anything other than a subquery must be a TVF call: a path expression
+	// followed by an argument list.
+	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.LPAREN {
+		if err := p.exceptClashError(); err != nil {
+			return nil, err
+		}
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or "." but got %s`, describeToken(p.peek()))
+	}
+	tvf, err := p.parseTVFRest(path)
+	if err != nil {
+		return nil, err
+	}
+	tvf.IsLateral = true
+	tvf.Start = latTok.Pos
+	return tvf, nil
 }
 
 // parseTableSubquery parses "( query ) [[AS] alias]" in a FROM clause; see
@@ -1879,11 +1959,10 @@ func (p *parser) parseTVFRest(path *ast.PathExpression) (*ast.TVF, error) {
 	tvf := &ast.TVF{Span: span(path.Pos(), 0), Name: path}
 	if p.peek().Kind != token.RPAREN {
 		for {
-			expr, err := p.parseExpression()
+			arg, err := p.parseTVFArgument()
 			if err != nil {
 				return nil, err
 			}
-			arg := &ast.TVFArgument{Span: span(expr.Pos(), expr.End()), Expr: expr}
 			tvf.Args = append(tvf.Args, arg)
 			if p.peek().Kind != token.COMMA {
 				break
@@ -1905,6 +1984,56 @@ func (p *parser) parseTVFRest(path *ast.PathExpression) (*ast.TVF, error) {
 		tvf.Stop = alias.End()
 	}
 	return tvf, nil
+}
+
+// parseTVFArgument parses a single table-valued function (or CALL statement)
+// argument: an expression, or a TABLE, MODEL, or CONNECTION clause; see
+// tvf_argument in googlesql.tm. The keyword forms apply only when the
+// keyword is followed by a token that can start the clause's operand, so a
+// plain column reference named "table" still parses as an expression.
+func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
+	tok := p.peek()
+	isPathStart := func(t token.Token) bool {
+		return (t.Kind == token.IDENT || t.Kind == token.QUOTED_IDENT) && !isReserved(t)
+	}
+	switch {
+	case isKeyword(tok, "TABLE") && isPathStart(p.peekAt(1)):
+		p.advance() // TABLE
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		clause := &ast.TableClause{Span: span(tok.Pos, path.End()), Path: path}
+		return &ast.TVFArgument{Span: clause.Span, Expr: clause}, nil
+	case isKeyword(tok, "MODEL") && isPathStart(p.peekAt(1)):
+		p.advance() // MODEL
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		clause := &ast.ModelClause{Span: span(tok.Pos, path.End()), Path: path}
+		return &ast.TVFArgument{Span: clause.Span, Expr: clause}, nil
+	case isKeyword(tok, "CONNECTION") && (isPathStart(p.peekAt(1)) || isKeyword(p.peekAt(1), "DEFAULT")):
+		p.advance() // CONNECTION
+		var path ast.Node
+		if def := p.peek(); isKeyword(def, "DEFAULT") {
+			p.advance()
+			path = &ast.DefaultLiteral{Span: span(def.Pos, def.End)}
+		} else {
+			pathExpr, err := p.parsePathExpression()
+			if err != nil {
+				return nil, err
+			}
+			path = pathExpr
+		}
+		clause := &ast.ConnectionClause{Span: span(tok.Pos, path.End()), Path: path}
+		return &ast.TVFArgument{Span: clause.Span, Expr: clause}, nil
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.TVFArgument{Span: span(expr.Pos(), expr.End()), Expr: expr}, nil
 }
 
 // parseUnnestExpression parses "UNNEST ( expression [AS alias] [, ...] )";
@@ -2496,6 +2625,22 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		return p.parseBytesLiteral()
 	case token.LBRACKET:
 		return p.parseArrayConstructor(tok.Pos)
+	case token.QUESTION:
+		// Positional parameters are numbered left to right; see
+		// parameter_expression in googlesql.tm.
+		p.advance()
+		return &ast.ParameterExpr{
+			Span:     span(tok.Pos, tok.End),
+			Position: p.positionalParameterOrdinal(),
+		}, nil
+	case token.PARAM:
+		// The token image is "@name"; the identifier starts after "@". See
+		// named_parameter_expression in googlesql.tm.
+		p.advance()
+		name := &ast.Identifier{Span: span(tok.Pos+1, tok.End), Name: tok.Image[1:]}
+		return &ast.ParameterExpr{Span: span(tok.Pos, tok.End), Name: name}, nil
+	case token.SYSTEM_VARIABLE:
+		return p.parseSystemVariableExpr()
 	case token.LPAREN:
 		if p.lparenStartsQuery() {
 			save := p.pos
@@ -2804,6 +2949,41 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 		path.Stop = ident.End()
 	}
 	return path, nil
+}
+
+// parseSystemVariableExpr parses a system variable reference "@@path"; see
+// system_variable_expression in googlesql.tm. The lexer emits "@@" plus the
+// first name as one token; subsequent ".name" segments extend the path
+// ("@@a.b" is a single system variable named "a.b").
+func (p *parser) parseSystemVariableExpr() (ast.Node, error) {
+	tok := p.advance() // @@name
+	first := &ast.Identifier{Span: span(tok.Pos+2, tok.End), Name: tok.Image[2:]}
+	path := &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
+	for p.peek().Kind == token.DOT {
+		p.advance()
+		next := p.peek()
+		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(next.Pos, "Syntax error: Expected identifier after \".\" but got %s", describeToken(next))
+		}
+		ident := p.parseIdentifierToken(p.advance())
+		path.Names = append(path.Names, ident)
+		path.Stop = ident.End()
+	}
+	return &ast.SystemVariableExpr{Span: span(tok.Pos, path.End()), Path: path}, nil
+}
+
+// positionalParameterOrdinal returns the 1-based ordinal of the "?"
+// parameter token just consumed. Ordinals count "?" tokens left to right in
+// the token stream (see parameter_expression in googlesql.tm); deriving the
+// ordinal from token positions keeps it stable across parser backtracking.
+func (p *parser) positionalParameterOrdinal() int {
+	n := 0
+	for _, tok := range p.toks[:p.pos] {
+		if tok.Kind == token.QUESTION {
+			n++
+		}
+	}
+	return n
 }
 
 func (p *parser) parseStringLiteral() (ast.Node, error) {

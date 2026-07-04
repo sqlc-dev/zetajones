@@ -32,6 +32,7 @@ func Lex(sql string) ([]token.Token, error) {
 			return nil, err
 		}
 		toks = append(toks, tok)
+		l.updateLookback(tok)
 		if tok.Kind == token.EOF {
 			return toks, nil
 		}
@@ -41,6 +42,40 @@ func Lex(sql string) ([]token.Token, error) {
 type lexer struct {
 	sql string
 	pos int
+	// prev is the last token emitted, used as the one-token lookback for
+	// path-dot decisions; see LookbackTokenCanBeBeforeDotInPathExpression
+	// in googlesql/parser/lookahead_transformer.cc.
+	prev token.Token
+	// afterPathDot is true when the last token was a "." that continues a
+	// path expression; digits after such a dot lex as identifiers ("t.1",
+	// "t.1b") rather than as numbers.
+	afterPathDot bool
+}
+
+// updateLookback records tok as the lookback token and tracks whether the
+// lexer is positioned right after a path-continuation dot.
+func (l *lexer) updateLookback(tok token.Token) {
+	l.afterPathDot = tok.Kind == token.DOT && lookbackAllowsPathDot(l.prev)
+	l.prev = tok
+}
+
+// lookbackAllowsPathDot reports whether a "." following tok continues a path
+// expression rather than starting a floating point literal; ported from
+// LookbackTokenCanBeBeforeDotInPathExpression in
+// googlesql/parser/lookahead_transformer.cc (Apache 2.0). Identifiers,
+// non-reserved keywords, ")", "]", "?", named parameters, and named system
+// variables can all precede a path dot.
+func lookbackAllowsPathDot(tok token.Token) bool {
+	switch tok.Kind {
+	case token.IDENT:
+		return !token.IsReservedKeyword(tok.Image)
+	case token.QUOTED_IDENT, token.RPAREN, token.RBRACKET, token.QUESTION, token.PARAM:
+		return true
+	case token.SYSTEM_VARIABLE:
+		// A bare "@@" with no name does not end in an identifier.
+		return len(tok.Image) > len("@@")
+	}
+	return false
 }
 
 func (l *lexer) errorf(pos int, format string, args ...any) error {
