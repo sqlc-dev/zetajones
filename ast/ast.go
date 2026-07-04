@@ -944,3 +944,136 @@ func (n *PartitionBy) Children() []Node {
 	out := children(n.Hint)
 	return append(out, n.Expressions...)
 }
+
+// SetOperation is a chain of query primaries combined with the same set
+// operation (UNION/INTERSECT/EXCEPT), e.g. "q1 UNION ALL q2 UNION ALL q3";
+// see ASTSetOperation in googlesql/parser/parse_tree.h. Metadata holds one
+// entry per operator; Inputs holds the operand queries in order.
+type SetOperation struct {
+	Span
+	Metadata *SetOperationMetadataList `json:"metadata"`
+	Inputs   []Node                    `json:"inputs"`
+}
+
+func (n *SetOperation) Children() []Node {
+	out := children(n.Metadata)
+	return append(out, n.Inputs...)
+}
+
+// SetOperationMetadataList holds the metadata of each set operator in a
+// SetOperation; see ASTSetOperationMetadataList in
+// googlesql/parser/parse_tree.h.
+type SetOperationMetadataList struct {
+	Span
+	Entries []*SetOperationMetadata `json:"entries"`
+}
+
+func (n *SetOperationMetadataList) Children() []Node {
+	var out []Node
+	for _, e := range n.Entries {
+		out = append(out, e)
+	}
+	return out
+}
+
+// SetOperationMetadata describes one set operator: its type, ALL/DISTINCT
+// modifier, optional hint, and optional column match/propagation modes; see
+// ASTSetOperationMetadata in googlesql/parser/parse_tree.h. Children keep the
+// constructor order of the reference (not source order): type, ALL/DISTINCT,
+// hint, column match mode, column propagation mode, column list.
+type SetOperationMetadata struct {
+	Span
+	OpType                *SetOperationType                  `json:"op_type"`
+	AllOrDistinct         *SetOperationAllOrDistinct         `json:"all_or_distinct"`
+	Hint                  *Hint                              `json:"hint,omitempty"`
+	ColumnMatchMode       *SetOperationColumnMatchMode       `json:"column_match_mode,omitempty"`
+	ColumnPropagationMode *SetOperationColumnPropagationMode `json:"column_propagation_mode,omitempty"`
+	ColumnList            *ColumnList                        `json:"column_list,omitempty"`
+}
+
+func (n *SetOperationMetadata) Children() []Node {
+	return children(n.OpType, n.AllOrDistinct, n.Hint, n.ColumnMatchMode,
+		n.ColumnPropagationMode, n.ColumnList)
+}
+
+// SetOperationType is the operator keyword of a set operation; Op is "UNION",
+// "INTERSECT", or "EXCEPT". See ASTSetOperationType in
+// googlesql/parser/parse_tree.h.
+type SetOperationType struct {
+	Span
+	Op string `json:"op"`
+}
+
+func (n *SetOperationType) Children() []Node { return nil }
+
+// SetOperationAllOrDistinct is the ALL or DISTINCT modifier of a set
+// operation; Value is "ALL" or "DISTINCT". See ASTSetOperationAllOrDistinct
+// in googlesql/parser/parse_tree.h.
+type SetOperationAllOrDistinct struct {
+	Span
+	Value string `json:"value"`
+}
+
+func (n *SetOperationAllOrDistinct) Children() []Node { return nil }
+
+// SetOperationColumnMatchMode is a CORRESPONDING / CORRESPONDING BY /
+// BY NAME / BY NAME ON modifier on a set operation; Value is
+// "CORRESPONDING", "CORRESPONDING_BY", "BY_NAME", or "BY_NAME_ON". See
+// ASTSetOperationColumnMatchMode in googlesql/parser/parse_tree.h.
+type SetOperationColumnMatchMode struct {
+	Span
+	Value string `json:"value"`
+}
+
+func (n *SetOperationColumnMatchMode) Children() []Node { return nil }
+
+// SetOperationColumnPropagationMode is a FULL/LEFT/INNER outer mode prefix or
+// a STRICT modifier on a set operation; Value is "FULL", "LEFT", "INNER", or
+// "STRICT". See ASTSetOperationColumnPropagationMode in
+// googlesql/parser/parse_tree.h.
+type SetOperationColumnPropagationMode struct {
+	Span
+	Value string `json:"value"`
+}
+
+func (n *SetOperationColumnPropagationMode) Children() []Node { return nil }
+
+// ColumnList is a parenthesized list of column name identifiers, e.g. "(a,
+// b)"; see ASTColumnList in googlesql/parser/parse_tree.h. The span includes
+// the parentheses.
+type ColumnList struct {
+	Span
+	Identifiers []*Identifier `json:"identifiers"`
+}
+
+func (n *ColumnList) Children() []Node {
+	var out []Node
+	for _, id := range n.Identifiers {
+		out = append(out, id)
+	}
+	return out
+}
+
+// TableClause is a "TABLE path" clause used as a query; see ASTTableClause
+// in googlesql/parser/parse_tree.h.
+type TableClause struct {
+	Span
+	Path *PathExpression `json:"path"`
+}
+
+func (n *TableClause) Children() []Node {
+	return children(n.Path)
+}
+
+// PipeSetOperation is a "|> UNION ALL (query), ..." pipe operator; see
+// ASTPipeSetOperation in googlesql/parser/parse_tree.h.
+type PipeSetOperation struct {
+	Span
+	Metadata *SetOperationMetadata `json:"metadata"`
+	Inputs   []Node                `json:"inputs"`
+}
+
+func (n *PipeSetOperation) Children() []Node {
+	out := children(n.Metadata)
+	return append(out, n.Inputs...)
+}

@@ -9,10 +9,7 @@
     "case_21": true,
     "case_23": true,
     "case_26": true,
-    "case_30": true,
-    "case_32": true,
-    "case_7": true,
-    "case_8": true
+    "case_32": true
   },
   "alternations": {
     "case_12": true,

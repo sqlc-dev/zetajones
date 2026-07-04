@@ -200,6 +200,29 @@ func nodeString(n ast.Node) string {
 		return "StructConstructorWithParens"
 	case *ast.FromQuery:
 		return "FromQuery"
+	case *ast.SetOperation:
+		// The parenthesized detail is the first operator's SQL; see
+		// ASTSetOperationMetadata::GetSQLForOperation in parse_tree.cc.
+		md := t.Metadata.Entries[0]
+		return fmt.Sprintf("SetOperation(%s %s)", md.OpType.Op, md.AllOrDistinct.Value)
+	case *ast.SetOperationMetadataList:
+		return "SetOperationMetadataList"
+	case *ast.SetOperationMetadata:
+		return "SetOperationMetadata"
+	case *ast.SetOperationType:
+		return "SetOperationType"
+	case *ast.SetOperationAllOrDistinct:
+		return "SetOperationAllOrDistinct"
+	case *ast.SetOperationColumnMatchMode:
+		return "SetOperationColumnMatchMode"
+	case *ast.SetOperationColumnPropagationMode:
+		return "SetOperationColumnPropagationMode"
+	case *ast.ColumnList:
+		return "ColumnList"
+	case *ast.TableClause:
+		return "TableClause"
+	case *ast.PipeSetOperation:
+		return "PipeSetOperation"
 	case *ast.Subpipeline:
 		return "Subpipeline"
 	case *ast.PipeLog:

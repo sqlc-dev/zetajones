@@ -176,14 +176,16 @@ func (l *lexer) next() (token.Token, error) {
 			return l.emit(token.SYSTEM_VARIABLE, start), nil
 		}
 		l.pos++
-		for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
-			l.pos++
+		// A parameter name is an identifier, which cannot start with a
+		// digit; "@5" is a bare "@" (an integer hint) followed by a number.
+		if l.pos < len(l.sql) && isIdentStart(l.sql[l.pos]) {
+			for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
+				l.pos++
+			}
+			return l.emit(token.PARAM, start), nil
 		}
-		if l.pos == start+1 {
-			// A bare "@" with no name, e.g. the "@" opening a hint.
-			return l.emit(token.ATSIGN, start), nil
-		}
-		return l.emit(token.PARAM, start), nil
+		// A bare "@" with no name, e.g. the "@" opening a hint.
+		return l.emit(token.ATSIGN, start), nil
 	}
 
 	// Operators and punctuation, longest match first.

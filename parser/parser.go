@@ -134,12 +134,16 @@ type Feature string
 // clauses (FEATURE_WITH_GROUP_ROWS).
 const FeatureWithGroupRows Feature = "WITH_GROUP_ROWS"
 
+// FeaturePipes gates pipe query syntax (FEATURE_PIPES).
+const FeaturePipes Feature = "PIPES"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
 // language_feature_options annotations in googlesql/public/options.proto.
 var featureInMaximum = map[Feature]bool{
 	FeatureWithGroupRows: false, // in_development
+	FeaturePipes:         true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -216,6 +220,9 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		p.advance()
 	}
 	if p.peek().Kind != token.EOF {
+		if err := p.exceptClashError(); err != nil {
+			return nil, err
+		}
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
 	}
 	return stmt, nil
@@ -311,6 +318,9 @@ func isReserved(tok token.Token) bool {
 // expectKeyword consumes the given keyword or returns an error.
 func (p *parser) expectKeyword(kw string) (token.Token, error) {
 	if !isKeyword(p.peek(), kw) {
+		if err := p.exceptClashError(); err != nil {
+			return token.Token{}, err
+		}
 		return token.Token{}, p.errorf(p.peek().Pos, "Syntax error: Expected keyword %s but got %s", kw, describeToken(p.peek()))
 	}
 	return p.advance(), nil
@@ -318,9 +328,36 @@ func (p *parser) expectKeyword(kw string) (token.Token, error) {
 
 func (p *parser) expect(kind token.Kind, what string) (token.Token, error) {
 	if p.peek().Kind != kind {
+		if err := p.exceptClashError(); err != nil {
+			return token.Token{}, err
+		}
 		return token.Token{}, p.errorf(p.peek().Pos, "Syntax error: Expected %s but got %s", what, describeToken(p.peek()))
 	}
 	return p.advance(), nil
+}
+
+// exceptClashError returns the dedicated EXCEPT error if the parser is
+// stopped at an EXCEPT keyword that is not followed by ALL, DISTINCT, "(", or
+// a hint. Such an EXCEPT lexes as KW_EXCEPT_IN_UNEXPECTED_CONTEXT in the
+// reference, and any syntax error at it produces this message; see
+// MakeSyntaxErrorAtToken in googlesql/parser/parser_internal.cc and the
+// KW_EXCEPT case in googlesql/parser/lookahead_transformer.cc.
+func (p *parser) exceptClashError() error {
+	tok := p.peek()
+	if !isKeyword(tok, "EXCEPT") {
+		return nil
+	}
+	next := p.peekAt(1)
+	if isKeyword(next, "ALL") || isKeyword(next, "DISTINCT") || next.Kind == token.LPAREN {
+		return nil
+	}
+	if next.Kind == token.ATSIGN {
+		if k := p.peekAt(2).Kind; k == token.INT || k == token.LBRACE {
+			return nil
+		}
+	}
+	// No "Syntax error: " prefix, matching the reference.
+	return p.errorf(tok.Pos, `EXCEPT must be followed by ALL, DISTINCT, or "("`)
 }
 
 func span(start, end int) ast.Span { return ast.Span{Start: start, Stop: end} }
@@ -329,7 +366,7 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	tok := p.peek()
 	switch {
 	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"),
-		tok.Kind == token.LPAREN:
+		isKeyword(tok, "TABLE"), tok.Kind == token.LPAREN:
 		query, err := p.parseQuery()
 		if err != nil {
 			return nil, err
@@ -639,6 +676,16 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 			return nil, err
 		}
 		primary, primaryEnd = sel, sel.End()
+	case isKeyword(tok, "TABLE"):
+		tc, err := p.parseTableClause()
+		if err != nil {
+			return nil, err
+		}
+		// A TABLE clause used as a query primary is wrapped in a Query node;
+		// see the table_clause_reserved alternative of query_primary in
+		// googlesql.tm.
+		primary = &ast.Query{Span: span(tc.Pos(), tc.End()), QueryExpr: tc}
+		primaryEnd = tc.End()
 	case tok.Kind == token.LPAREN:
 		inner, parenEnd, err := p.parseParenthesizedQuery()
 		if err != nil {
@@ -647,6 +694,14 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 		primary, primaryEnd = inner, parenEnd
 	default:
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+
+	if p.atSetOpMetadataStart() {
+		setOp, err := p.parseSetOperationRest(primary, tok.Pos)
+		if err != nil {
+			return nil, err
+		}
+		primary, primaryEnd = setOp, setOp.End()
 	}
 
 	var orderBy *ast.OrderBy
@@ -882,6 +937,262 @@ func (p *parser) badKeywordAfterFromQuery(tok token.Token, keyword, pipeOp strin
 	return p.errorf(tok.Pos, "Syntax error: %s not supported after FROM query; Consider using pipe operator `|> %s`%s", keyword, pipeOp, suffix)
 }
 
+// atSetOpMetadataStart reports whether the tokens at the current position
+// begin set operation metadata: an optional FULL/LEFT/INNER/OUTER outer mode
+// prefix followed by UNION, INTERSECT, or an EXCEPT that lexes as a set
+// operator. FULL/LEFT/INNER only lex as set operation keywords when followed
+// by (OUTER)? UNION/INTERSECT/EXCEPT; see the KW_FULL/KW_LEFT/KW_INNER cases
+// in googlesql/parser/lookahead_transformer.cc.
+func (p *parser) atSetOpMetadataStart() bool {
+	i := 0
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "FULL"), isKeyword(tok, "LEFT"):
+		i = 1
+		if isKeyword(p.peekAt(1), "OUTER") {
+			i = 2
+		}
+	case isKeyword(tok, "INNER"), isKeyword(tok, "OUTER"):
+		i = 1
+	}
+	op := p.peekAt(i)
+	if isKeyword(op, "UNION") || isKeyword(op, "INTERSECT") {
+		return true
+	}
+	return isKeyword(op, "EXCEPT") && p.exceptIsSetOp(i)
+}
+
+// exceptIsSetOp reports whether the EXCEPT keyword at offset i from the
+// current position lexes as a set operator (KW_EXCEPT_IN_SET_OP): it must be
+// followed by ALL, DISTINCT, or a hint; see the KW_EXCEPT case in
+// googlesql/parser/lookahead_transformer.cc.
+func (p *parser) exceptIsSetOp(i int) bool {
+	next := p.peekAt(i + 1)
+	if isKeyword(next, "ALL") || isKeyword(next, "DISTINCT") {
+		return true
+	}
+	if next.Kind == token.ATSIGN {
+		if k := p.peekAt(i + 2).Kind; k == token.INT || k == token.LBRACE {
+			return true
+		}
+	}
+	return false
+}
+
+// parseSetOperationRest parses "(set_operation_metadata query_primary)+"
+// following an already-parsed left query primary whose tokens start at
+// firstStart; see query_set_operation_prefix in googlesql.tm. All metadata
+// entries collect into one list and all operand queries become flat inputs.
+func (p *parser) parseSetOperationRest(first ast.Node, firstStart int) (*ast.SetOperation, error) {
+	mdl := &ast.SetOperationMetadataList{}
+	setOp := &ast.SetOperation{Span: span(firstStart, 0), Metadata: mdl, Inputs: []ast.Node{first}}
+	for p.atSetOpMetadataStart() {
+		md, err := p.parseSetOperationMetadata()
+		if err != nil {
+			return nil, err
+		}
+		if len(mdl.Entries) == 0 {
+			mdl.Start = md.Pos()
+		}
+		mdl.Entries = append(mdl.Entries, md)
+		mdl.Stop = md.End()
+		rhs, err := p.parseQueryPrimary()
+		if err != nil {
+			return nil, err
+		}
+		setOp.Inputs = append(setOp.Inputs, rhs)
+		// The end covers all consumed tokens, which can exceed the operand
+		// node's end when it is a parenthesized query.
+		setOp.Stop = p.prevEnd()
+	}
+	return setOp, nil
+}
+
+// parseSetOperationMetadata parses one set operator: an optional outer mode
+// prefix, the operator keyword, an optional hint, ALL or DISTINCT, an
+// optional STRICT, and an optional column match suffix; see
+// set_operation_metadata in googlesql.tm.
+func (p *parser) parseSetOperationMetadata() (*ast.SetOperationMetadata, error) {
+	start := p.peek().Pos
+
+	// opt_corresponding_outer_mode.
+	var outerMode *ast.SetOperationColumnPropagationMode
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "FULL"), isKeyword(tok, "LEFT"):
+		p.advance()
+		end := tok.End
+		if isKeyword(p.peek(), "OUTER") {
+			end = p.advance().End
+		}
+		value := "FULL"
+		if isKeyword(tok, "LEFT") {
+			value = "LEFT"
+		}
+		outerMode = &ast.SetOperationColumnPropagationMode{Span: span(tok.Pos, end), Value: value}
+	case isKeyword(tok, "OUTER"):
+		p.advance()
+		outerMode = &ast.SetOperationColumnPropagationMode{Span: span(tok.Pos, tok.End), Value: "FULL"}
+	case isKeyword(tok, "INNER"):
+		p.advance()
+		outerMode = &ast.SetOperationColumnPropagationMode{Span: span(tok.Pos, tok.End), Value: "INNER"}
+	}
+
+	opTok := p.advance() // UNION, INTERSECT, or EXCEPT
+	md := &ast.SetOperationMetadata{
+		Span:                  span(start, 0),
+		OpType:                &ast.SetOperationType{Span: span(opTok.Pos, opTok.End), Op: strings.ToUpper(opTok.Image)},
+		ColumnPropagationMode: outerMode,
+	}
+
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	md.Hint = hint
+
+	// all_or_distinct is required.
+	tok = p.peek()
+	var value string
+	switch {
+	case isKeyword(tok, "ALL"):
+		value = "ALL"
+	case isKeyword(tok, "DISTINCT"):
+		value = "DISTINCT"
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword ALL or keyword DISTINCT but got %s", describeToken(tok))
+	}
+	p.advance()
+	md.AllOrDistinct = &ast.SetOperationAllOrDistinct{Span: span(tok.Pos, tok.End), Value: value}
+	md.Stop = tok.End
+
+	// opt_strict.
+	var strict *ast.SetOperationColumnPropagationMode
+	if isKeyword(p.peek(), "STRICT") {
+		stok := p.advance()
+		strict = &ast.SetOperationColumnPropagationMode{Span: span(stok.Pos, stok.End), Value: "STRICT"}
+		md.Stop = stok.End
+	}
+
+	// opt_column_match_suffix.
+	switch {
+	case isKeyword(p.peek(), "CORRESPONDING"):
+		ctok := p.advance()
+		if isKeyword(p.peek(), "BY") {
+			btok := p.advance()
+			md.ColumnMatchMode = &ast.SetOperationColumnMatchMode{Span: span(ctok.Pos, btok.End), Value: "CORRESPONDING_BY"}
+			cols, err := p.parseColumnList()
+			if err != nil {
+				return nil, err
+			}
+			md.ColumnList = cols
+			md.Stop = cols.End()
+		} else {
+			md.ColumnMatchMode = &ast.SetOperationColumnMatchMode{Span: span(ctok.Pos, ctok.End), Value: "CORRESPONDING"}
+			md.Stop = ctok.End
+		}
+	case isKeyword(p.peek(), "BY") && isKeyword(p.peekAt(1), "NAME"):
+		btok := p.advance()
+		ntok := p.advance()
+		if isKeyword(p.peek(), "ON") {
+			otok := p.advance()
+			md.ColumnMatchMode = &ast.SetOperationColumnMatchMode{Span: span(btok.Pos, otok.End), Value: "BY_NAME_ON"}
+			cols, err := p.parseColumnList()
+			if err != nil {
+				return nil, err
+			}
+			md.ColumnList = cols
+			md.Stop = cols.End()
+		} else {
+			md.ColumnMatchMode = &ast.SetOperationColumnMatchMode{Span: span(btok.Pos, ntok.End), Value: "BY_NAME"}
+			md.Stop = ntok.End
+		}
+	}
+
+	if strict != nil {
+		// See the reduce action of set_operation_metadata in googlesql.tm.
+		if outerMode != nil {
+			return nil, p.errorf(strict.Pos(), "Syntax error: STRICT cannot be used with outer mode in set operations")
+		}
+		if md.ColumnMatchMode != nil && (md.ColumnMatchMode.Value == "BY_NAME" || md.ColumnMatchMode.Value == "BY_NAME_ON") {
+			return nil, p.errorf(strict.Pos(), "Syntax error: STRICT cannot be used with BY NAME in set operations")
+		}
+		md.ColumnPropagationMode = strict
+	}
+	return md, nil
+}
+
+// parseColumnList parses "( identifier, ... )"; see column_list in
+// googlesql.tm. The list's location includes the parentheses.
+func (p *parser) parseColumnList() (*ast.ColumnList, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.ColumnList{Span: span(lparen.Pos, 0)}
+	for {
+		tok := p.peek()
+		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		if isReserved(tok) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+		}
+		list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
+}
+
+// parseQueryPrimary parses one operand of a set operation: a SELECT, a TABLE
+// clause, or a parenthesized query; see query_primary in googlesql.tm.
+func (p *parser) parseQueryPrimary() (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "SELECT"):
+		return p.parseSelect()
+	case isKeyword(tok, "TABLE"):
+		tc, err := p.parseTableClause()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.Query{Span: span(tc.Pos(), tc.End()), QueryExpr: tc}, nil
+	case isKeyword(tok, "FROM"):
+		// See the "FROM" alternatives of query_set_operation_prefix in
+		// googlesql.tm.
+		if p.features.Enabled(FeaturePipes) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected FROM; FROM queries following a set operation must be parenthesized")
+		}
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected FROM")
+	case tok.Kind == token.LPAREN:
+		query, _, err := p.parseParenthesizedQuery()
+		if err != nil {
+			return nil, err
+		}
+		return query, nil
+	}
+	return nil, p.errorf(tok.Pos, `Syntax error: Expected "(" or keyword SELECT or keyword TABLE but got %s`, describeToken(tok))
+}
+
+// parseTableClause parses "TABLE path"; see table_clause in googlesql.tm.
+// Table-valued function calls after TABLE are not implemented yet.
+func (p *parser) parseTableClause() (*ast.TableClause, error) {
+	tableTok := p.advance() // TABLE
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.TableClause{Span: span(tableTok.Pos, path.End()), Path: path}, nil
+}
+
 // parsePipeOperator parses one "|> <operator>" pipe operator.
 func (p *parser) parsePipeOperator() (ast.Node, error) {
 	pipeTok := p.advance() // |>
@@ -932,10 +1243,65 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 	case isKeyword(tok, "DISTINCT"):
 		distinctTok := p.advance()
 		return &ast.PipeDistinct{Span: span(pipeTok.Pos, distinctTok.End)}, nil
+	case p.atSetOpMetadataStart():
+		return p.parsePipeSetOperation(pipeTok)
+	}
+	if err := p.exceptClashError(); err != nil {
+		return nil, err
 	}
 	// The reference grammar's recovery point for an unrecognized pipe
 	// operator is the JOIN inside pipe_join.
 	return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword JOIN but got %s", describeToken(tok))
+}
+
+// parsePipeSetOperation parses "<set_operation_metadata> (query|table_clause)
+// [, ...][,]" after a |> token; see pipe_set_operation in googlesql.tm. Each
+// operand is a parenthesized query or an unparenthesized TABLE clause. When
+// the first operand is a parenthesized query the operator's location includes
+// its closing parenthesis; operands appended after a comma extend the
+// location only to the operand node's own end (which excludes the
+// parentheses), and a trailing comma is not included.
+func (p *parser) parsePipeSetOperation(pipeTok token.Token) (ast.Node, error) {
+	md, err := p.parseSetOperationMetadata()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.PipeSetOperation{Span: span(pipeTok.Pos, 0), Metadata: md}
+	for {
+		tok := p.peek()
+		switch {
+		case tok.Kind == token.LPAREN:
+			query, parenEnd, err := p.parseParenthesizedQuery()
+			if err != nil {
+				return nil, err
+			}
+			node.Inputs = append(node.Inputs, query)
+			if len(node.Inputs) == 1 {
+				node.Stop = parenEnd
+			} else {
+				node.Stop = query.End()
+			}
+		case isKeyword(tok, "TABLE"):
+			tc, err := p.parseTableClause()
+			if err != nil {
+				return nil, err
+			}
+			node.Inputs = append(node.Inputs, tc)
+			node.Stop = tc.End()
+		default:
+			return nil, p.errorf(tok.Pos, `Syntax error: Expected "(" or keyword TABLE but got %s`, describeToken(tok))
+		}
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+		next := p.peek()
+		if next.Kind != token.LPAREN && !isKeyword(next, "TABLE") {
+			// Trailing comma; see pipe_set_operation in googlesql.tm.
+			break
+		}
+	}
+	return node, nil
 }
 
 // parsePipeSet parses "SET column = expression, ..." after a |> token,
@@ -1624,18 +1990,26 @@ func (p *parser) parseCollate() (*ast.Collate, error) {
 	return &ast.Collate{Span: span(collateTok.Pos, name.End()), Name: name}, nil
 }
 
-// parseOptionalHint parses a "@{name=value, ...}" hint if one starts at the
-// current position; see hint in googlesql.tm. Integer hints ("@<int>") are
-// not implemented yet.
+// parseOptionalHint parses a "@<int>" and/or "@{name=value, ...}" hint if one
+// starts at the current position; see hint in googlesql.tm.
 func (p *parser) parseOptionalHint() (*ast.Hint, error) {
 	if p.peek().Kind != token.ATSIGN {
 		return nil, nil
 	}
 	at := p.advance() // @
+	hint := &ast.Hint{Span: span(at.Pos, 0)}
+	if p.peek().Kind == token.INT {
+		it := p.advance()
+		hint.NumShardsHint = &ast.IntLiteral{Span: span(it.Pos, it.End), Image: it.Image}
+		hint.Stop = it.End
+		if p.peek().Kind != token.ATSIGN || p.peekAt(1).Kind != token.LBRACE {
+			return hint, nil
+		}
+		p.advance() // @
+	}
 	if _, err := p.expect(token.LBRACE, `"{"`); err != nil {
 		return nil, err
 	}
-	hint := &ast.Hint{Span: span(at.Pos, 0)}
 	for {
 		entry, err := p.parseHintEntry()
 		if err != nil {
@@ -2074,6 +2448,9 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			p.advance() // EXISTS; the subquery's span starts at the keyword.
 			return p.parseModifiedSubquery(tok.Pos, "EXISTS")
 		case isReserved(tok):
+			if err := p.exceptClashError(); err != nil {
+				return nil, err
+			}
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
 		return p.parsePathOrCall()
@@ -2091,7 +2468,8 @@ func (p *parser) lparenStartsQuery() bool {
 		i++
 	}
 	tok := p.peekAt(i)
-	return isKeyword(tok, "SELECT") || isKeyword(tok, "WITH") || isKeyword(tok, "FROM")
+	return isKeyword(tok, "SELECT") || isKeyword(tok, "WITH") || isKeyword(tok, "FROM") ||
+		isKeyword(tok, "TABLE")
 }
 
 // furthestError returns whichever parse error consumed more input, so the
