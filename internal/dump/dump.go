@@ -129,6 +129,14 @@ func nodeString(n ast.Node) string {
 		return "ImportStatement"
 	case *ast.ModuleStatement:
 		return "ModuleStatement"
+	case *ast.SingleAssignment:
+		return "SingleAssignment"
+	case *ast.ParameterAssignment:
+		return "ParameterAssignment"
+	case *ast.SystemVariableAssignment:
+		return "SystemVariableAssignment"
+	case *ast.AssignmentFromStruct:
+		return "AssignmentFromStruct"
 	case *ast.Star:
 		return fmt.Sprintf("Star(%s)", t.Image)
 	case *ast.StarWithModifiers:

@@ -105,6 +105,58 @@ func (n *ImportStatement) Children() []Node {
 	return out
 }
 
+// SingleAssignment is "SET identifier = expression"; see ASTSingleAssignment
+// in googlesql/parser/parse_tree.h.
+type SingleAssignment struct {
+	Span
+	Variable *Identifier `json:"variable"`
+	Value    Node        `json:"value"`
+}
+
+func (n *SingleAssignment) statementNode() {}
+func (n *SingleAssignment) Children() []Node {
+	return children(n.Variable, n.Value)
+}
+
+// ParameterAssignment is "SET @parameter = expression"; see
+// ASTParameterAssignment in googlesql/parser/parse_tree.h.
+type ParameterAssignment struct {
+	Span
+	Parameter *ParameterExpr `json:"parameter"`
+	Value     Node           `json:"value"`
+}
+
+func (n *ParameterAssignment) statementNode() {}
+func (n *ParameterAssignment) Children() []Node {
+	return children(n.Parameter, n.Value)
+}
+
+// SystemVariableAssignment is "SET @@system_variable = expression"; see
+// ASTSystemVariableAssignment in googlesql/parser/parse_tree.h.
+type SystemVariableAssignment struct {
+	Span
+	SystemVariable *SystemVariableExpr `json:"system_variable"`
+	Value          Node                `json:"value"`
+}
+
+func (n *SystemVariableAssignment) statementNode() {}
+func (n *SystemVariableAssignment) Children() []Node {
+	return children(n.SystemVariable, n.Value)
+}
+
+// AssignmentFromStruct is "SET (a, b, ...) = expression"; see
+// ASTAssignmentFromStruct in googlesql/parser/parse_tree.h.
+type AssignmentFromStruct struct {
+	Span
+	Variables *IdentifierList `json:"variables"`
+	Value     Node            `json:"value"`
+}
+
+func (n *AssignmentFromStruct) statementNode() {}
+func (n *AssignmentFromStruct) Children() []Node {
+	return children(n.Variables, n.Value)
+}
+
 // ModuleStatement is "MODULE path_expression [OPTIONS(...)]"; see
 // ASTModuleStatement in googlesql/parser/parse_tree.h.
 type ModuleStatement struct {

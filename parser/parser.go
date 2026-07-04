@@ -677,8 +677,122 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseMergeStatement()
 	case isKeyword(tok, "UPDATE"):
 		return p.parseUpdateStatement()
+	case isKeyword(tok, "SET"):
+		return p.parseSetStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseSetStatement parses a "SET" assignment statement; see set_statement in
+// googlesql.tm. It handles single-variable, named-parameter, system-variable,
+// and struct (parenthesized variable list) assignments.
+func (p *parser) parseSetStatement() (ast.Statement, error) {
+	setTok := p.advance() // SET
+	tok := p.peek()
+	switch {
+	case tok.Kind == token.LPAREN:
+		// SET "(" identifier_list ")" "=" expression
+		p.advance() // (
+		if p.peek().Kind == token.RPAREN {
+			// Improved error for an empty variable list; see set_statement in
+			// googlesql.tm.
+			return nil, p.errorf(p.peek().Pos, "Parenthesized SET statement requires a variable list")
+		}
+		list, err := p.parseIdentifierList()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.EQ, `"="`); err != nil {
+			return nil, err
+		}
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AssignmentFromStruct{Span: span(setTok.Pos, p.prevEnd()), Variables: list, Value: value}, nil
+	case tok.Kind == token.PARAM || tok.Kind == token.ATSIGN:
+		// SET named_parameter_expression "=" expression
+		param, err := p.parseNamedParameterExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.EQ, `"="`); err != nil {
+			return nil, err
+		}
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ParameterAssignment{Span: span(setTok.Pos, p.prevEnd()), Parameter: param, Value: value}, nil
+	case tok.Kind == token.SYSTEM_VARIABLE:
+		// SET system_variable_expression "=" expression
+		svNode, err := p.parseSystemVariableExpr()
+		if err != nil {
+			return nil, err
+		}
+		sv := svNode.(*ast.SystemVariableExpr)
+		if _, err := p.expect(token.EQ, `"="`); err != nil {
+			return nil, err
+		}
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SystemVariableAssignment{Span: span(setTok.Pos, p.prevEnd()), SystemVariable: sv, Value: value}, nil
+	default:
+		// SET identifier "=" expression
+		ident, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		switch p.peek().Kind {
+		case token.EQ:
+			p.advance() // =
+			value, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.SingleAssignment{Span: span(setTok.Pos, p.prevEnd()), Variable: ident, Value: value}, nil
+		case token.COMMA:
+			// "SET identifier "," identifier_list "=" ...": the improved error
+			// for a list of multiple variables without the required
+			// parentheses only applies once the whole list and "=" have been
+			// consumed; otherwise the normal syntax error wins. See
+			// set_statement in googlesql.tm.
+			p.advance() // ,
+			if _, err := p.parseIdentifierList(); err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(token.EQ, `"="`); err != nil {
+				return nil, err
+			}
+			return nil, p.errorf(ident.Pos(), "Using SET with multiple variables requires parentheses around the variable list")
+		default:
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," or "=" but got %s`, describeToken(p.peek()))
+		}
+	}
+}
+
+// parseNamedParameterExpr parses a named query parameter "@name"; see
+// named_parameter_expression in googlesql.tm. The lexer emits "@name" as a
+// single PARAM token, while a bare "@" (ATSIGN) must be followed by an
+// identifier.
+func (p *parser) parseNamedParameterExpr() (*ast.ParameterExpr, error) {
+	tok := p.peek()
+	if tok.Kind == token.PARAM {
+		p.advance()
+		name := &ast.Identifier{Span: span(tok.Pos+1, tok.End), Name: tok.Image[1:]}
+		return &ast.ParameterExpr{Span: span(tok.Pos, tok.End), Name: name}, nil
+	}
+	at := p.advance() // bare @
+	ident, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ParameterExpr{Span: span(at.Pos, ident.End()), Name: ident}, nil
 }
 
 // parseImportStatement parses "IMPORT MODULE|PROTO path_or_string
@@ -8300,22 +8414,38 @@ func toIdentifierLiteral(name string) string {
 }
 
 // parseSystemVariableExpr parses a system variable reference "@@path"; see
-// system_variable_expression in googlesql.tm. The lexer emits "@@" plus the
-// first name as one token; subsequent ".name" segments extend the path
-// ("@@a.b" is a single system variable named "a.b").
+// system_variable_expression in googlesql.tm. When "@@" is immediately
+// followed by identifier characters the lexer emits "@@name" as one token and
+// subsequent ".name" segments extend the path ("@@a.b" is a single system
+// variable named "a.b"). When "@@" stands alone (e.g. "@@ name"), the path
+// follows as ordinary tokens.
 func (p *parser) parseSystemVariableExpr() (ast.Node, error) {
-	tok := p.advance() // @@name
-	first := &ast.Identifier{Span: span(tok.Pos+2, tok.End), Name: tok.Image[2:]}
-	path := &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
-	for p.peek().Kind == token.DOT {
-		p.advance()
-		next := p.peek()
-		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+	tok := p.advance() // @@ or @@name
+	var path *ast.PathExpression
+	if len(tok.Image) > 2 {
+		first := &ast.Identifier{Span: span(tok.Pos+2, tok.End), Name: tok.Image[2:]}
+		path = &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
+		for p.peek().Kind == token.DOT {
+			p.advance()
+			next := p.peek()
+			if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+				return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+			}
+			ident := p.parseIdentifierToken(p.advance())
+			path.Names = append(path.Names, ident)
+			path.Stop = ident.End()
+		}
+	} else {
+		// A bare "@@" token: the path expression follows as separate tokens.
+		// A token that cannot start a path is reported as unexpected.
+		if next := p.peek(); next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
 		}
-		ident := p.parseIdentifierToken(p.advance())
-		path.Names = append(path.Names, ident)
-		path.Stop = ident.End()
+		var err error
+		path, err = p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &ast.SystemVariableExpr{Span: span(tok.Pos, path.End()), Path: path}, nil
 }
