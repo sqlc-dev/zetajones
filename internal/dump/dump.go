@@ -330,6 +330,8 @@ func nodeString(n ast.Node) string {
 		return "HavingModifier"
 	case *ast.NamedArgument:
 		return "NamedArgument"
+	case *ast.Lambda:
+		return "Lambda"
 	case *ast.StructConstructorWithParens:
 		return "StructConstructorWithParens"
 	case *ast.StructConstructorWithKeyword:

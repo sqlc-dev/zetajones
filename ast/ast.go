@@ -625,12 +625,19 @@ func (n *TVFArgument) Children() []Node {
 type UnnestExpression struct {
 	Span
 	Expressions []*ExpressionWithOptAlias `json:"expressions"`
+	// ArrayZipMode is an optional trailing named argument, e.g. the
+	// "mode => 'pad'" in UNNEST([1], mode => 'pad'); see unnest_expression in
+	// googlesql.tm.
+	ArrayZipMode *NamedArgument `json:"array_zip_mode,omitempty"`
 }
 
 func (n *UnnestExpression) Children() []Node {
 	var out []Node
 	for _, e := range n.Expressions {
 		out = append(out, e)
+	}
+	if n.ArrayZipMode != nil {
+		out = append(out, n.ArrayZipMode)
 	}
 	return out
 }
@@ -1834,6 +1841,20 @@ type NamedArgument struct {
 
 func (n *NamedArgument) Children() []Node {
 	return children(n.Name, n.Value)
+}
+
+// Lambda is a lambda argument "param -> body" or "(a, b) -> body" passed to a
+// function or table-valued function call; see ASTLambda in
+// googlesql/parser/parse_tree.h. Params is a PathExpression (single argument)
+// or a StructConstructorWithParens (parenthesized argument list).
+type Lambda struct {
+	Span
+	Params Node `json:"params"`
+	Body   Node `json:"body"`
+}
+
+func (n *Lambda) Children() []Node {
+	return children(n.Params, n.Body)
 }
 
 // HavingModifier is the "HAVING MAX <expr>" or "HAVING MIN <expr>" modifier

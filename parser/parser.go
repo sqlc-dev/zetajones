@@ -3178,6 +3178,12 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 		if err != nil {
 			return nil, err
 		}
+		if p.peek().Kind == token.ARROW {
+			value, err = p.finishLambda(value)
+			if err != nil {
+				return nil, err
+			}
+		}
 		named := &ast.NamedArgument{
 			Span:  span(name.Pos(), p.extEnd(value)),
 			Name:  name,
@@ -3205,6 +3211,30 @@ func (p *parser) parseUnnestExpression() (*ast.UnnestExpression, error) {
 	}
 	node := &ast.UnnestExpression{Span: span(unnestTok.Pos, 0)}
 	for {
+		// A trailing "name => value" named argument (the optional array_zip_mode)
+		// may follow the expression list; see unnest_expression in googlesql.tm.
+		if len(node.Expressions) > 0 && p.peekAt(1).Kind == token.LAMBDA &&
+			(p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
+			!isReserved(p.peek()) {
+			name := p.parseIdentifierToken(p.advance())
+			p.advance() // consume =>
+			value, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			if p.peek().Kind == token.ARROW {
+				value, err = p.finishLambda(value)
+				if err != nil {
+					return nil, err
+				}
+			}
+			node.ArrayZipMode = &ast.NamedArgument{
+				Span:  span(name.Pos(), p.extEnd(value)),
+				Name:  name,
+				Value: value,
+			}
+			break
+		}
 		expr, err := p.parseExpressionWithOptAlias()
 		if err != nil {
 			return nil, err
@@ -3221,6 +3251,29 @@ func (p *parser) parseUnnestExpression() (*ast.UnnestExpression, error) {
 	}
 	node.Stop = rparen.End
 	return node, nil
+}
+
+// finishLambda parses "-> expression" after a lambda argument list has already
+// been parsed as params, producing an ASTLambda; see lambda_argument in
+// googlesql.tm. The caller must have verified the current token is ARROW.
+// params is a PathExpression (single unparenthesized argument) or a
+// StructConstructorWithParens (parenthesized argument list).
+func (p *parser) finishLambda(params ast.Node) (ast.Node, error) {
+	// The lambda argument list must be a single identifier (parsed as a
+	// PathExpression) or a parenthesized argument list (a
+	// StructConstructorWithParens); any other expression is rejected. See
+	// lambda_argument_list in googlesql.tm.
+	switch params.(type) {
+	case *ast.PathExpression, *ast.StructConstructorWithParens:
+	default:
+		return nil, p.errorf(p.extStart(params), "Syntax error: Expecting lambda argument list")
+	}
+	p.advance() // consume ->
+	body, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.Lambda{Span: span(p.extStart(params), p.extEnd(body)), Params: params, Body: body}, nil
 }
 
 // parseExpressionWithOptAlias parses an expression with an optional alias
@@ -4782,15 +4835,39 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 				if verr != nil {
 					return nil, verr
 				}
+				if p.peek().Kind == token.ARROW {
+					value, verr = p.finishLambda(value)
+					if verr != nil {
+						return nil, verr
+					}
+				}
 				arg = &ast.NamedArgument{
 					Span:  span(name.Pos(), p.extEnd(value)),
 					Name:  name,
 					Value: value,
 				}
+			case p.peek().Kind == token.LPAREN && p.peekAt(1).Kind == token.RPAREN &&
+				p.peekAt(2).Kind == token.ARROW:
+				// No-param lambda "() -> expr"; the empty argument list is an
+				// empty StructConstructorWithParens. See lambda_argument_list in
+				// googlesql.tm.
+				lp := p.advance() // (
+				rp := p.advance() // )
+				params := &ast.StructConstructorWithParens{Span: span(lp.Pos, rp.End)}
+				arg, err = p.finishLambda(params)
+				if err != nil {
+					return nil, err
+				}
 			default:
 				arg, err = p.parseExpression()
 				if err != nil {
 					return nil, err
+				}
+				if p.peek().Kind == token.ARROW {
+					arg, err = p.finishLambda(arg)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 			call.Args = append(call.Args, arg)
