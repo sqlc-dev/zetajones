@@ -961,6 +961,116 @@ func (n *StructConstructorWithKeyword) Children() []Node {
 	return out
 }
 
+// NewConstructor is "NEW type_name(arg, ...)"; see ASTNewConstructor in
+// parse_tree.h.
+type NewConstructor struct {
+	Span
+	TypeName *SimpleType          `json:"type_name"`
+	Args     []*NewConstructorArg `json:"args,omitempty"`
+}
+
+func (n *NewConstructor) Children() []Node {
+	out := children(n.TypeName)
+	for _, a := range n.Args {
+		out = append(out, a)
+	}
+	return out
+}
+
+// NewConstructorArg is one "expression [AS identifier | AS (path)]" argument
+// of a NEW constructor; see ASTNewConstructorArg in parse_tree.h. At most
+// one of OptionalIdentifier and OptionalPathExpression is set.
+type NewConstructorArg struct {
+	Span
+	Expression             Node            `json:"expression"`
+	OptionalIdentifier     *Identifier     `json:"optional_identifier,omitempty"`
+	OptionalPathExpression *PathExpression `json:"optional_path_expression,omitempty"`
+}
+
+func (n *NewConstructorArg) Children() []Node {
+	return children(n.Expression, n.OptionalIdentifier, n.OptionalPathExpression)
+}
+
+// BracedNewConstructor is "NEW type_name { ... }"; see
+// ASTBracedNewConstructor in parse_tree.h.
+type BracedNewConstructor struct {
+	Span
+	TypeName    *SimpleType        `json:"type_name"`
+	Constructor *BracedConstructor `json:"constructor"`
+}
+
+func (n *BracedNewConstructor) Children() []Node {
+	return children(n.TypeName, n.Constructor)
+}
+
+// BracedConstructor is a braced proto/struct constructor body
+// "{ field [, field ...] }"; see ASTBracedConstructor in parse_tree.h.
+type BracedConstructor struct {
+	Span
+	Fields []*BracedConstructorField `json:"fields,omitempty"`
+}
+
+func (n *BracedConstructor) Children() []Node {
+	out := make([]Node, 0, len(n.Fields))
+	for _, f := range n.Fields {
+		out = append(out, f)
+	}
+	return out
+}
+
+// BracedConstructorField is one "lhs: value" or "lhs { ... }" entry of a
+// braced constructor; see ASTBracedConstructorField in parse_tree.h.
+// CommaSeparated records whether the field was preceded by a comma (fields
+// may also be separated by whitespace only, proto text-format style).
+type BracedConstructorField struct {
+	Span
+	Lhs            *BracedConstructorLhs        `json:"lhs"`
+	Value          *BracedConstructorFieldValue `json:"value"`
+	CommaSeparated bool                         `json:"comma_separated,omitempty"`
+}
+
+func (n *BracedConstructorField) Children() []Node {
+	return children(n.Lhs, n.Value)
+}
+
+// BracedConstructorLhs is the field name of a braced constructor field: a
+// path expression, or a parenthesized extension path "(path.to.extension)";
+// see ASTBracedConstructorLhs in parse_tree.h.
+type BracedConstructorLhs struct {
+	Span
+	Expression Node `json:"expression"`
+}
+
+func (n *BracedConstructorLhs) Children() []Node {
+	return children(n.Expression)
+}
+
+// BracedConstructorFieldValue is the value of a braced constructor field;
+// see ASTBracedConstructorFieldValue in parse_tree.h. ColonPrefixed is true
+// for "lhs: value" and false for the sub-message form "lhs { ... }".
+type BracedConstructorFieldValue struct {
+	Span
+	Expression    Node `json:"expression"`
+	ColonPrefixed bool `json:"colon_prefixed,omitempty"`
+}
+
+func (n *BracedConstructorFieldValue) Children() []Node {
+	return children(n.Expression)
+}
+
+// StructBracedConstructor is "STRUCT { ... }" or "STRUCT<...> { ... }"; see
+// ASTStructBracedConstructor in parse_tree.h. StructType is nil for the
+// typeless form.
+type StructBracedConstructor struct {
+	Span
+	StructType  *StructType        `json:"struct_type,omitempty"`
+	Constructor *BracedConstructor `json:"constructor"`
+}
+
+func (n *StructBracedConstructor) Children() []Node {
+	return children(n.StructType, n.Constructor)
+}
+
 // FromQuery is a standalone FROM clause used as a query, e.g. "FROM t";
 // see ASTFromQuery in googlesql/parser/parse_tree.h.
 type FromQuery struct {

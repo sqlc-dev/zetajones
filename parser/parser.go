@@ -214,15 +214,20 @@ const FeatureAllowConsecutiveOn Feature = "ALLOW_CONSECUTIVE_ON"
 // (FEATURE_IS_DISTINCT).
 const FeatureIsDistinct Feature = "IS_DISTINCT"
 
+// FeatureBracedProtoConstructors gates braced constructors "{ field: value }"
+// (FEATURE_BRACED_PROTO_CONSTRUCTORS), including the "STRUCT { ... }" form.
+const FeatureBracedProtoConstructors Feature = "BRACED_PROTO_CONSTRUCTORS"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
 // language_feature_options annotations in googlesql/public/options.proto.
 var featureInMaximum = map[Feature]bool{
-	FeatureWithGroupRows:      false, // in_development
-	FeaturePipes:              true,
-	FeatureAllowConsecutiveOn: true,
-	FeatureIsDistinct:         true,
+	FeatureWithGroupRows:           false, // in_development
+	FeaturePipes:                   true,
+	FeatureAllowConsecutiveOn:      true,
+	FeatureIsDistinct:              true,
+	FeatureBracedProtoConstructors: true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -3194,6 +3199,10 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		return p.parseBytesLiteral()
 	case token.LBRACKET:
 		return p.parseArrayConstructor(tok.Pos)
+	case token.LBRACE:
+		// A bare "{...}" in expression position is a braced (proto)
+		// constructor; see braced_constructor in googlesql.tm.
+		return p.parseBracedConstructor()
 	case token.QUESTION:
 		// Positional parameters are numbered left to right; see
 		// parameter_expression in googlesql.tm.
@@ -3273,8 +3282,13 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			}
 			node.(*ast.ExpressionSubquery).Hint = hint
 			return node, nil
-		case isKeyword(tok, "STRUCT") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.LT ||
-			(p.peekAt(1).Kind == token.NEQ && p.peekAt(1).Image == "<>")):
+		case isKeyword(tok, "NEW"):
+			return p.parseNewConstructor()
+		case isKeyword(tok, "STRUCT"):
+			// STRUCT always starts a struct constructor in expression
+			// position: "STRUCT(...)", "STRUCT<...>(...)", or the braced
+			// forms "STRUCT {...}" and "STRUCT<...> {...}". Anything else
+			// after the keyword is a syntax error reported there.
 			return p.parseStructConstructorWithKeyword()
 		case isKeyword(tok, "CASE"):
 			return p.parseCaseExpression()
@@ -3377,16 +3391,33 @@ func (p *parser) parseParenthesizedExpression() (ast.Node, error) {
 // struct_constructor_prefix_with_keyword in googlesql.tm.
 func (p *parser) parseStructConstructorWithKeyword() (ast.Node, error) {
 	start := p.peek().Pos
-	s := &ast.StructConstructorWithKeyword{Span: span(start, 0)}
-	if p.peekAt(1).Kind != token.LPAREN {
+	var structType *ast.StructType
+	if p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.LBRACE {
+		p.advance() // STRUCT
+	} else {
+		// Anything but "(" or "{" after STRUCT must open a struct type;
+		// parseStructType reports `Expected "<"` otherwise, matching the
+		// reference parser.
 		typ, err := p.parseStructType()
 		if err != nil {
 			return nil, err
 		}
-		s.StructType = typ
-	} else {
-		p.advance() // STRUCT
+		structType = typ
 	}
+	if p.peek().Kind == token.LBRACE {
+		// "STRUCT { ... }" or "STRUCT<...> { ... }"; see
+		// struct_braced_constructor in googlesql.tm.
+		ctor, err := p.parseBracedConstructor()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StructBracedConstructor{
+			Span:        span(start, ctor.End()),
+			StructType:  structType,
+			Constructor: ctor,
+		}, nil
+	}
+	s := &ast.StructConstructorWithKeyword{Span: span(start, 0), StructType: structType}
 	// After a struct type the reference parser can also start a braced
 	// constructor, so its error message offers "{" too.
 	if _, err := p.expect(token.LPAREN, `"(" or "{"`); err != nil {
@@ -3431,6 +3462,201 @@ func (p *parser) parseStructConstructorArg() (*ast.StructConstructorArg, error) 
 		arg.Stop = alias.End()
 	}
 	return arg, nil
+}
+
+// parseNewConstructor parses "NEW type_name(arg, ...)" or the braced form
+// "NEW type_name { ... }" with the NEW keyword as the next token; see
+// new_constructor and braced_new_constructor in googlesql.tm. Only named
+// types are allowed after NEW.
+func (p *parser) parseNewConstructor() (ast.Node, error) {
+	newTok := p.advance() // NEW
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	typ := &ast.SimpleType{Span: span(path.Pos(), path.End()), Name: path}
+	if p.peek().Kind == token.LBRACE {
+		ctor, err := p.parseBracedConstructor()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.BracedNewConstructor{
+			Span:        span(newTok.Pos, ctor.End()),
+			TypeName:    typ,
+			Constructor: ctor,
+		}, nil
+	}
+	if _, err := p.expect(token.LPAREN, `"(" or "{"`); err != nil {
+		return nil, err
+	}
+	n := &ast.NewConstructor{Span: span(newTok.Pos, 0), TypeName: typ}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			arg, err := p.parseNewConstructorArg()
+			if err != nil {
+				return nil, err
+			}
+			n.Args = append(n.Args, arg)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")" or ","`)
+	if err != nil {
+		return nil, err
+	}
+	n.Stop = rparen.End
+	return n, nil
+}
+
+// parseNewConstructorArg parses "expression [AS identifier | AS ( path )]";
+// see new_constructor_arg in googlesql.tm. Aliases require the AS keyword,
+// and multi-part alias paths must be parenthesized.
+func (p *parser) parseNewConstructorArg() (*ast.NewConstructorArg, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	arg := &ast.NewConstructorArg{Span: span(expr.Pos(), expr.End()), Expression: expr}
+	if isKeyword(p.peek(), "AS") {
+		p.advance()
+		if p.peek().Kind == token.LPAREN {
+			p.advance()
+			path, err := p.parsePathExpression()
+			if err != nil {
+				return nil, err
+			}
+			rparen, err := p.expect(token.RPAREN, `")"`)
+			if err != nil {
+				return nil, err
+			}
+			arg.OptionalPathExpression = path
+			arg.Stop = rparen.End
+			return arg, nil
+		}
+		tok := p.peek()
+		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		ident := p.parseIdentifierToken(p.advance())
+		arg.OptionalIdentifier = ident
+		arg.Stop = ident.End()
+	}
+	return arg, nil
+}
+
+// parseBracedConstructor parses "{ [field [, field ...] [,]] }" with the
+// opening brace as the next token; see braced_constructor in googlesql.tm.
+// Fields may be separated by commas or, proto text-format style, by
+// whitespace alone; in the whitespace form the next field's name must be a
+// plain path expression.
+func (p *parser) parseBracedConstructor() (*ast.BracedConstructor, error) {
+	lbrace := p.peek()
+	if !p.features.Enabled(FeatureBracedProtoConstructors) {
+		return nil, p.errorf(lbrace.Pos, "Syntax error: Braced constructors are not supported")
+	}
+	p.advance() // {
+	b := &ast.BracedConstructor{Span: span(lbrace.Pos, 0)}
+	if p.peek().Kind != token.RBRACE {
+		commaSeparated := false
+		for {
+			field, err := p.parseBracedConstructorField(commaSeparated)
+			if err != nil {
+				return nil, err
+			}
+			b.Fields = append(b.Fields, field)
+			if p.peek().Kind == token.COMMA {
+				p.advance()
+				if p.peek().Kind == token.RBRACE {
+					break // trailing comma
+				}
+				commaSeparated = true
+				continue
+			}
+			if p.peek().Kind == token.RBRACE {
+				break
+			}
+			// Without a comma the next field's name must be a plain path
+			// expression (see braced_constructor_field_following_omitted_comma
+			// in googlesql.tm); anything else is a syntax error.
+			next := p.peek()
+			if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+				return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+			}
+			commaSeparated = false
+		}
+	}
+	rbrace := p.advance() // }
+	b.Stop = rbrace.End
+	return b, nil
+}
+
+// parseBracedConstructorField parses one "lhs: expression" or "lhs { ... }"
+// braced constructor field; see braced_constructor_field in googlesql.tm.
+// The field name is a path expression or a parenthesized extension path
+// "(path.to.extension)".
+func (p *parser) parseBracedConstructorField(commaSeparated bool) (*ast.BracedConstructorField, error) {
+	tok := p.peek()
+	lhs := &ast.BracedConstructorLhs{Span: span(tok.Pos, 0)}
+	switch {
+	case tok.Kind == token.LPAREN:
+		// "(path.to.extension)"; see braced_constructor_extension_expression
+		// in googlesql.tm. The lhs span includes the parentheses.
+		p.advance()
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		lhs.Expression = path
+		lhs.Stop = rparen.End
+	case (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok):
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		lhs.Expression = path
+		lhs.Stop = path.End()
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	value := &ast.BracedConstructorFieldValue{}
+	switch p.peek().Kind {
+	case token.COLON:
+		p.advance()
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		value.Span = span(expr.Pos(), expr.End())
+		value.Expression = expr
+		value.ColonPrefixed = true
+	case token.LBRACE:
+		// Sub-message form "lhs { ... }" without a colon.
+		sub, err := p.parseBracedConstructor()
+		if err != nil {
+			return nil, err
+		}
+		value.Span = span(sub.Pos(), sub.End())
+		value.Expression = sub
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	return &ast.BracedConstructorField{
+		Span:           span(lhs.Pos(), value.End()),
+		Lhs:            lhs,
+		Value:          value,
+		CommaSeparated: commaSeparated,
+	}, nil
 }
 
 // parseArrayConstructor parses "[ [expression, ...] ]" with the opening

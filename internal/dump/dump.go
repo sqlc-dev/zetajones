@@ -277,6 +277,22 @@ func nodeString(n ast.Node) string {
 		return "StructConstructorWithKeyword"
 	case *ast.StructConstructorArg:
 		return "StructConstructorArg"
+	case *ast.NewConstructor:
+		return "NewConstructor"
+	case *ast.NewConstructorArg:
+		return "NewConstructorArg"
+	case *ast.BracedNewConstructor:
+		return "BracedNewConstructor"
+	case *ast.StructBracedConstructor:
+		return "StructBracedConstructor"
+	case *ast.BracedConstructor:
+		return "BracedConstructor"
+	case *ast.BracedConstructorField:
+		return "BracedConstructorField"
+	case *ast.BracedConstructorLhs:
+		return "BracedConstructorLhs"
+	case *ast.BracedConstructorFieldValue:
+		return "BracedConstructorFieldValue"
 	case *ast.FromQuery:
 		return "FromQuery"
 	case *ast.SetOperation:
