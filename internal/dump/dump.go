@@ -467,6 +467,8 @@ func nodeString(n ast.Node) string {
 		return "PipeAggregate"
 	case *ast.PipeWhere:
 		return "PipeWhere"
+	case *ast.PipeTablesample:
+		return "PipeTablesample"
 	case *ast.PipeOrderBy:
 		return "PipeOrderBy"
 	case *ast.PipeSet:

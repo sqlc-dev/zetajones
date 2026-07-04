@@ -1600,6 +1600,17 @@ func (n *PipeWhere) Children() []Node {
 	return children(n.Where)
 }
 
+// PipeTablesample is a |> TABLESAMPLE pipe operator; see ASTPipeTablesample
+// in googlesql/parser/parse_tree.h.
+type PipeTablesample struct {
+	Span
+	Sample *SampleClause `json:"sample"`
+}
+
+func (n *PipeTablesample) Children() []Node {
+	return children(n.Sample)
+}
+
 // PipeOrderBy is a |> ORDER BY pipe operator.
 type PipeOrderBy struct {
 	Span

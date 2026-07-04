@@ -118,7 +118,7 @@ func (p *parser) parseSampleSize() (*ast.SampleSize, error) {
 	case isKeyword(p.peek(), "PERCENT"):
 		size.Unit = "PERCENT"
 	default:
-		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword ROWS or keyword PERCENT but got %s", describeToken(p.peek()))
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword PERCENT or keyword ROWS but got %s", describeToken(p.peek()))
 	}
 	unitTok := p.advance()
 	size.Stop = unitTok.End

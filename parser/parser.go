@@ -480,8 +480,9 @@ var reservedKeywords = map[string]bool{
 	"NATURAL":         true, "NOT": true, "NULL": true,
 	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
-	"RESPECT": true, "RIGHT": true, "SELECT": true, "SET": true, "STRUCT": true,
-	"TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
+	"RESPECT": true, "RIGHT": true, "ROWS": true, "SELECT": true, "SET": true, "STRUCT": true,
+	"TABLESAMPLE": true,
+	"TRUE":        true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
 	"WINDOW": true, "WITH": true,
 }
 
@@ -2252,6 +2253,12 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 			return nil, err
 		}
 		return &ast.PipeMatchRecognize{Span: span(pipeTok.Pos, clause.End()), Clause: clause}, nil
+	case isKeyword(tok, "TABLESAMPLE"):
+		clause, err := p.parseSampleClause()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.PipeTablesample{Span: span(pipeTok.Pos, clause.End()), Sample: clause}, nil
 	case p.atSetOpMetadataStart():
 		return p.parsePipeSetOperation(pipeTok)
 	}
@@ -3955,10 +3962,25 @@ func (p *parser) parseInRhs(quantified bool) (query *ast.Query, list *ast.InList
 		}
 		p.advance() // ,
 	}
-	rparen, rerr := p.expect(token.RPAREN, `")"`)
-	if rerr != nil {
-		return nil, nil, 0, p.preferError(qerr, rerr)
+	// After an in-list expression, only "," (continue the list) or ")" (close
+	// it) are valid. On any other token the reference reports an expected ","
+	// rather than ")"; see the in_list_two_or_more_prefix reduction in
+	// parenthesized_in_rhs in googlesql.tm.
+	if p.peek().Kind != token.RPAREN {
+		eerr := p.errorf(p.peek().Pos, `Syntax error: Expected "," but got %s`, describeToken(p.peek()))
+		// The in-list interpretation wins ties against an abandoned query
+		// parse: the reference reduces the parenthesized rhs as an in-list and
+		// reports the expected "," even when a query parse reached the same
+		// point (e.g. "IN((select 1) foo)").
+		if qerr != nil {
+			var ea, eb *Error
+			if errors.As(qerr, &ea) && errors.As(eerr, &eb) && ea.Offset > eb.Offset {
+				return nil, nil, 0, qerr
+			}
+		}
+		return nil, nil, 0, eerr
 	}
+	rparen := p.advance()
 	list = &ast.InList{
 		Span:  span(p.extStart(exprs[0]), p.extEnd(exprs[len(exprs)-1])),
 		Exprs: exprs,
