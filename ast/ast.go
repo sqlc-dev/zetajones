@@ -780,6 +780,62 @@ func (n *BetweenExpression) Children() []Node {
 	return children(n.Lhs, n.BetweenLocation, n.Low, n.High)
 }
 
+// InList is the parenthesized value list of an IN or LIKE ANY/SOME/ALL
+// expression; see ASTInList in googlesql/parser/parse_tree.h. Its location
+// covers the expressions but not the enclosing parentheses (except for a
+// single extra-parenthesized subquery element).
+type InList struct {
+	Span
+	Exprs []Node `json:"exprs"`
+}
+
+func (n *InList) Children() []Node { return n.Exprs }
+
+// InExpression is <lhs> [NOT] IN <rhs> where rhs is exactly one of a value
+// list, a subquery, or an UNNEST expression; see ASTInExpression in
+// googlesql/parser/parse_tree.h.
+type InExpression struct {
+	Span
+	IsNot      bool              `json:"is_not,omitempty"`
+	Lhs        Node              `json:"lhs"`
+	InLocation *Location         `json:"in_location"`
+	Query      *Query            `json:"query,omitempty"`
+	List       *InList           `json:"in_list,omitempty"`
+	UnnestExpr *UnnestExpression `json:"unnest_expr,omitempty"`
+}
+
+func (n *InExpression) Children() []Node {
+	return children(n.Lhs, n.InLocation, n.Query, n.List, n.UnnestExpr)
+}
+
+// AnySomeAllOp is the ANY, SOME, or ALL quantifier of a LIKE or comparison
+// expression; see ASTAnySomeAllOp in googlesql/parser/parse_tree.h.
+type AnySomeAllOp struct {
+	Span
+	Op string `json:"op"` // "ANY", "SOME", or "ALL"
+}
+
+func (n *AnySomeAllOp) Children() []Node { return nil }
+
+// LikeExpression is <lhs> [NOT] LIKE ANY|SOME|ALL <rhs> where rhs is exactly
+// one of a value list, a subquery, or an UNNEST expression; see
+// ASTLikeExpression in googlesql/parser/parse_tree.h. Plain "<lhs> LIKE
+// <rhs>" is a BinaryExpression instead.
+type LikeExpression struct {
+	Span
+	IsNot        bool              `json:"is_not,omitempty"`
+	Lhs          Node              `json:"lhs"`
+	LikeLocation *Location         `json:"like_location"`
+	Op           *AnySomeAllOp     `json:"op"`
+	Query        *Query            `json:"query,omitempty"`
+	List         *InList           `json:"in_list,omitempty"`
+	UnnestExpr   *UnnestExpression `json:"unnest_expr,omitempty"`
+}
+
+func (n *LikeExpression) Children() []Node {
+	return children(n.Lhs, n.LikeLocation, n.Op, n.Query, n.List, n.UnnestExpr)
+}
+
 // StructConstructorWithParens is "(expr1, expr2 [, ... ])" with at least two
 // expressions; see ASTStructConstructorWithParens in parse_tree.h. The
 // single-expression form is a parenthesized expression, not a struct.

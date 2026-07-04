@@ -210,6 +210,10 @@ const FeaturePipes Feature = "PIPES"
 // expressions (FEATURE_ALLOW_CONSECUTIVE_ON).
 const FeatureAllowConsecutiveOn Feature = "ALLOW_CONSECUTIVE_ON"
 
+// FeatureIsDistinct gates "IS [NOT] DISTINCT FROM" comparisons
+// (FEATURE_IS_DISTINCT).
+const FeatureIsDistinct Feature = "IS_DISTINCT"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -218,6 +222,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureWithGroupRows:      false, // in_development
 	FeaturePipes:              true,
 	FeatureAllowConsecutiveOn: true,
+	FeatureIsDistinct:         true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -2448,11 +2453,23 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		return nil, err
 	}
 
-	// [NOT] BETWEEN
+	// The reference lexes a NOT followed by BETWEEN, IN, LIKE, or DISTINCT
+	// as KW_NOT_SPECIAL (see lookahead_transformer.cc); after an expression
+	// it must introduce NOT BETWEEN, NOT IN, or NOT LIKE (NOT DISTINCT is
+	// only valid after IS, handled below). Any other postfix NOT is left
+	// for the caller to report.
 	notTok := token.Token{Pos: -1}
-	if isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "BETWEEN") {
-		notTok = p.advance()
+	if isKeyword(p.peek(), "NOT") {
+		next := p.peekAt(1)
+		switch {
+		case isKeyword(next, "BETWEEN"), isKeyword(next, "IN"), isKeyword(next, "LIKE"):
+			notTok = p.advance()
+		case isKeyword(next, "DISTINCT"):
+			return nil, p.errorf(next.Pos, "Syntax error: Expected keyword BETWEEN or keyword IN or keyword LIKE but got %s", describeToken(next))
+		}
 	}
+
+	// [NOT] BETWEEN
 	if isKeyword(p.peek(), "BETWEEN") {
 		betweenTok := p.advance()
 		low, err := p.parseBitwiseOr()
@@ -2469,22 +2486,99 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		if isKeyword(p.peek(), "BETWEEN") {
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Expression in BETWEEN must be parenthesized")
 		}
-		return &ast.BetweenExpression{
+		return p.finishComparison(&ast.BetweenExpression{
 			Span:            span(p.extStart(lhs), p.extEnd(high)),
 			IsNot:           notTok.Pos >= 0,
 			Lhs:             lhs,
 			BetweenLocation: &ast.Location{Span: span(betweenTok.Pos, betweenTok.End)},
 			Low:             low,
 			High:            high,
-		}, nil
-	}
-	if notTok.Pos >= 0 {
-		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected BETWEEN")
+		})
 	}
 
-	// IS [NOT] NULL / TRUE / FALSE
+	// [NOT] IN; see the in_operator alternatives of
+	// expression_higher_prec_than_and in googlesql.tm.
+	if isKeyword(p.peek(), "IN") {
+		inTok := p.advance()
+		in := &ast.InExpression{
+			IsNot:      notTok.Pos >= 0,
+			Lhs:        lhs,
+			InLocation: &ast.Location{Span: span(inTok.Pos, inTok.End)},
+		}
+		var end int
+		switch {
+		case isKeyword(p.peek(), "UNNEST"):
+			unnest, err := p.parseUnnestExpression()
+			if err != nil {
+				return nil, err
+			}
+			in.UnnestExpr = unnest
+			end = unnest.End()
+		case p.peek().Kind == token.LPAREN:
+			query, list, rhsEnd, err := p.parseInRhs(false)
+			if err != nil {
+				return nil, err
+			}
+			in.Query, in.List = query, list
+			end = rhsEnd
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+		}
+		in.Span = span(p.extStart(lhs), end)
+		return p.finishComparison(in)
+	}
+
+	// [NOT] LIKE, either the plain binary operator or the quantified
+	// LIKE ANY/SOME/ALL form; see the like_operator alternatives of
+	// expression_higher_prec_than_and in googlesql.tm.
+	if isKeyword(p.peek(), "LIKE") {
+		likeTok := p.advance()
+		if isKeyword(p.peek(), "ANY") || isKeyword(p.peek(), "SOME") || isKeyword(p.peek(), "ALL") {
+			opTok := p.advance()
+			like := &ast.LikeExpression{
+				IsNot:        notTok.Pos >= 0,
+				Lhs:          lhs,
+				LikeLocation: &ast.Location{Span: span(likeTok.Pos, likeTok.End)},
+				Op:           &ast.AnySomeAllOp{Span: span(opTok.Pos, opTok.End), Op: strings.ToUpper(opTok.Image)},
+			}
+			var end int
+			switch {
+			case isKeyword(p.peek(), "UNNEST"):
+				unnest, err := p.parseUnnestExpression()
+				if err != nil {
+					return nil, err
+				}
+				like.UnnestExpr = unnest
+				end = unnest.End()
+			case p.peek().Kind == token.LPAREN:
+				query, list, rhsEnd, err := p.parseInRhs(true)
+				if err != nil {
+					return nil, err
+				}
+				like.Query, like.List = query, list
+				end = rhsEnd
+			default:
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+			}
+			like.Span = span(p.extStart(lhs), end)
+			return p.finishComparison(like)
+		}
+		rhs, err := p.parseBitwiseOr()
+		if err != nil {
+			return nil, err
+		}
+		return p.finishComparison(&ast.BinaryExpression{
+			Span:  span(p.extStart(lhs), p.extEnd(rhs)),
+			Op:    "LIKE",
+			IsNot: notTok.Pos >= 0,
+			Left:  lhs,
+			Right: rhs,
+		})
+	}
+
+	// IS [NOT] NULL / TRUE / FALSE / DISTINCT FROM
 	if isKeyword(p.peek(), "IS") {
-		p.advance()
+		isTok := p.advance()
 		isNot := false
 		if isKeyword(p.peek(), "NOT") {
 			p.advance()
@@ -2493,6 +2587,35 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		tok := p.peek()
 		var rhs ast.Node
 		switch {
+		case isKeyword(tok, "DISTINCT"):
+			// IS [NOT] DISTINCT FROM; error messages point at the DISTINCT
+			// for the NOT form and at the IS otherwise (see
+			// distinct_operator in googlesql.tm).
+			if !p.features.Enabled(FeatureIsDistinct) {
+				pos := isTok.Pos
+				if isNot {
+					pos = tok.Pos
+				}
+				// No "Syntax error: " prefix; see the distinct_operator
+				// alternative of expression_higher_prec_than_and.
+				return nil, p.errorf(pos, "IS DISTINCT FROM is not supported")
+			}
+			p.advance() // DISTINCT
+			if !isKeyword(p.peek(), "FROM") {
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+			}
+			p.advance() // FROM
+			rhs, err := p.parseBitwiseOr()
+			if err != nil {
+				return nil, err
+			}
+			return p.finishComparison(&ast.BinaryExpression{
+				Span:  span(p.extStart(lhs), p.extEnd(rhs)),
+				Op:    "IS DISTINCT FROM",
+				IsNot: isNot,
+				Left:  lhs,
+				Right: rhs,
+			})
 		case isKeyword(tok, "NULL"):
 			p.advance()
 			rhs = &ast.NullLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
@@ -2502,13 +2625,13 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		default:
 			return nil, p.errorf(tok.Pos, "Syntax error: Expected NULL, TRUE, or FALSE after IS")
 		}
-		return &ast.BinaryExpression{
+		return p.finishComparison(&ast.BinaryExpression{
 			Span:  span(p.extStart(lhs), p.extEnd(rhs)),
 			Op:    "IS",
 			IsNot: isNot,
 			Left:  lhs,
 			Right: rhs,
-		}, nil
+		})
 	}
 
 	// Simple comparison operators.
@@ -2534,12 +2657,106 @@ func (p *parser) parseComparison() (ast.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.BinaryExpression{
+	return p.finishComparison(&ast.BinaryExpression{
 		Span:  span(p.extStart(lhs), p.extEnd(rhs)),
 		Op:    op,
 		Left:  lhs,
 		Right: rhs,
-	}, nil
+	})
+}
+
+// finishComparison enforces non-associativity of the comparison level. A
+// LIKE after a comparison result gets a dedicated message because the
+// reference shifts it and then rejects the lhs (IsAllowedInComparison is
+// false; see the like_operator alternatives of
+// expression_higher_prec_than_and in googlesql.tm); the other comparison
+// operators fail immediately on the %nonassoc conflict.
+func (p *parser) finishComparison(n ast.Node) (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "LIKE"):
+		return nil, p.errorf(tok.Pos, "Syntax error: Expression to the left of LIKE must be parenthesized")
+	case isKeyword(tok, "IN"), isKeyword(tok, "IS"), isKeyword(tok, "BETWEEN"):
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	}
+	return n, nil
+}
+
+// parseInRhs parses the parenthesized right-hand side of an IN or (with
+// quantified set) a LIKE ANY/SOME/ALL expression, with the opening
+// parenthesis as the next token. Exactly one of query and list is returned,
+// along with the end offset of the closing parenthesis; see
+// parenthesized_in_rhs and parenthesized_anysomeall_list_rhs in
+// googlesql.tm.
+func (p *parser) parseInRhs(quantified bool) (query *ast.Query, list *ast.InList, end int, err error) {
+	lparen := p.peek()
+	var qerr error
+	if p.lparenStartsQuery() {
+		save := p.pos
+		p.advance() // (
+		inner, ierr := p.parseQuery()
+		var rparen token.Token
+		if ierr == nil {
+			rparen, ierr = p.expect(token.RPAREN, `")"`)
+		}
+		if ierr == nil {
+			if quantified && inner.Parenthesized {
+				// An extra-parenthesized subquery is a single scalar
+				// subquery expression element (see case 4 of
+				// parenthesized_anysomeall_list_rhs).
+				inner.Parenthesized = false
+				sub := &ast.ExpressionSubquery{Span: span(lparen.Pos, rparen.End), Query: inner}
+				list = &ast.InList{Span: span(lparen.Pos, rparen.End), Exprs: []ast.Node{sub}}
+				return nil, list, rparen.End, nil
+			}
+			if quantified {
+				// The subquery rhs of a quantified expression gets an extra
+				// Query node spanning the parentheses.
+				return &ast.Query{Span: span(lparen.Pos, rparen.End), QueryExpr: inner}, nil, rparen.End, nil
+			}
+			inner.Parenthesized = true
+			return inner, nil, rparen.End, nil
+		}
+		// Not a parenthesized query after all (e.g. "((select 1), x)");
+		// retry as an expression list and keep whichever error got further.
+		qerr = ierr
+		p.pos = save
+	}
+	// "( expression [, ...] )" is an in-list; its location spans the
+	// expressions but not the parentheses (see in_list_two_or_more_prefix
+	// in googlesql.tm).
+	p.advance() // (
+	var exprs []ast.Node
+	for {
+		expr, eerr := p.parseExpression()
+		if eerr != nil {
+			return nil, nil, 0, p.preferError(qerr, eerr)
+		}
+		exprs = append(exprs, expr)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	rparen, rerr := p.expect(token.RPAREN, `")"`)
+	if rerr != nil {
+		return nil, nil, 0, p.preferError(qerr, rerr)
+	}
+	list = &ast.InList{
+		Span:  span(p.extStart(exprs[0]), p.extEnd(exprs[len(exprs)-1])),
+		Exprs: exprs,
+	}
+	return nil, list, rparen.End, nil
+}
+
+// preferError combines the error from an abandoned query parse with the
+// error from the expression-list parse of the same input, keeping whichever
+// consumed more input.
+func (p *parser) preferError(qerr, eerr error) error {
+	if qerr == nil {
+		return eerr
+	}
+	return furthestError(qerr, eerr)
 }
 
 // parseBinaryLevel parses a left-associative binary operator level.
@@ -2683,6 +2900,16 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 				Expr: expr,
 				Name: ident,
 			}
+		case token.LPAREN:
+			// "expression ( ... )" is a function call, which requires a
+			// (generalized) path expression; chained calls on paths are
+			// handled elsewhere, and anything else is an error (see
+			// function_call_expression_base in googlesql.tm).
+			switch expr.(type) {
+			case *ast.PathExpression, *ast.DotIdentifier, *ast.FunctionCall:
+				return expr, nil
+			}
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Function call cannot be applied to this expression. Function calls require a path, e.g. a.b.c()")
 		case token.LBRACKET:
 			// "expression [ expression ]" is array element access; the
 			// Location child covers the "[" token (see the

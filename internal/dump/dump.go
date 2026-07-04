@@ -212,10 +212,34 @@ func nodeString(n ast.Node) string {
 	case *ast.UnaryExpression:
 		return fmt.Sprintf("UnaryExpression(%s)", t.Op)
 	case *ast.BinaryExpression:
+		// See ASTBinaryExpression::GetSQLForOperator in parse_tree.cc for
+		// how is_not combines with the operator name.
+		op := t.Op
 		if t.IsNot {
-			return fmt.Sprintf("BinaryExpression(%s (with IS NOT))", t.Op)
+			switch t.Op {
+			case "IS":
+				op = "IS NOT"
+			case "LIKE":
+				op = "NOT LIKE"
+			case "IS DISTINCT FROM":
+				op = "IS NOT DISTINCT FROM"
+			}
 		}
-		return fmt.Sprintf("BinaryExpression(%s)", t.Op)
+		return fmt.Sprintf("BinaryExpression(%s)", op)
+	case *ast.InExpression:
+		if t.IsNot {
+			return "InExpression(NOT IN)"
+		}
+		return "InExpression(IN)"
+	case *ast.InList:
+		return "InList"
+	case *ast.LikeExpression:
+		if t.IsNot {
+			return "LikeExpression(NOT LIKE)"
+		}
+		return "LikeExpression(LIKE)"
+	case *ast.AnySomeAllOp:
+		return fmt.Sprintf("AnySomeAllOp(%s)", t.Op)
 	case *ast.AndExpr:
 		return "AndExpr"
 	case *ast.OrExpr:
