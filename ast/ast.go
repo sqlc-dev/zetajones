@@ -309,6 +309,123 @@ func (n *WithOffset) Children() []Node {
 	return children(n.Alias)
 }
 
+// Join is a JOIN between two table expressions, including comma joins; see
+// ASTJoin in googlesql/parser/parse_tree.h. Child order matches the
+// reference: Lhs, Hint, JoinLocation, Rhs, then the ON/USING clause (or the
+// clause list before consecutive-ON transformation).
+type Join struct {
+	Span
+	// JoinType is "" for a plain JOIN, or "COMMA", "CROSS", "FULL", "INNER",
+	// "LEFT", or "RIGHT".
+	JoinType string `json:"join_type,omitempty"`
+	// JoinHint is "" or the join hint keyword "HASH" or "LOOKUP".
+	JoinHint string `json:"join_hint,omitempty"`
+	Natural  bool   `json:"natural,omitempty"`
+	Lhs      Node   `json:"lhs"`
+	Hint     *Hint  `json:"hint,omitempty"`
+	// JoinLocation covers the join keywords (e.g. "LEFT OUTER JOIN"), or the
+	// comma of a comma join.
+	JoinLocation *Location `json:"join_location"`
+	Rhs          Node      `json:"rhs"`
+	// OnOrUsingClause is the *OnClause or *UsingClause, if any.
+	OnOrUsingClause Node `json:"on_or_using_clause,omitempty"`
+	// ClauseList holds two or more consecutive ON/USING clauses before the
+	// join transformation dissolves them; see ASTOnOrUsingClauseList and
+	// googlesql/parser/join_processor.cc.
+	ClauseList *OnOrUsingClauseList `json:"clause_list,omitempty"`
+
+	// The fields below are parser bookkeeping used by the consecutive
+	// ON/USING clause transformation (join_processor.cc); they are not part
+	// of the parse tree.
+	UnmatchedJoinCount   int             `json:"-"`
+	TransformationNeeded bool            `json:"-"`
+	ContainsCommaJoin    bool            `json:"-"`
+	ParseError           *JoinParseError `json:"-"`
+}
+
+func (n *Join) Children() []Node {
+	return children(n.Lhs, n.Hint, n.JoinLocation, n.Rhs, n.OnOrUsingClause, n.ClauseList)
+}
+
+// JoinParseError is a deferred error recorded on a Join when there are more
+// ON/USING clauses than joins that need one; see ASTJoin::ParseError in
+// googlesql/parser/parse_tree.h.
+type JoinParseError struct {
+	ErrorNode Node
+	Message   string
+}
+
+// OnClause is the ON condition of a join; see ASTOnClause in
+// googlesql/parser/parse_tree.h.
+type OnClause struct {
+	Span
+	Expr Node `json:"expr"`
+}
+
+func (n *OnClause) Children() []Node {
+	return children(n.Expr)
+}
+
+// UsingClause is the USING (column, ...) clause of a join; see
+// ASTUsingClause in googlesql/parser/parse_tree.h. The span includes the
+// USING keyword and the parentheses.
+type UsingClause struct {
+	Span
+	Keys []*Identifier `json:"keys"`
+}
+
+func (n *UsingClause) Children() []Node {
+	var out []Node
+	for _, k := range n.Keys {
+		out = append(out, k)
+	}
+	return out
+}
+
+// OnOrUsingClauseList holds consecutive ON/USING clauses of a join before
+// the join transformation; see ASTOnOrUsingClauseList in
+// googlesql/parser/parse_tree.h.
+type OnOrUsingClauseList struct {
+	Span
+	Clauses []Node `json:"clauses"` // *OnClause or *UsingClause
+}
+
+func (n *OnOrUsingClauseList) Children() []Node {
+	return append([]Node(nil), n.Clauses...)
+}
+
+// ParenthesizedJoin is "( join )" used as a table primary; see
+// ASTParenthesizedJoin in googlesql/parser/parse_tree.h. The span includes
+// the parentheses.
+type ParenthesizedJoin struct {
+	Span
+	Join Node `json:"join"`
+}
+
+func (n *ParenthesizedJoin) Children() []Node {
+	return children(n.Join)
+}
+
+// PipeJoin is a |> JOIN pipe operator; see ASTPipeJoin in
+// googlesql/parser/parse_tree.h. The contained Join's Lhs is a
+// PipeJoinLhsPlaceholder because the left input is the pipe input.
+type PipeJoin struct {
+	Span
+	Join Node `json:"join"`
+}
+
+func (n *PipeJoin) Children() []Node {
+	return children(n.Join)
+}
+
+// PipeJoinLhsPlaceholder stands in for the missing left input of a pipe
+// JOIN; see ASTPipeJoinLhsPlaceholder in googlesql/parser/parse_tree.h.
+type PipeJoinLhsPlaceholder struct {
+	Span
+}
+
+func (n *PipeJoinLhsPlaceholder) Children() []Node { return nil }
+
 // ArrayConstructor is "[...]" or "ARRAY[...]"; see ASTArrayConstructor in
 // googlesql/parser/parse_tree.h.
 type ArrayConstructor struct {

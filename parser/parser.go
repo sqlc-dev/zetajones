@@ -98,17 +98,86 @@ func expandTabs(s string) string {
 }
 
 // Caret renders the error in ZetaSQL's test format: the message with
-// location, the offending source line (tabs expanded), and a caret marking
-// the column.
+// location, the offending source line (tabs expanded, truncated to 80
+// columns around the error), and a caret marking the column; see
+// GetErrorStringWithCaret and GetTruncatedInputStringInfo in
+// googlesql/public/error_helpers.cc.
 func (e *Error) Caret() string {
 	line, col := e.LineCol()
 	_, srcLine, _ := lineAtOffset(e.SQL, e.Offset)
 	srcLine = expandTabs(srcLine)
-	caret := col
-	if caret > len(srcLine)+1 {
-		caret = len(srcLine) + 1
+	const maxWidth = 80
+	// errorColumn is 0-based; col may be one off the end of the line for
+	// end-of-input errors.
+	errorColumn := max(1, min(len(srcLine)+1, col)) - 1
+	// If the error line is longer than maxWidth, give a substring of up to
+	// maxWidth characters with the caret near the middle of it.
+	if len(srcLine) > maxWidth {
+		oneHalf := maxWidth / 2
+		oneThird := maxWidth / 3
+		// If the error is near the start, just use a prefix of the string.
+		if errorColumn > maxWidth-oneThird {
+			// Otherwise, try to find a word boundary to start the string on
+			// that puts the caret in the middle third of the output line.
+			foundStart := -1
+			for startColumn := max(0, errorColumn-2*oneThird); startColumn < max(0, errorColumn-oneThird); startColumn++ {
+				if isWordStart(srcLine, startColumn) {
+					foundStart = startColumn
+					break
+				}
+			}
+			if foundStart == -1 {
+				// Didn't find a good separator. Just split in the middle.
+				foundStart = max(errorColumn-oneHalf, 0)
+			}
+			// Add the "..." prefix if necessary.
+			if foundStart < 3 {
+				foundStart = 0
+			} else {
+				srcLine = "..." + srcLine[foundStart:]
+				errorColumn -= foundStart - 3
+			}
+		}
+		srcLine = prettyTruncate(srcLine, maxWidth)
 	}
-	return fmt.Sprintf("%s [at %d:%d]\n%s\n%s^", e.Message, line, col, srcLine, strings.Repeat(" ", caret-1))
+	return fmt.Sprintf("%s [at %d:%d]\n%s\n%s^", e.Message, line, col, srcLine, strings.Repeat(" ", errorColumn))
+}
+
+// isWordStart reports whether the 0-based column in s starts a word; see
+// IsWordStart in googlesql/public/error_helpers.cc.
+func isWordStart(s string, column int) bool {
+	if column == 0 || column >= len(s) {
+		return true
+	}
+	return !isWordByte(s[column-1]) && isWordByte(s[column])
+}
+
+func isWordByte(c byte) bool {
+	return c == '_' ||
+		(c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9')
+}
+
+// prettyTruncate truncates s to at most maxBytes bytes, appending "..." when
+// it truncates and avoiding splitting a UTF-8 character; see
+// PrettyTruncateUTF8 in googlesql/common/utf_util.cc.
+func prettyTruncate(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	if maxBytes <= 3 {
+		return s[:maxBytes]
+	}
+	newWidth := maxBytes - 3
+	// Back up to the start of the code point containing byte newWidth.
+	for newWidth > 0 && s[newWidth]&0xC0 == 0x80 {
+		newWidth--
+	}
+	return s[:newWidth] + "..."
 }
 
 // Parse reads SQL from r and parses it as a single statement.
@@ -137,13 +206,18 @@ const FeatureWithGroupRows Feature = "WITH_GROUP_ROWS"
 // FeaturePipes gates pipe query syntax (FEATURE_PIPES).
 const FeaturePipes Feature = "PIPES"
 
+// FeatureAllowConsecutiveOn gates consecutive ON/USING clauses in join
+// expressions (FEATURE_ALLOW_CONSECUTIVE_ON).
+const FeatureAllowConsecutiveOn Feature = "ALLOW_CONSECUTIVE_ON"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
 // language_feature_options annotations in googlesql/public/options.proto.
 var featureInMaximum = map[Feature]bool{
-	FeatureWithGroupRows: false, // in_development
-	FeaturePipes:         true,
+	FeatureWithGroupRows:      false, // in_development
+	FeaturePipes:              true,
+	FeatureAllowConsecutiveOn: true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -302,9 +376,11 @@ var reservedKeywords = map[string]bool{
 	"BY":      true, "CASE": true, "CROSS": true, "DESC": true, "DISTINCT": true,
 	"ELSE": true, "END": true, "EXCEPT": true, "FALSE": true, "FOR": true,
 	"FROM": true,
-	"FULL": true, "GROUP": true, "HAVING": true, "IN": true, "INNER": true,
+	"FULL": true, "GROUP": true, "HASH": true, "HAVING": true, "IN": true,
+	"INNER":     true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LEFT": true, "LIKE": true,
-	"LIMIT": true, "NOT": true, "NULL": true, "NULLS": true, "ON": true,
+	"LIMIT": true, "LOOKUP": true, "NATURAL": true, "NOT": true, "NULL": true,
+	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
 	"RIGHT": true, "SELECT": true, "SET": true,
 	"TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
@@ -1249,9 +1325,9 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 	if err := p.exceptClashError(); err != nil {
 		return nil, err
 	}
-	// The reference grammar's recovery point for an unrecognized pipe
-	// operator is the JOIN inside pipe_join.
-	return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword JOIN but got %s", describeToken(tok))
+	// The last alternative is pipe_join; an unrecognized pipe operator gets
+	// its "Expected keyword JOIN" error from the JOIN inside pipe_join.
+	return p.parsePipeJoin(pipeTok)
 }
 
 // parsePipeSetOperation parses "<set_operation_metadata> (query|table_clause)
@@ -1696,19 +1772,28 @@ func (p *parser) parseFromClause() (*ast.FromClause, error) {
 	if err != nil {
 		return nil, err
 	}
-	table, err := p.parseTablePrimary()
+	contents, err := p.parseFromClauseContents()
 	if err != nil {
 		return nil, err
 	}
-	return &ast.FromClause{Span: span(fromTok.Pos, table.End()), TableExpression: table}, nil
+	// Consecutive ON/USING clauses rewrite the join tree; see from_clause in
+	// googlesql.tm.
+	table, err := p.transformJoinExpression(contents)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.FromClause{Span: span(fromTok.Pos, p.prevEnd()), TableExpression: table}, nil
 }
 
-// parseTablePrimary parses a single table item in a FROM clause: either a
-// parenthesized query used as a table subquery or a table path expression;
-// see table_primary in googlesql.tm.
+// parseTablePrimary parses a single table item in a FROM clause: a
+// parenthesized query used as a table subquery, a parenthesized join, or a
+// table path expression; see table_primary in googlesql.tm.
 func (p *parser) parseTablePrimary() (ast.Node, error) {
 	if p.peek().Kind == token.LPAREN {
-		return p.parseTableSubquery()
+		if p.lparenStartsQuery() {
+			return p.parseTableSubquery()
+		}
+		return p.parseParenthesizedJoin()
 	}
 	return p.parseTablePathExpression()
 }
@@ -1744,6 +1829,11 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 		}
 		table = &ast.TablePathExpression{Span: span(unnest.Pos(), unnest.End()), UnnestExpr: unnest}
 	} else {
+		// A table primary reports plain "Unexpected" errors rather than the
+		// path expression's "Expected identifier" ones.
+		if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
 		path, err := p.parsePathExpression()
 		if err != nil {
 			return nil, err

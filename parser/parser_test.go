@@ -25,7 +25,9 @@ var checkParse = flag.Bool("check-parse", false, "Run parse_todo cases and updat
 func runCase(c *testfile.Case) string {
 	var opts parser.Options
 	// The last language_features option wins: case options follow inherited
-	// [default ...] options. Without one, all features stay enabled.
+	// [default ...] options. The reference test driver defaults to NONE; see
+	// run_parser_test.cc.
+	opts.Features = parser.ParseFeatureSet("NONE")
 	for _, opt := range c.Options {
 		if spec, ok := strings.CutPrefix(opt, "language_features="); ok {
 			opts.Features = parser.ParseFeatureSet(spec)

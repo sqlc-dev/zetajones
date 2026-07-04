@@ -100,6 +100,36 @@ func nodeString(n ast.Node) string {
 		return "WithOffset"
 	case *ast.ArrayConstructor:
 		return "ArrayConstructor"
+	case *ast.Join:
+		// See ASTJoin::SingleNodeDebugString in parse_tree.cc: the details
+		// are NATURAL, the join type (comma joins show as COMMA), and the
+		// join hint, in that order.
+		var attrs []string
+		if t.Natural {
+			attrs = append(attrs, "NATURAL")
+		}
+		if t.JoinType != "" {
+			attrs = append(attrs, t.JoinType)
+		}
+		if t.JoinHint != "" {
+			attrs = append(attrs, t.JoinHint)
+		}
+		if len(attrs) == 0 {
+			return "Join"
+		}
+		return fmt.Sprintf("Join(%s)", strings.Join(attrs, ", "))
+	case *ast.OnClause:
+		return "OnClause"
+	case *ast.UsingClause:
+		return "UsingClause"
+	case *ast.OnOrUsingClauseList:
+		return "OnOrUsingClauseList"
+	case *ast.ParenthesizedJoin:
+		return "ParenthesizedJoin"
+	case *ast.PipeJoin:
+		return "PipeJoin"
+	case *ast.PipeJoinLhsPlaceholder:
+		return "PipeJoinLhsPlaceholder"
 	case *ast.WhereClause:
 		return "WhereClause"
 	case *ast.GroupBy:
