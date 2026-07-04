@@ -973,6 +973,18 @@ func (n *PipeExtend) Children() []Node {
 	return children(n.Select)
 }
 
+// PipeWindow is a |> WINDOW pipe operator. The selection item list is
+// represented as an ASTSelect for resolver code sharing in the reference
+// implementation.
+type PipeWindow struct {
+	Span
+	Select *Select `json:"select"`
+}
+
+func (n *PipeWindow) Children() []Node {
+	return children(n.Select)
+}
+
 // PipeLimitOffset is a |> LIMIT [OFFSET] pipe operator.
 type PipeLimitOffset struct {
 	Span
@@ -1243,10 +1255,40 @@ type WindowSpecification struct {
 	Name        *Identifier  `json:"name,omitempty"`
 	PartitionBy *PartitionBy `json:"partition_by,omitempty"`
 	OrderBy     *OrderBy     `json:"order_by,omitempty"`
+	WindowFrame *WindowFrame `json:"window_frame,omitempty"`
 }
 
 func (n *WindowSpecification) Children() []Node {
-	return children(n.Name, n.PartitionBy, n.OrderBy)
+	return children(n.Name, n.PartitionBy, n.OrderBy, n.WindowFrame)
+}
+
+// WindowFrame is a "ROWS|RANGE ..." window frame clause; see ASTWindowFrame
+// in googlesql/parser/parse_tree.h. EndExpr is only set for the
+// "BETWEEN low AND high" form.
+type WindowFrame struct {
+	Span
+	Unit      string           `json:"unit"` // "ROWS" or "RANGE"
+	StartExpr *WindowFrameExpr `json:"start_expr"`
+	EndExpr   *WindowFrameExpr `json:"end_expr,omitempty"`
+}
+
+func (n *WindowFrame) Children() []Node {
+	return children(n.StartExpr, n.EndExpr)
+}
+
+// WindowFrameExpr is a window frame boundary; see ASTWindowFrameExpr in
+// googlesql/parser/parse_tree.h. Expression is only set for the
+// "expression PRECEDING/FOLLOWING" (OFFSET) forms.
+type WindowFrameExpr struct {
+	Span
+	// BoundaryType is one of "UNBOUNDED PRECEDING", "OFFSET PRECEDING",
+	// "CURRENT ROW", "OFFSET FOLLOWING" or "UNBOUNDED FOLLOWING".
+	BoundaryType string `json:"boundary_type"`
+	Expression   Node   `json:"expression,omitempty"`
+}
+
+func (n *WindowFrameExpr) Children() []Node {
+	return children(n.Expression)
 }
 
 // PartitionBy is a "PARTITION [hint] BY expr, ..." clause; see ASTPartitionBy

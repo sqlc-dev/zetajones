@@ -176,6 +176,10 @@ func nodeString(n ast.Node) string {
 		return "AnalyticFunctionCall"
 	case *ast.WindowSpecification:
 		return "WindowSpecification"
+	case *ast.WindowFrame:
+		return "WindowFrame(" + t.Unit + ")"
+	case *ast.WindowFrameExpr:
+		return "WindowFrameExpr(" + t.BoundaryType + ")"
 	case *ast.PartitionBy:
 		return "PartitionBy"
 	case *ast.LimitOffset:
@@ -323,6 +327,8 @@ func nodeString(n ast.Node) string {
 		return "PipeSelect"
 	case *ast.PipeExtend:
 		return "PipeExtend"
+	case *ast.PipeWindow:
+		return "PipeWindow"
 	case *ast.PipeLimitOffset:
 		return "PipeLimitOffset"
 	case *ast.PipeDistinct:

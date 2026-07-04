@@ -302,6 +302,12 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		if err := p.exceptClashError(); err != nil {
 			return nil, err
 		}
+		if isKeyword(p.peek(), "OVER") {
+			// When the OVER keyword is used in the wrong place, the
+			// reference parser tells the user exactly where it can be used;
+			// see MakeSyntaxError in parser_internal.cc.
+			return nil, p.errorf(p.peek().Pos, "Syntax error: OVER keyword must follow a function call")
+		}
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
 	}
 	return stmt, nil
@@ -321,10 +327,17 @@ type parser struct {
 	extents map[ast.Node][2]int
 	// allowDotStar is set while parsing a select column expression, where a
 	// trailing ".*" may follow (see select_column_dot_star in googlesql.tm).
-	// It is consumed by the first path expression parsed and cleared when
-	// entering any nested expression, so that ".*" only ends the outermost
-	// postfix expression of the select column.
+	// It is cleared while parsing any nested expression (and restored
+	// afterwards), so that ".*" only ends a postfix expression of the select
+	// column itself.
 	allowDotStar bool
+	// dotStarTarget records the postfix expression that stopped in front of
+	// ".*" while allowDotStar was set. Grammar-wise ".*" binds more tightly
+	// than any binary operator (select_column_dot_star takes an
+	// expression_higher_prec_than_and with %prec "."), so the ".*" is only
+	// valid when the whole select column expression is exactly this postfix
+	// expression (e.g. "1+x.*" is an error).
+	dotStarTarget ast.Node
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -1398,6 +1411,8 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		return &ast.PipeSelect{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
 	case isKeyword(tok, "EXTEND"):
 		return p.parsePipeExtend(pipeTok)
+	case isKeyword(tok, "WINDOW"):
+		return p.parsePipeWindow(pipeTok)
 	case isKeyword(tok, "LIMIT"):
 		limitOffset, err := p.parseLimitOffset()
 		if err != nil {
@@ -1553,7 +1568,7 @@ func (p *parser) parsePipeAggregate(pipeTok token.Token) (ast.Node, error) {
 	list := &ast.SelectList{Span: span(aggTok.End, aggTok.End)}
 	if startsExpression(p.peek()) {
 		for {
-			col, err := p.parseSelectColumnExpr()
+			col, err := p.parseSelectColumnOrDotStar()
 			if err != nil {
 				return nil, err
 			}
@@ -1599,11 +1614,24 @@ func (p *parser) parsePipeExtend(pipeTok token.Token) (ast.Node, error) {
 	return &ast.PipeExtend{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
 }
 
+// parsePipeWindow parses "WINDOW pipe_selection_item_list" after a |> token.
+// The selection list is represented as a Select node whose location starts at
+// the WINDOW keyword; see pipe_window in googlesql.tm.
+func (p *parser) parsePipeWindow(pipeTok token.Token) (ast.Node, error) {
+	windowTok := p.advance() // WINDOW
+	list, err := p.parsePipeSelectionItemList()
+	if err != nil {
+		return nil, err
+	}
+	sel := &ast.Select{Span: span(windowTok.Pos, list.End()), SelectList: list}
+	return &ast.PipeWindow{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
+}
+
 // parsePipeSelectionItemList parses one or more comma-separated selection
 // items with an optional trailing comma; see pipe_selection_item_list in
 // googlesql.tm.
 func (p *parser) parsePipeSelectionItemList() (*ast.SelectList, error) {
-	first, err := p.parseSelectColumnExpr()
+	first, err := p.parseSelectColumnOrDotStar()
 	if err != nil {
 		return nil, err
 	}
@@ -1615,7 +1643,7 @@ func (p *parser) parsePipeSelectionItemList() (*ast.SelectList, error) {
 			list.Stop = comma.End
 			break
 		}
-		col, err := p.parseSelectColumnExpr()
+		col, err := p.parseSelectColumnOrDotStar()
 		if err != nil {
 			return nil, err
 		}
@@ -1623,28 +1651,6 @@ func (p *parser) parsePipeSelectionItemList() (*ast.SelectList, error) {
 		list.Stop = col.End()
 	}
 	return list, nil
-}
-
-// parseSelectColumnExpr parses "expression [[AS] alias]" (a select list item
-// without the * forms); see select_column_expr in googlesql.tm.
-func (p *parser) parseSelectColumnExpr() (*ast.SelectColumn, error) {
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if err := p.checkAttachedAlias(); err != nil {
-		return nil, err
-	}
-	col := &ast.SelectColumn{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
-	alias, err := p.parseOptionalAlias()
-	if err != nil {
-		return nil, err
-	}
-	if alias != nil {
-		col.Alias = alias
-		col.Stop = alias.End()
-	}
-	return col, nil
 }
 
 // startsExpression reports whether tok can begin an expression.
@@ -1788,13 +1794,29 @@ func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {
 		}
 		return &ast.SelectColumn{Span: span(expr.Pos(), expr.End()), Expr: expr}, nil
 	}
+	return p.parseSelectColumnOrDotStar()
+}
+
+// parseSelectColumnOrDotStar parses a select column that is either
+// "expression [[AS] alias]" or "expression . *" with optional EXCEPT/REPLACE
+// modifiers (which cannot take an alias); see select_column_expr and
+// select_column_dot_star in googlesql.tm. This is also the pipe selection
+// item form, which excludes the plain "*" select column; see
+// pipe_selection_item in googlesql.tm.
+func (p *parser) parseSelectColumnOrDotStar() (*ast.SelectColumn, error) {
 	p.allowDotStar = true
+	p.dotStarTarget = nil
 	expr, err := p.parseOr()
 	p.allowDotStar = false
 	if err != nil {
 		return nil, err
 	}
 	if p.peek().Kind == token.DOT && p.peekAt(1).Kind == token.STAR {
+		if expr != p.dotStarTarget {
+			// ".*" binds more tightly than any binary operator, so it
+			// cannot apply to a larger expression (e.g. "1+x.*").
+			return nil, p.errorf(p.peekAt(1).Pos, `Syntax error: Unexpected "*"`)
+		}
 		p.advance() // .
 		star := p.advance()
 		start := p.extStart(expr)
@@ -2488,9 +2510,14 @@ func (p *parser) parseLimitOffset() (*ast.LimitOffset, error) {
 //	primary
 func (p *parser) parseExpression() (ast.Node, error) {
 	// A nested expression (function argument, parenthesized expression,
-	// subscript, ...) can never end at a select column's ".*".
+	// subscript, ...) can never end at a select column's ".*". The flag is
+	// restored afterwards so that a parenthesized expression can itself be
+	// followed by ".*" (e.g. "select (1+x).*").
+	saved := p.allowDotStar
 	p.allowDotStar = false
-	return p.parseOr()
+	expr, err := p.parseOr()
+	p.allowDotStar = saved
+	return expr, err
 }
 
 func (p *parser) parseOr() (ast.Node, error) {
@@ -2990,6 +3017,12 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 		case token.DOT:
 			next := p.peekAt(1)
 			if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+				if next.Kind == token.STAR && p.allowDotStar {
+					// Stop in front of a select column's ".*" and record
+					// which expression it binds to; see
+					// select_column_dot_star in googlesql.tm.
+					p.dotStarTarget = expr
+				}
 				return expr, nil
 			}
 			p.advance() // .
@@ -3385,7 +3418,8 @@ func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 	windowSpec := &ast.WindowSpecification{Span: span(lparen.Pos, 0)}
 	tok = p.peek()
 	if (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok) &&
-		!isKeyword(tok, "PARTITION") && !isKeyword(tok, "ORDER") {
+		!isKeyword(tok, "PARTITION") && !isKeyword(tok, "ORDER") &&
+		!isKeyword(tok, "ROWS") && !isKeyword(tok, "RANGE") {
 		windowSpec.Name = p.parseIdentifierToken(p.advance())
 	}
 	if isKeyword(p.peek(), "PARTITION") {
@@ -3402,12 +3436,104 @@ func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 		}
 		windowSpec.OrderBy = orderBy
 	}
+	if isKeyword(p.peek(), "ROWS") || isKeyword(p.peek(), "RANGE") {
+		frame, err := p.parseWindowFrame()
+		if err != nil {
+			return nil, err
+		}
+		windowSpec.WindowFrame = frame
+	}
 	rparen, err := p.expect(token.RPAREN, `")"`)
 	if err != nil {
 		return nil, err
 	}
 	windowSpec.Stop = rparen.End
 	return windowSpec, nil
+}
+
+// parseWindowFrame parses "ROWS|RANGE window_frame_bound" or
+// "ROWS|RANGE BETWEEN window_frame_bound AND window_frame_bound"; see
+// window_frame_clause in googlesql.tm.
+func (p *parser) parseWindowFrame() (*ast.WindowFrame, error) {
+	unitTok := p.advance() // ROWS or RANGE
+	frame := &ast.WindowFrame{Span: span(unitTok.Pos, 0), Unit: strings.ToUpper(unitTok.Image)}
+	if isKeyword(p.peek(), "BETWEEN") {
+		p.advance()
+		low, err := p.parseWindowFrameExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("AND"); err != nil {
+			return nil, err
+		}
+		high, err := p.parseWindowFrameExpr()
+		if err != nil {
+			return nil, err
+		}
+		frame.StartExpr, frame.EndExpr = low, high
+		frame.Stop = high.End()
+	} else {
+		bound, err := p.parseWindowFrameExpr()
+		if err != nil {
+			return nil, err
+		}
+		frame.StartExpr = bound
+		frame.Stop = bound.End()
+	}
+	return frame, nil
+}
+
+// parseWindowFrameExpr parses a window frame boundary: "UNBOUNDED
+// PRECEDING/FOLLOWING", "CURRENT ROW" or "expression PRECEDING/FOLLOWING";
+// see window_frame_bound in googlesql.tm.
+func (p *parser) parseWindowFrameExpr() (*ast.WindowFrameExpr, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "UNBOUNDED"):
+		p.advance()
+		dir, err := p.parsePrecedingOrFollowing()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.WindowFrameExpr{
+			Span:         span(tok.Pos, dir.End),
+			BoundaryType: "UNBOUNDED " + strings.ToUpper(dir.Image),
+		}, nil
+	case isKeyword(tok, "CURRENT"):
+		p.advance()
+		rowTok, err := p.expectKeyword("ROW")
+		if err != nil {
+			return nil, err
+		}
+		return &ast.WindowFrameExpr{
+			Span:         span(tok.Pos, rowTok.End),
+			BoundaryType: "CURRENT ROW",
+		}, nil
+	default:
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		dir, err := p.parsePrecedingOrFollowing()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.WindowFrameExpr{
+			Span:         span(p.extStart(expr), dir.End),
+			BoundaryType: "OFFSET " + strings.ToUpper(dir.Image),
+			Expression:   expr,
+		}, nil
+	}
+}
+
+// parsePrecedingOrFollowing parses the PRECEDING or FOLLOWING keyword after
+// a window frame boundary; see preceding_or_following in googlesql.tm.
+func (p *parser) parsePrecedingOrFollowing() (token.Token, error) {
+	tok := p.peek()
+	if !isKeyword(tok, "PRECEDING") && !isKeyword(tok, "FOLLOWING") {
+		return token.Token{}, p.errorf(tok.Pos, "Syntax error: Expected keyword FOLLOWING or keyword PRECEDING but got %s", describeToken(tok))
+	}
+	return p.advance(), nil
 }
 
 // parsePartitionBy parses "PARTITION [hint] BY expression, ..."; see
@@ -3445,15 +3571,13 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 	if isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
-	// Only the first path expression of a select column may stop before a
-	// ".*"; consume the flag so later paths (e.g. the right operand of a
-	// binary expression) report the usual error.
-	allowDotStar := p.allowDotStar
-	p.allowDotStar = false
 	first := p.parseIdentifierToken(p.advance())
 	path := &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
 	for p.peek().Kind == token.DOT {
-		if allowDotStar && p.peekAt(1).Kind == token.STAR {
+		// In a select column a path may stop before a ".*"; parsePostfix
+		// records it as the dot-star target. A path that is not the whole
+		// column expression fails the target check there instead.
+		if p.allowDotStar && p.peekAt(1).Kind == token.STAR {
 			return path, nil
 		}
 		p.advance()
