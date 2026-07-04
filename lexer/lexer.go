@@ -330,6 +330,7 @@ func (l *lexer) str(start int, raw, bytes bool) (token.Token, error) {
 	} else {
 		l.pos++
 	}
+	contentStart := l.pos
 	for l.pos < len(l.sql) {
 		c := l.sql[l.pos]
 		if c == '\\' && !raw {
@@ -345,11 +346,19 @@ func (l *lexer) str(start int, raw, bytes bool) (token.Token, error) {
 		if c == quote {
 			if triple {
 				if l.pos+3 <= len(l.sql) && l.sql[l.pos+1] == quote && l.sql[l.pos+2] == quote {
+					contentEnd := l.pos
+					if err := l.checkStringUTF8(contentStart, contentEnd, bytes); err != nil {
+						return token.Token{}, err
+					}
 					l.pos += 3
 					return l.emitStr(start, bytes), nil
 				}
 				l.pos++
 				continue
+			}
+			contentEnd := l.pos
+			if err := l.checkStringUTF8(contentStart, contentEnd, bytes); err != nil {
+				return token.Token{}, err
 			}
 			l.pos++
 			return l.emitStr(start, bytes), nil
@@ -360,6 +369,58 @@ func (l *lexer) str(start int, raw, bytes bool) (token.Token, error) {
 		l.pos++
 	}
 	return token.Token{}, l.unclosedError(start, raw, bytes, triple)
+}
+
+// checkStringUTF8 validates that the content of a (non-bytes) string literal is
+// structurally well-formed UTF-8. Bytes literals are exempt. Ported from the
+// UTF8 check in CUnescapeInternal in googlesql/public/strings.cc.
+func (l *lexer) checkStringUTF8(contentStart, contentEnd int, bytes bool) error {
+	if bytes {
+		return nil
+	}
+	content := l.sql[contentStart:contentEnd]
+	span := spanWellFormedUTF8(content)
+	if span >= len(content) {
+		return nil
+	}
+	return l.errorf(contentStart+span,
+		"Syntax error: Structurally invalid UTF8 string: %s", escapeBytes(content))
+}
+
+// spanWellFormedUTF8 returns the length in bytes of the longest prefix of s that
+// is structurally valid UTF-8.
+func spanWellFormedUTF8(s string) int {
+	i := 0
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			return i
+		}
+		i += size
+	}
+	return i
+}
+
+// escapeBytes renders bytes the way EscapeBytes does in
+// googlesql/public/strings.cc with escape_all_bytes=false and no quote char:
+// non-printable bytes become \xHH, backslash is doubled, other bytes pass
+// through.
+func escapeBytes(s string) string {
+	var b strings.Builder
+	const hexdigits = "0123456789abcdef"
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c > 0x7e {
+			b.WriteString(`\x`)
+			b.WriteByte(hexdigits[c>>4])
+			b.WriteByte(hexdigits[c&0xf])
+		} else if c == '\\' {
+			b.WriteString(`\\`)
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // unclosedError builds a "Syntax error: Unclosed ..." message matching
