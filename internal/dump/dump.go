@@ -95,6 +95,23 @@ func nodeString(n ast.Node) string {
 		return "OrderingExpression(ASC)"
 	case *ast.LimitOffset:
 		return "LimitOffset"
+	case *ast.Limit:
+		return "Limit"
+	case *ast.LimitAll:
+		return "LimitAll"
+	case *ast.AlterStatement:
+		if t.IsIfExists {
+			return t.NodeName + "(is_if_exists)"
+		}
+		return t.NodeName
+	case *ast.AlterActionList:
+		return "AlterActionList"
+	case *ast.SetOptionsAction:
+		return "SetOptionsAction"
+	case *ast.OptionsList:
+		return "OptionsList"
+	case *ast.OptionsEntry:
+		return "OptionsEntry"
 	case *ast.Identifier:
 		return fmt.Sprintf("Identifier(%s)", t.Name)
 	case *ast.PathExpression:

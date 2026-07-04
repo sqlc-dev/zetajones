@@ -229,13 +229,31 @@ func (n *OrderingExpression) Children() []Node {
 // LimitOffset is a LIMIT [OFFSET] clause.
 type LimitOffset struct {
 	Span
-	Limit  Node `json:"limit"`
-	Offset Node `json:"offset,omitempty"`
+	Limit  *Limit `json:"limit"`
+	Offset Node   `json:"offset,omitempty"`
 }
 
 func (n *LimitOffset) Children() []Node {
 	return children(n.Limit, n.Offset)
 }
+
+// Limit wraps the expression (or ALL) of a LIMIT clause, including the LIMIT
+// keyword in its location.
+type Limit struct {
+	Span
+	Expr Node `json:"expr"` // expression, or *LimitAll for LIMIT ALL
+}
+
+func (n *Limit) Children() []Node {
+	return children(n.Expr)
+}
+
+// LimitAll is the ALL keyword in LIMIT ALL.
+type LimitAll struct {
+	Span
+}
+
+func (n *LimitAll) Children() []Node { return nil }
 
 // Identifier is a single (possibly quoted) identifier.
 type Identifier struct {
@@ -448,6 +466,71 @@ type PipeSetItem struct {
 
 func (n *PipeSetItem) Children() []Node {
 	return children(n.Column, n.Expr)
+}
+
+// AlterStatement is an ALTER <object kind> statement. NodeName holds the
+// per-object-kind parse tree node name (e.g. "AlterTableStatement",
+// "AlterViewStatement"), matching the distinct ASTAlter*Statement node
+// classes in the reference implementation.
+type AlterStatement struct {
+	Span
+	NodeName   string           `json:"node_name"`
+	IsIfExists bool             `json:"is_if_exists,omitempty"`
+	Path       *PathExpression  `json:"path"`
+	Actions    *AlterActionList `json:"actions"`
+}
+
+func (n *AlterStatement) statementNode() {}
+func (n *AlterStatement) Children() []Node {
+	return children(n.Path, n.Actions)
+}
+
+// AlterActionList is the comma-separated list of actions in an ALTER
+// statement.
+type AlterActionList struct {
+	Span
+	Actions []Node `json:"actions"`
+}
+
+func (n *AlterActionList) Children() []Node {
+	return append([]Node(nil), n.Actions...)
+}
+
+// SetOptionsAction is a SET OPTIONS (...) alter action.
+type SetOptionsAction struct {
+	Span
+	Options *OptionsList `json:"options"`
+}
+
+func (n *SetOptionsAction) Children() []Node {
+	return children(n.Options)
+}
+
+// OptionsList is a parenthesized list of name = value options.
+type OptionsList struct {
+	Span
+	Entries []*OptionsEntry `json:"entries"`
+}
+
+func (n *OptionsList) Children() []Node {
+	var out []Node
+	for _, e := range n.Entries {
+		out = append(out, e)
+	}
+	return out
+}
+
+// OptionsEntry is a single "name <op> value" entry in an options list. Op is
+// "=", "+=", or "-=".
+type OptionsEntry struct {
+	Span
+	Name  *Identifier `json:"name"`
+	Op    string      `json:"op"`
+	Value Node        `json:"value"`
+}
+
+func (n *OptionsEntry) Children() []Node {
+	return children(n.Name, n.Value)
 }
 
 // FunctionCall is a function call expression.

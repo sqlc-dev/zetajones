@@ -1,7 +1,6 @@
 {
   "parse_todo": {
     "case_1": true,
-    "case_10": true,
     "case_11": true,
     "case_13": true,
     "case_14": true,
@@ -38,12 +37,7 @@
     "case_42": true,
     "case_43": true,
     "case_44": true,
-    "case_47": true,
-    "case_48": true,
-    "case_49": true,
     "case_5": true,
-    "case_50": true,
-    "case_51": true,
     "case_52": true,
     "case_53": true,
     "case_54": true,

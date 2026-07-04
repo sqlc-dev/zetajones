@@ -198,8 +198,207 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 			return nil, err
 		}
 		return &ast.QueryStatement{Span: span(query.Pos(), query.End()), Query: query}, nil
+	case isKeyword(tok, "ALTER"):
+		return p.parseAlterStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseAlterStatement parses ALTER <schema object kind> [IF EXISTS] <path>
+// <alter action list>; see alter_statement in googlesql.tm. Object kinds the
+// reference grammar recognizes but does not support for ALTER (for example
+// ALTER FUNCTION) are diagnosed only after the whole statement parses,
+// matching the reference, which raises the error in the rule's reduce action.
+func (p *parser) parseAlterStatement() (ast.Statement, error) {
+	alterTok := p.advance() // ALTER
+	kindTok := p.peek()
+	var nodeName string    // parse tree node name for supported kinds
+	var unsupported string // schema object kind name for unsupported kinds
+	consumeSecond := func() { p.advance(); p.advance() }
+	second := p.peekAt(1)
+	switch {
+	case isKeyword(kindTok, "TABLE") && isKeyword(second, "FUNCTION"):
+		consumeSecond()
+		unsupported = "TABLE FUNCTION"
+	case isKeyword(kindTok, "TABLE"):
+		p.advance()
+		nodeName = "AlterTableStatement"
+	case isKeyword(kindTok, "VIEW"):
+		p.advance()
+		nodeName = "AlterViewStatement"
+	case isKeyword(kindTok, "MATERIALIZED") && isKeyword(second, "VIEW"):
+		consumeSecond()
+		nodeName = "AlterMaterializedViewStatement"
+	case isKeyword(kindTok, "APPROX") && isKeyword(second, "VIEW"):
+		consumeSecond()
+		nodeName = "AlterApproxViewStatement"
+	case isKeyword(kindTok, "MODEL"):
+		p.advance()
+		nodeName = "AlterModelStatement"
+	case isKeyword(kindTok, "DATABASE"):
+		p.advance()
+		nodeName = "AlterDatabaseStatement"
+	case isKeyword(kindTok, "SCHEMA"):
+		p.advance()
+		nodeName = "AlterSchemaStatement"
+	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "SCHEMA"):
+		consumeSecond()
+		nodeName = "AlterExternalSchemaStatement"
+	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "TABLE"):
+		consumeSecond()
+		unsupported = "EXTERNAL TABLE"
+	case isKeyword(kindTok, "SEQUENCE"):
+		p.advance()
+		nodeName = "AlterSequenceStatement"
+	case isKeyword(kindTok, "CONNECTION"):
+		p.advance()
+		nodeName = "AlterConnectionStatement"
+	case isKeyword(kindTok, "AGGREGATE") && isKeyword(second, "FUNCTION"):
+		consumeSecond()
+		unsupported = "AGGREGATE FUNCTION"
+	case isKeyword(kindTok, "CONSTANT"):
+		p.advance()
+		unsupported = "CONSTANT"
+	case isKeyword(kindTok, "FUNCTION"):
+		p.advance()
+		unsupported = "FUNCTION"
+	case isKeyword(kindTok, "INDEX"):
+		p.advance()
+		unsupported = "INDEX"
+	case isKeyword(kindTok, "PROCEDURE"):
+		p.advance()
+		unsupported = "PROCEDURE"
+	case isKeyword(kindTok, "PROPERTY") && isKeyword(second, "GRAPH"):
+		consumeSecond()
+		unsupported = "PROPERTY GRAPH"
+	default:
+		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
+	}
+
+	stmt := &ast.AlterStatement{Span: span(alterTok.Pos, 0), NodeName: nodeName}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "EXISTS") {
+		p.advance()
+		p.advance()
+		stmt.IsIfExists = true
+	}
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Path = path
+	actions, err := p.parseAlterActionList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Actions = actions
+	stmt.Stop = actions.End()
+	if unsupported != "" {
+		// No "Syntax error: " prefix; see alter_statement in googlesql.tm.
+		return nil, p.errorf(kindTok.Pos, "ALTER %s is not supported", unsupported)
+	}
+	return stmt, nil
+}
+
+// parseAlterActionList parses one or more comma-separated alter actions.
+func (p *parser) parseAlterActionList() (*ast.AlterActionList, error) {
+	first, err := p.parseAlterAction()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.AlterActionList{Span: span(first.Pos(), first.End()), Actions: []ast.Node{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance()
+		action, err := p.parseAlterAction()
+		if err != nil {
+			return nil, err
+		}
+		list.Actions = append(list.Actions, action)
+		list.Stop = action.End()
+	}
+	return list, nil
+}
+
+// parseAlterAction parses a single alter action; see alter_action in
+// googlesql.tm. Only SET OPTIONS is implemented so far.
+func (p *parser) parseAlterAction() (ast.Node, error) {
+	tok := p.peek()
+	if !isKeyword(tok, "SET") {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	setTok := p.advance()
+	next := p.peek()
+	if !isKeyword(next, "OPTIONS") {
+		return nil, p.errorf(next.Pos, "Syntax error: Expected keyword AS or keyword DEFAULT or keyword ON or keyword OPTIONS but got %s", describeToken(next))
+	}
+	p.advance() // OPTIONS
+	opts, err := p.parseOptionsList()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.SetOptionsAction{Span: span(setTok.Pos, opts.End()), Options: opts}, nil
+}
+
+// parseOptionsList parses "( [options_entry, ...] )".
+func (p *parser) parseOptionsList() (*ast.OptionsList, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.OptionsList{Span: span(lparen.Pos, 0)}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			entry, err := p.parseOptionsEntry()
+			if err != nil {
+				return nil, err
+			}
+			list.Entries = append(list.Entries, entry)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
+}
+
+// parseOptionsEntry parses "identifier (=|+=|-=) expression".
+func (p *parser) parseOptionsEntry() (*ast.OptionsEntry, error) {
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	name := p.parseIdentifierToken(p.advance())
+	var op string
+	switch {
+	case p.peek().Kind == token.EQ:
+		p.advance()
+		op = "="
+	// The lexer has no dedicated += / -= tokens yet; recognize the adjacent
+	// two-token forms.
+	case p.peek().Kind == token.PLUS && p.peekAt(1).Kind == token.EQ && p.peek().End == p.peekAt(1).Pos:
+		p.advance()
+		p.advance()
+		op = "+="
+	case p.peek().Kind == token.MINUS && p.peekAt(1).Kind == token.EQ && p.peek().End == p.peekAt(1).Pos:
+		p.advance()
+		p.advance()
+		op = "-="
+	default:
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "=" but got %s`, describeToken(p.peek()))
+	}
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.OptionsEntry{Span: span(name.Pos(), value.End()), Name: name, Op: op, Value: value}, nil
 }
 
 func (p *parser) parseQuery() (*ast.Query, error) {
@@ -546,9 +745,19 @@ func (p *parser) parseLimitOffset() (*ast.LimitOffset, error) {
 	if err != nil {
 		return nil, err
 	}
-	limit, err := p.parseExpression()
-	if err != nil {
-		return nil, err
+	// The LIMIT keyword is included in the wrapping Limit node's location;
+	// see limit_expression and limit_all in googlesql.tm.
+	var limit *ast.Limit
+	if isKeyword(p.peek(), "ALL") {
+		allTok := p.advance()
+		all := &ast.LimitAll{Span: span(allTok.Pos, allTok.End)}
+		limit = &ast.Limit{Span: span(limitTok.Pos, allTok.End), Expr: all}
+	} else {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		limit = &ast.Limit{Span: span(limitTok.Pos, expr.End()), Expr: expr}
 	}
 	node := &ast.LimitOffset{Span: span(limitTok.Pos, limit.End()), Limit: limit}
 	if isKeyword(p.peek(), "OFFSET") {
