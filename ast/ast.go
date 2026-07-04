@@ -930,6 +930,37 @@ func (n *StructConstructorWithParens) Children() []Node {
 	return children(n.FieldExpressions...)
 }
 
+// StructConstructorArg is one "expression [AS alias]" argument of a
+// keyword-form struct constructor; see ASTStructConstructorArg in
+// parse_tree.h. The alias requires the AS keyword (see
+// as_alias_with_required_as in googlesql.tm).
+type StructConstructorArg struct {
+	Span
+	Expression Node   `json:"expression"`
+	Alias      *Alias `json:"alias,omitempty"`
+}
+
+func (n *StructConstructorArg) Children() []Node {
+	return children(n.Expression, n.Alias)
+}
+
+// StructConstructorWithKeyword is "STRUCT(...)" or "STRUCT<...>(...)"; see
+// ASTStructConstructorWithKeyword in parse_tree.h. StructType is nil for the
+// typeless "STRUCT(...)" form.
+type StructConstructorWithKeyword struct {
+	Span
+	StructType *StructType             `json:"struct_type,omitempty"`
+	Fields     []*StructConstructorArg `json:"fields,omitempty"`
+}
+
+func (n *StructConstructorWithKeyword) Children() []Node {
+	out := children(n.StructType)
+	for _, f := range n.Fields {
+		out = append(out, f)
+	}
+	return out
+}
+
 // FromQuery is a standalone FROM clause used as a query, e.g. "FROM t";
 // see ASTFromQuery in googlesql/parser/parse_tree.h.
 type FromQuery struct {
@@ -1157,11 +1188,12 @@ func (n *OptionsEntry) Children() []Node {
 type ExpressionSubquery struct {
 	Span
 	Modifier string `json:"modifier,omitempty"`
+	Hint     *Hint  `json:"hint,omitempty"`
 	Query    *Query `json:"query"`
 }
 
 func (n *ExpressionSubquery) Children() []Node {
-	return children(n.Query)
+	return children(n.Hint, n.Query)
 }
 
 // CaseValueExpression is "CASE value WHEN ... THEN ... [ELSE ...] END"; see

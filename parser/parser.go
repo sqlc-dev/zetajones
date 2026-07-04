@@ -446,7 +446,7 @@ var reservedKeywords = map[string]bool{
 	"LIMIT": true, "LOOKUP": true, "NATURAL": true, "NOT": true, "NULL": true,
 	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
-	"RIGHT": true, "SELECT": true, "SET": true,
+	"RIGHT": true, "SELECT": true, "SET": true, "STRUCT": true,
 	"TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
 	"WITH": true,
 }
@@ -1665,7 +1665,7 @@ func startsExpression(tok token.Token) bool {
 			return true
 		}
 		switch strings.ToUpper(tok.Image) {
-		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE":
+		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "STRUCT":
 			return true
 		}
 	}
@@ -1957,7 +1957,9 @@ func (p *parser) parseOptionalAlias() (*ast.Alias, error) {
 		return &ast.Alias{Span: span(start, ident.End()), Identifier: ident}, nil
 	}
 	if hasAs {
-		return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+		// The reference LALR parser reports a generic error after "AS"
+		// rather than "Expected identifier".
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	return nil, nil
 }
@@ -3217,9 +3219,23 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LPAREN:
 			p.advance() // ARRAY; the subquery's span starts at the keyword.
 			return p.parseModifiedSubquery(tok.Pos, "ARRAY")
-		case isKeyword(tok, "EXISTS") && p.peekAt(1).Kind == token.LPAREN:
+		case isKeyword(tok, "EXISTS") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.ATSIGN):
+			// EXISTS takes an optional hint before the subquery; see
+			// expression_subquery_with_keyword in googlesql.tm.
 			p.advance() // EXISTS; the subquery's span starts at the keyword.
-			return p.parseModifiedSubquery(tok.Pos, "EXISTS")
+			hint, err := p.parseOptionalHint()
+			if err != nil {
+				return nil, err
+			}
+			node, err := p.parseModifiedSubquery(tok.Pos, "EXISTS")
+			if err != nil {
+				return nil, err
+			}
+			node.(*ast.ExpressionSubquery).Hint = hint
+			return node, nil
+		case isKeyword(tok, "STRUCT") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.LT ||
+			(p.peekAt(1).Kind == token.NEQ && p.peekAt(1).Image == "<>")):
+			return p.parseStructConstructorWithKeyword()
 		case isKeyword(tok, "CASE"):
 			return p.parseCaseExpression()
 		case isReserved(tok):
@@ -3314,6 +3330,67 @@ func (p *parser) parseParenthesizedExpression() (ast.Node, error) {
 	// enclosing productions span them (see parser.extents).
 	p.setExtent(expr, lparen.Pos, rparen.End)
 	return expr, nil
+}
+
+// parseStructConstructorWithKeyword parses "STRUCT( args )" or
+// "STRUCT<...>( args )" with the STRUCT keyword as the next token; see
+// struct_constructor_prefix_with_keyword in googlesql.tm.
+func (p *parser) parseStructConstructorWithKeyword() (ast.Node, error) {
+	start := p.peek().Pos
+	s := &ast.StructConstructorWithKeyword{Span: span(start, 0)}
+	if p.peekAt(1).Kind != token.LPAREN {
+		typ, err := p.parseStructType()
+		if err != nil {
+			return nil, err
+		}
+		s.StructType = typ
+	} else {
+		p.advance() // STRUCT
+	}
+	// After a struct type the reference parser can also start a braced
+	// constructor, so its error message offers "{" too.
+	if _, err := p.expect(token.LPAREN, `"(" or "{"`); err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			arg, err := p.parseStructConstructorArg()
+			if err != nil {
+				return nil, err
+			}
+			s.Fields = append(s.Fields, arg)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")" or ","`)
+	if err != nil {
+		return nil, err
+	}
+	s.Stop = rparen.End
+	return s, nil
+}
+
+// parseStructConstructorArg parses "expression [AS alias]"; the alias
+// requires the AS keyword. See struct_constructor_arg and
+// as_alias_with_required_as in googlesql.tm.
+func (p *parser) parseStructConstructorArg() (*ast.StructConstructorArg, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	arg := &ast.StructConstructorArg{Span: span(expr.Pos(), expr.End()), Expression: expr}
+	if isKeyword(p.peek(), "AS") {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		arg.Alias = alias
+		arg.Stop = alias.End()
+	}
+	return arg, nil
 }
 
 // parseArrayConstructor parses "[ [expression, ...] ]" with the opening
@@ -3907,8 +3984,15 @@ func (p *parser) parseRawType() (ast.Node, error) {
 	return &ast.SimpleType{Span: span(path.Pos(), path.End()), Name: path}, nil
 }
 
-// expectTemplateOpen consumes the "<" opening a template type.
+// expectTemplateOpen consumes the "<" opening a template type. A "<>" token
+// (as in the empty "STRUCT<>") is split so its ">" can close the template
+// type; the reference lexer emits separate tokens in template contexts.
 func (p *parser) expectTemplateOpen() (token.Token, error) {
+	tok := p.peek()
+	if tok.Kind == token.NEQ && tok.Image == "<>" {
+		p.toks[p.pos] = token.Token{Kind: token.GT, Image: ">", Pos: tok.Pos + 1, End: tok.End}
+		return token.Token{Kind: token.LT, Image: "<", Pos: tok.Pos, End: tok.Pos + 1}, nil
+	}
 	return p.expect(token.LT, `"<"`)
 }
 
