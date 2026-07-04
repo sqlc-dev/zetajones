@@ -3379,6 +3379,29 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 			p.advance()
 		}
 	}
+	// clamped_between_modifier in googlesql.tm. It requires at least one
+	// argument; with no arguments, CLAMPED parses as an identifier inside
+	// the first argument expression.
+	if len(call.Args) > 0 && isKeyword(p.peek(), "CLAMPED") && isKeyword(p.peekAt(1), "BETWEEN") {
+		clampedTok := p.advance()
+		p.advance() // consume BETWEEN
+		low, err := p.parseBitwiseOr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("AND"); err != nil {
+			return nil, err
+		}
+		high, err := p.parseBitwiseOr()
+		if err != nil {
+			return nil, err
+		}
+		call.ClampedBetween = &ast.ClampedBetweenModifier{
+			Span: span(clampedTok.Pos, p.extEnd(high)),
+			Low:  low,
+			High: high,
+		}
+	}
 	rparen, err := p.expect(token.RPAREN, `")"`)
 	if err != nil {
 		return nil, err

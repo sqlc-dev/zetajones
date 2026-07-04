@@ -849,6 +849,19 @@ func (n *BetweenExpression) Children() []Node {
 	return children(n.Lhs, n.BetweenLocation, n.Low, n.High)
 }
 
+// ClampedBetweenModifier is the "CLAMPED BETWEEN <low> AND <high>" modifier
+// on aggregate function calls; see ASTClampedBetweenModifier in
+// googlesql/parser/parse_tree.h.
+type ClampedBetweenModifier struct {
+	Span
+	Low  Node `json:"low"`
+	High Node `json:"high"`
+}
+
+func (n *ClampedBetweenModifier) Children() []Node {
+	return children(n.Low, n.High)
+}
+
 // InList is the parenthesized value list of an IN or LIKE ANY/SOME/ALL
 // expression; see ASTInList in googlesql/parser/parse_tree.h. Its location
 // covers the expressions but not the enclosing parentheses (except for a
@@ -1223,14 +1236,18 @@ func (n *CreateTableStatement) Children() []Node {
 // FunctionCall is a function call expression.
 type FunctionCall struct {
 	Span
-	Function *PathExpression `json:"function"`
-	Args     []Node          `json:"args"`
-	Distinct bool            `json:"distinct,omitempty"`
+	Function       *PathExpression         `json:"function"`
+	Args           []Node                  `json:"args"`
+	Distinct       bool                    `json:"distinct,omitempty"`
+	ClampedBetween *ClampedBetweenModifier `json:"clamped_between_modifier,omitempty"`
 }
 
 func (n *FunctionCall) Children() []Node {
 	out := children(n.Function)
 	out = append(out, n.Args...)
+	if n.ClampedBetween != nil {
+		out = append(out, n.ClampedBetween)
+	}
 	return out
 }
 
