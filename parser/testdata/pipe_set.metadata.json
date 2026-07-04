@@ -1,7 +1,4 @@
 {
-  "parse_todo": {
-    "case_7": true
-  },
   "alternations": {
     "case_1": true,
     "case_2": true,

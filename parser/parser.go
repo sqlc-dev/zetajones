@@ -115,11 +115,38 @@ func (p *parser) errorf(offset int, format string, args ...any) error {
 	return &Error{Message: fmt.Sprintf(format, args...), Offset: offset, SQL: p.sql}
 }
 
+// describeToken renders a token for an error message the same way the
+// reference implementation does; see MakeSyntaxErrorAtToken in
+// googlesql/parser/parser_internal.cc.
 func describeToken(tok token.Token) string {
-	if tok.Kind == token.EOF {
-		return "end of input"
+	switch tok.Kind {
+	case token.EOF:
+		return "end of statement"
+	case token.IDENT:
+		if keywordNames[strings.ToLower(tok.Image)] {
+			return "keyword " + strings.ToUpper(tok.Image)
+		}
+		return fmt.Sprintf("identifier \"%s\"", tok.Image)
+	case token.QUOTED_IDENT:
+		// Don't put extra quotes around an already-backquoted identifier.
+		return "identifier " + tok.Image
+	case token.INT:
+		return fmt.Sprintf("integer literal \"%s\"", tok.Image)
+	case token.FLOAT:
+		return fmt.Sprintf("floating point literal \"%s\"", tok.Image)
+	case token.STRING:
+		return "string literal " + escapeTokenNewlines(tok.Image)
+	case token.BYTES:
+		return "bytes literal " + escapeTokenNewlines(tok.Image)
 	}
 	return fmt.Sprintf("%q", tok.Image)
+}
+
+// escapeTokenNewlines escapes physical newlines to avoid multi-line error
+// messages, matching the reference implementation.
+func escapeTokenNewlines(s string) string {
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	return strings.ReplaceAll(s, "\n", `\n`)
 }
 
 // isKeyword reports whether tok is the given keyword (case-insensitive).
@@ -198,7 +225,99 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 		query.Limit = limit
 		query.Stop = limit.End()
 	}
+	for p.peek().Kind == token.PIPE_INPUT {
+		op, err := p.parsePipeOperator()
+		if err != nil {
+			return nil, err
+		}
+		query.PipeOperators = append(query.PipeOperators, op)
+		query.Stop = op.End()
+	}
 	return query, nil
+}
+
+// parsePipeOperator parses one "|> <operator>" pipe operator.
+func (p *parser) parsePipeOperator() (ast.Node, error) {
+	pipeTok := p.advance() // |>
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "WHERE"):
+		where, err := p.parseWhereClause()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.PipeWhere{Span: span(pipeTok.Pos, where.End()), Where: where}, nil
+	case isKeyword(tok, "ORDER"):
+		orderBy, err := p.parseOrderBy()
+		if err != nil {
+			return nil, err
+		}
+		node := &ast.PipeOrderBy{Span: span(pipeTok.Pos, orderBy.End()), OrderBy: orderBy}
+		// Pipe ORDER BY allows a trailing comma.
+		if p.peek().Kind == token.COMMA {
+			comma := p.advance()
+			node.Stop = comma.End
+		}
+		return node, nil
+	case isKeyword(tok, "SET"):
+		return p.parsePipeSet(pipeTok)
+	}
+	// The reference grammar's recovery point for an unrecognized pipe
+	// operator is the JOIN inside pipe_join.
+	return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword JOIN but got %s", describeToken(tok))
+}
+
+// parsePipeSet parses "SET column = expression, ..." after a |> token,
+// including an optional trailing comma.
+func (p *parser) parsePipeSet(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // SET
+	node := &ast.PipeSet{Span: span(pipeTok.Pos, 0)}
+	for {
+		tok := p.peek()
+		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		ident := p.parseIdentifierToken(p.advance())
+		if p.peek().Kind == token.DOT {
+			return nil, p.errorf(ident.Pos(), "Syntax error: Pipe SET can only update columns by column name alone; Setting columns under table aliases or fields under paths is not supported")
+		}
+		if p.peek().Kind != token.EQ {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "." or "=" but got %s`, describeToken(p.peek()))
+		}
+		p.advance() // =
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		item := &ast.PipeSetItem{Span: span(ident.Pos(), expr.End()), Column: ident, Expr: expr}
+		node.Items = append(node.Items, item)
+		node.Stop = item.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		next := p.peek()
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			// Trailing comma; it is included in the operator's location.
+			node.Stop = comma.End
+			break
+		}
+	}
+	return node, nil
+}
+
+// parseWhereClause parses "WHERE expression"; the WHERE keyword is included
+// in the clause's location.
+func (p *parser) parseWhereClause() (*ast.WhereClause, error) {
+	whereTok, err := p.expectKeyword("WHERE")
+	if err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.WhereClause{Span: span(whereTok.Pos, expr.End()), Expr: expr}, nil
 }
 
 func (p *parser) parseSelect() (*ast.Select, error) {
@@ -231,13 +350,12 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		sel.Stop = from.End()
 	}
 	if isKeyword(p.peek(), "WHERE") {
-		p.advance()
-		expr, err := p.parseExpression()
+		where, err := p.parseWhereClause()
 		if err != nil {
 			return nil, err
 		}
-		sel.Where = &ast.WhereClause{Span: span(expr.Pos(), expr.End()), Expr: expr}
-		sel.Stop = expr.End()
+		sel.Where = where
+		sel.Stop = where.End()
 	}
 	if isKeyword(p.peek(), "GROUP") {
 		groupBy, err := p.parseGroupBy()

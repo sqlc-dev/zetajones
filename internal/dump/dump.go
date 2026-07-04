@@ -133,6 +133,14 @@ func nodeString(n ast.Node) string {
 			return "BetweenExpression(NOT BETWEEN)"
 		}
 		return "BetweenExpression(BETWEEN)"
+	case *ast.PipeWhere:
+		return "PipeWhere"
+	case *ast.PipeOrderBy:
+		return "PipeOrderBy"
+	case *ast.PipeSet:
+		return "PipeSet"
+	case *ast.PipeSetItem:
+		return "PipeSetItem"
 	case *ast.FunctionCall:
 		if t.Distinct {
 			return "FunctionCall(distinct=true)"

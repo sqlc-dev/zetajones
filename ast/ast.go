@@ -62,16 +62,19 @@ func (n *QueryStatement) Children() []Node {
 	return children(n.Query)
 }
 
-// Query is a query expression with optional ORDER BY and LIMIT/OFFSET.
+// Query is a query expression with optional ORDER BY and LIMIT/OFFSET,
+// optionally followed by |> pipe operators.
 type Query struct {
 	Span
-	QueryExpr Node         `json:"query_expr"` // *Select, *SetOperation, or parenthesized *Query
-	OrderBy   *OrderBy     `json:"order_by,omitempty"`
-	Limit     *LimitOffset `json:"limit,omitempty"`
+	QueryExpr     Node         `json:"query_expr"` // *Select, *SetOperation, or parenthesized *Query
+	OrderBy       *OrderBy     `json:"order_by,omitempty"`
+	Limit         *LimitOffset `json:"limit,omitempty"`
+	PipeOperators []Node       `json:"pipe_operators,omitempty"`
 }
 
 func (n *Query) Children() []Node {
-	return children(n.QueryExpr, n.OrderBy, n.Limit)
+	out := children(n.QueryExpr, n.OrderBy, n.Limit)
+	return append(out, n.PipeOperators...)
 }
 
 // Select is a SELECT clause with its associated clauses.
@@ -399,6 +402,52 @@ type BetweenExpression struct {
 
 func (n *BetweenExpression) Children() []Node {
 	return children(n.Lhs, n.BetweenLocation, n.Low, n.High)
+}
+
+// PipeWhere is a |> WHERE pipe operator.
+type PipeWhere struct {
+	Span
+	Where *WhereClause `json:"where"`
+}
+
+func (n *PipeWhere) Children() []Node {
+	return children(n.Where)
+}
+
+// PipeOrderBy is a |> ORDER BY pipe operator.
+type PipeOrderBy struct {
+	Span
+	OrderBy *OrderBy `json:"order_by"`
+}
+
+func (n *PipeOrderBy) Children() []Node {
+	return children(n.OrderBy)
+}
+
+// PipeSet is a |> SET pipe operator.
+type PipeSet struct {
+	Span
+	Items []*PipeSetItem `json:"items"`
+}
+
+func (n *PipeSet) Children() []Node {
+	var out []Node
+	for _, item := range n.Items {
+		out = append(out, item)
+	}
+	return out
+}
+
+// PipeSetItem is a single "column = expression" assignment in a pipe SET
+// operator.
+type PipeSetItem struct {
+	Span
+	Column *Identifier `json:"column"`
+	Expr   Node        `json:"expr"`
+}
+
+func (n *PipeSetItem) Children() []Node {
+	return children(n.Column, n.Expr)
 }
 
 // FunctionCall is a function call expression.
