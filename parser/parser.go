@@ -319,6 +319,12 @@ type parser struct {
 	// tokens, including the parentheses. Keys are the inner expression
 	// nodes; values are the [start, end) offsets including parentheses.
 	extents map[ast.Node][2]int
+	// allowDotStar is set while parsing a select column expression, where a
+	// trailing ".*" may follow (see select_column_dot_star in googlesql.tm).
+	// It is consumed by the first path expression parsed and cleared when
+	// entering any nested expression, so that ".*" only ends the outermost
+	// postfix expression of the select column.
+	allowDotStar bool
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -1767,16 +1773,40 @@ func (p *parser) parseSelectList() (*ast.SelectList, error) {
 }
 
 func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {
-	var expr ast.Node
-	var err error
+	// "*" and "expression . *", with optional EXCEPT/REPLACE modifiers, are
+	// select column forms that cannot take an alias; see select_column_star
+	// and select_column_dot_star in googlesql.tm.
 	if p.peek().Kind == token.STAR {
 		star := p.advance()
-		expr = &ast.Star{Span: span(star.Pos, star.End), Image: star.Image}
-	} else {
-		expr, err = p.parseExpression()
+		var expr ast.Node = &ast.Star{Span: span(star.Pos, star.End), Image: star.Image}
+		mods, err := p.parseOptionalStarModifiers()
 		if err != nil {
 			return nil, err
 		}
+		if mods != nil {
+			expr = &ast.StarWithModifiers{Span: span(star.Pos, mods.End()), Modifiers: mods}
+		}
+		return &ast.SelectColumn{Span: span(expr.Pos(), expr.End()), Expr: expr}, nil
+	}
+	p.allowDotStar = true
+	expr, err := p.parseOr()
+	p.allowDotStar = false
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == token.DOT && p.peekAt(1).Kind == token.STAR {
+		p.advance() // .
+		star := p.advance()
+		start := p.extStart(expr)
+		var dotStar ast.Node = &ast.DotStar{Span: span(start, star.End), Expr: expr}
+		mods, err := p.parseOptionalStarModifiers()
+		if err != nil {
+			return nil, err
+		}
+		if mods != nil {
+			dotStar = &ast.DotStarWithModifiers{Span: span(start, mods.End()), Expr: expr, Modifiers: mods}
+		}
+		return &ast.SelectColumn{Span: span(dotStar.Pos(), dotStar.End()), Expr: dotStar}, nil
 	}
 	if err := p.checkAttachedAlias(); err != nil {
 		return nil, err
@@ -1791,6 +1821,81 @@ func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {
 		col.Stop = alias.End()
 	}
 	return col, nil
+}
+
+// parseOptionalStarModifiers parses [EXCEPT "(" identifier, ... ")"]
+// [REPLACE "(" expression AS identifier, ... ")"] after "*" or ".*",
+// returning nil when neither modifier is present; see star_modifiers in
+// googlesql.tm. EXCEPT only starts a modifier list when directly followed by
+// "(", mirroring the set operation disambiguation in the reference lexer
+// (see the KW_EXCEPT case in googlesql/parser/lookahead_transformer.cc).
+func (p *parser) parseOptionalStarModifiers() (*ast.StarModifiers, error) {
+	hasExcept := isKeyword(p.peek(), "EXCEPT") && p.peekAt(1).Kind == token.LPAREN
+	hasReplace := isKeyword(p.peek(), "REPLACE") && p.peekAt(1).Kind == token.LPAREN
+	if !hasExcept && !hasReplace {
+		return nil, nil
+	}
+	mods := &ast.StarModifiers{Span: span(p.peek().Pos, 0)}
+	if hasExcept {
+		exceptTok := p.advance()
+		p.advance() // (
+		list := &ast.StarExceptList{Span: span(exceptTok.Pos, 0)}
+		for {
+			tok := p.peek()
+			if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+				return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+			}
+			if isReserved(tok) {
+				return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+			}
+			list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+		rparen, err := p.expect(token.RPAREN, `")" or ","`)
+		if err != nil {
+			return nil, err
+		}
+		list.Stop = rparen.End
+		mods.ExceptList = list
+		mods.Stop = rparen.End
+	}
+	if isKeyword(p.peek(), "REPLACE") && p.peekAt(1).Kind == token.LPAREN {
+		p.advance() // REPLACE
+		p.advance() // (
+		for {
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			if !isKeyword(p.peek(), "AS") {
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword AS but got %s", describeToken(p.peek()))
+			}
+			p.advance() // AS
+			tok := p.peek()
+			if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+				return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+			}
+			alias := p.parseIdentifierToken(p.advance())
+			mods.ReplaceItems = append(mods.ReplaceItems, &ast.StarReplaceItem{
+				Span:  span(p.extStart(expr), alias.End()),
+				Expr:  expr,
+				Alias: alias,
+			})
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+		rparen, err := p.expect(token.RPAREN, `")" or ","`)
+		if err != nil {
+			return nil, err
+		}
+		mods.Stop = rparen.End
+	}
+	return mods, nil
 }
 
 // checkAttachedAlias reports the reference implementation's ATTACHED_ALIAS
@@ -2382,6 +2487,9 @@ func (p *parser) parseLimitOffset() (*ast.LimitOffset, error) {
 //	unary - ~ +
 //	primary
 func (p *parser) parseExpression() (ast.Node, error) {
+	// A nested expression (function argument, parenthesized expression,
+	// subscript, ...) can never end at a select column's ".*".
+	p.allowDotStar = false
 	return p.parseOr()
 }
 
@@ -2434,6 +2542,7 @@ func (p *parser) parseAnd() (ast.Node, error) {
 func (p *parser) parseNot() (ast.Node, error) {
 	if isKeyword(p.peek(), "NOT") {
 		notTok := p.advance()
+		p.allowDotStar = false
 		operand, err := p.parseNot()
 		if err != nil {
 			return nil, err
@@ -2853,6 +2962,7 @@ func (p *parser) parseUnary() (ast.Node, error) {
 	switch tok.Kind {
 	case token.MINUS, token.PLUS, token.TILDE:
 		p.advance()
+		p.allowDotStar = false
 		operand, err := p.parseUnary()
 		if err != nil {
 			return nil, err
@@ -3335,9 +3445,17 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 	if isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
+	// Only the first path expression of a select column may stop before a
+	// ".*"; consume the flag so later paths (e.g. the right operand of a
+	// binary expression) report the usual error.
+	allowDotStar := p.allowDotStar
+	p.allowDotStar = false
 	first := p.parseIdentifierToken(p.advance())
 	path := &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
 	for p.peek().Kind == token.DOT {
+		if allowDotStar && p.peekAt(1).Kind == token.STAR {
+			return path, nil
+		}
 		p.advance()
 		tok := p.peek()
 		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {

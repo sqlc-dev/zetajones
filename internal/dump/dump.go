@@ -87,6 +87,18 @@ func nodeString(n ast.Node) string {
 		return "Alias"
 	case *ast.Star:
 		return fmt.Sprintf("Star(%s)", t.Image)
+	case *ast.StarWithModifiers:
+		return "StarWithModifiers"
+	case *ast.DotStar:
+		return "DotStar"
+	case *ast.DotStarWithModifiers:
+		return "DotStarWithModifiers"
+	case *ast.StarModifiers:
+		return "StarModifiers"
+	case *ast.StarExceptList:
+		return "StarExceptList"
+	case *ast.StarReplaceItem:
+		return "StarReplaceItem"
 	case *ast.FromClause:
 		return "FromClause"
 	case *ast.TablePathExpression:

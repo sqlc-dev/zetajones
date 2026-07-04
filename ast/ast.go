@@ -220,6 +220,75 @@ type Star struct {
 
 func (n *Star) Children() []Node { return nil }
 
+// StarWithModifiers is "* EXCEPT (...) REPLACE (...)" in a select list; see
+// ASTStarWithModifiers in googlesql/parser/parse_tree.h.
+type StarWithModifiers struct {
+	Span
+	Modifiers *StarModifiers `json:"modifiers"`
+}
+
+func (n *StarWithModifiers) Children() []Node { return children(n.Modifiers) }
+
+// DotStar is "expression . *" as a select list item; see ASTDotStar in
+// googlesql/parser/parse_tree.h.
+type DotStar struct {
+	Span
+	Expr Node `json:"expr"`
+}
+
+func (n *DotStar) Children() []Node { return children(n.Expr) }
+
+// DotStarWithModifiers is "expression . * EXCEPT (...) REPLACE (...)"; see
+// ASTDotStarWithModifiers in googlesql/parser/parse_tree.h.
+type DotStarWithModifiers struct {
+	Span
+	Expr      Node           `json:"expr"`
+	Modifiers *StarModifiers `json:"modifiers"`
+}
+
+func (n *DotStarWithModifiers) Children() []Node { return children(n.Expr, n.Modifiers) }
+
+// StarModifiers holds the EXCEPT column list and REPLACE items following "*"
+// or ".*"; see ASTStarModifiers in googlesql/parser/parse_tree.h.
+type StarModifiers struct {
+	Span
+	ExceptList   *StarExceptList    `json:"except_list"`
+	ReplaceItems []*StarReplaceItem `json:"replace_items"`
+}
+
+func (n *StarModifiers) Children() []Node {
+	out := children(n.ExceptList)
+	for _, item := range n.ReplaceItems {
+		out = append(out, item)
+	}
+	return out
+}
+
+// StarExceptList is the "EXCEPT ( identifiers )" part of star modifiers; see
+// ASTStarExceptList in googlesql/parser/parse_tree.h.
+type StarExceptList struct {
+	Span
+	Identifiers []*Identifier `json:"identifiers"`
+}
+
+func (n *StarExceptList) Children() []Node {
+	var out []Node
+	for _, id := range n.Identifiers {
+		out = append(out, id)
+	}
+	return out
+}
+
+// StarReplaceItem is one "expression AS identifier" inside "REPLACE (...)";
+// see ASTStarReplaceItem in googlesql/parser/parse_tree.h.
+type StarReplaceItem struct {
+	Span
+	Expr  Node        `json:"expr"`
+	Alias *Identifier `json:"alias"`
+}
+
+func (n *StarReplaceItem) Children() []Node { return children(n.Expr, n.Alias) }
+
 // FromClause holds the FROM clause contents.
 type FromClause struct {
 	Span
