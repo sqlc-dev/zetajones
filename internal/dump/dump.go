@@ -190,6 +190,8 @@ func nodeString(n ast.Node) string {
 		return "GroupingItem"
 	case *ast.Having:
 		return "Having"
+	case *ast.Qualify:
+		return "Qualify"
 	case *ast.OrderBy:
 		return "OrderBy"
 	case *ast.OrderingExpression:

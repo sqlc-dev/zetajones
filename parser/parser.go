@@ -218,6 +218,9 @@ const FeatureIsDistinct Feature = "IS_DISTINCT"
 // (FEATURE_BRACED_PROTO_CONSTRUCTORS), including the "STRUCT { ... }" form.
 const FeatureBracedProtoConstructors Feature = "BRACED_PROTO_CONSTRUCTORS"
 
+// FeatureQualify gates the QUALIFY clause (FEATURE_QUALIFY).
+const FeatureQualify Feature = "QUALIFY"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -228,6 +231,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureAllowConsecutiveOn:      true,
 	FeatureIsDistinct:              true,
 	FeatureBracedProtoConstructors: true,
+	FeatureQualify:                 true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -2584,6 +2588,18 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		sel.Having = &ast.Having{Span: span(havingTok.Pos, p.extEnd(expr)), Expr: expr}
 		sel.Stop = p.extEnd(expr)
 	}
+	// QUALIFY is a non-reserved keyword. In the reference grammar the QUALIFY
+	// clause is only permitted here after a WHERE, GROUP BY or HAVING clause;
+	// otherwise QUALIFY directly following a table is treated as an alias. See
+	// opt_clauses_following_from and qualify_clause in googlesql.tm.
+	if isKeyword(p.peek(), "QUALIFY") {
+		qualify, err := p.parseQualifyClause()
+		if err != nil {
+			return nil, err
+		}
+		sel.Qualify = qualify
+		sel.Stop = qualify.End()
+	}
 	if isKeyword(p.peek(), "WINDOW") {
 		window, err := p.parseWindowClause(false)
 		if err != nil {
@@ -2593,6 +2609,30 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		sel.Stop = window.End()
 	}
 	return sel, nil
+}
+
+// parseQualifyClause parses "QUALIFY expression"; the QUALIFY keyword is
+// included in the resulting node's location. The FEATURE_QUALIFY language
+// feature gates the clause: without it the reference parser reports
+// "QUALIFY is not supported" at the QUALIFY keyword. See qualify_clause in
+// googlesql.tm.
+func (p *parser) parseQualifyClause() (*ast.Qualify, error) {
+	qualifyTok := p.advance() // QUALIFY
+	if !p.features.Enabled(FeatureQualify) {
+		return nil, p.errorf(qualifyTok.Pos, "QUALIFY is not supported")
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.Qualify{Span: span(qualifyTok.Pos, p.extEnd(expr)), Expr: expr}, nil
+}
+
+// isPostfixQualify reports whether the next tokens are a non-reserved QUALIFY
+// keyword immediately followed by an expression, i.e. a QUALIFY clause in the
+// postfix table operator position rather than a table alias named QUALIFY.
+func (p *parser) isPostfixQualify() bool {
+	return isKeyword(p.peek(), "QUALIFY") && startsExpression(p.peekAt(1))
 }
 
 func (p *parser) parseSelectList() (*ast.SelectList, error) {
@@ -2973,13 +3013,20 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 	if p.peek().Kind == token.DOT && p.peekAt(1).Kind == token.LPAREN {
 		return nil, p.errorf(p.peekAt(1).Pos, "Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
 	}
-	alias, err := p.parseOptionalAlias()
-	if err != nil {
-		return nil, err
-	}
-	if alias != nil {
-		table.Alias = alias
-		table.Stop = alias.End()
+	// A non-reserved QUALIFY keyword immediately followed by an expression is a
+	// QUALIFY clause in the postfix table operator position, not a table alias;
+	// leave it for parsePostfixTableOperators (see qualify_clause_nonreserved
+	// in pivot_or_unpivot_clause in googlesql.tm). QUALIFY not followed by an
+	// expression (e.g. at end of input or before WHERE) is a plain alias.
+	if !p.isPostfixQualify() {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		if alias != nil {
+			table.Alias = alias
+			table.Stop = alias.End()
+		}
 	}
 	// WITH OFFSET [[AS] alias]; see with_offset_and_alias in googlesql.tm.
 	// A bare WITH in this position must be followed by OFFSET.

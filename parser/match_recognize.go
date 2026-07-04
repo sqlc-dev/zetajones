@@ -13,6 +13,22 @@ import (
 // the "table_primary match_recognize_clause" alternative of table_primary in
 // googlesql.tm.
 func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
+	// A non-reserved QUALIFY keyword followed by an expression in this
+	// position is a QUALIFY clause that is not preceded by a WHERE, GROUP BY
+	// or HAVING clause. The reference grammar rejects this via the
+	// qualify_clause_nonreserved alternative of pivot_or_unpivot_clause.
+	if p.isPostfixQualify() {
+		qualifyTok := p.advance() // QUALIFY
+		// Parse the expression so any error inside it is reported before the
+		// clause-position errors below (matching the reference reduction order).
+		if _, err := p.parseExpression(); err != nil {
+			return nil, err
+		}
+		if !p.features.Enabled(FeatureQualify) {
+			return nil, p.errorf(qualifyTok.Pos, "QUALIFY is not supported")
+		}
+		return nil, p.errorf(qualifyTok.Pos, "QUALIFY clause must be used in conjunction with WHERE or GROUP BY or HAVING clause")
+	}
 	for isKeyword(p.peek(), "MATCH_RECOGNIZE") {
 		clause, err := p.parseMatchRecognizeClause()
 		if err != nil {

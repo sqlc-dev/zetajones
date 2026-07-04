@@ -409,11 +409,12 @@ type Select struct {
 	Where      *WhereClause  `json:"where,omitempty"`
 	GroupBy    *GroupBy      `json:"group_by,omitempty"`
 	Having     *Having       `json:"having,omitempty"`
+	Qualify    *Qualify      `json:"qualify,omitempty"`
 	Window     *WindowClause `json:"window,omitempty"`
 }
 
 func (n *Select) Children() []Node {
-	return children(n.SelectList, n.From, n.Where, n.GroupBy, n.Having, n.Window)
+	return children(n.SelectList, n.From, n.Where, n.GroupBy, n.Having, n.Qualify, n.Window)
 }
 
 // SelectList is the list of expressions being selected.
@@ -853,6 +854,16 @@ type Having struct {
 }
 
 func (n *Having) Children() []Node {
+	return children(n.Expr)
+}
+
+// Qualify is a QUALIFY clause.
+type Qualify struct {
+	Span
+	Expr Node `json:"expr"`
+}
+
+func (n *Qualify) Children() []Node {
 	return children(n.Expr)
 }
 
