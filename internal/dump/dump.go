@@ -784,6 +784,28 @@ func nodeString(n ast.Node) string {
 			return name
 		}
 		return fmt.Sprintf("%s(%s)", name, strings.Join(mods, ", "))
+	case *ast.CreateConstantStatement:
+		// Modifier order matches the base ASTCreateStatement modifiers:
+		// scope, is_or_replace, is_if_not_exists.
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreateConstantStatement"
+		}
+		return fmt.Sprintf("CreateConstantStatement(%s)", strings.Join(mods, ", "))
 	case *ast.CreateModelStatement:
 		// The modifier order matches the base ASTCreateStatement modifiers:
 		// scope, is_or_replace, is_if_not_exists. is_remote is not shown.

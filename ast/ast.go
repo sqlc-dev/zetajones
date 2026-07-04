@@ -2600,6 +2600,23 @@ func (n *CreateViewStatement) Children() []Node {
 	return children(n.Name, n.Columns, n.Options, n.Query)
 }
 
+// CreateConstantStatement is a CREATE CONSTANT statement; see
+// ASTCreateConstantStatement in googlesql/parser/parse_tree.h. Scope is "",
+// "TEMP", "PUBLIC", or "PRIVATE". Value is the constant's assigned expression.
+type CreateConstantStatement struct {
+	Span
+	Scope         string          `json:"scope,omitempty"`
+	IsOrReplace   bool            `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool            `json:"is_if_not_exists,omitempty"`
+	Name          *PathExpression `json:"name"`
+	Value         Node            `json:"value"`
+}
+
+func (n *CreateConstantStatement) statementNode() {}
+func (n *CreateConstantStatement) Children() []Node {
+	return children(n.Name, n.Value)
+}
+
 // CreateModelStatement is a CREATE MODEL statement; see
 // ASTCreateModelStatement in googlesql/parser/parse_tree.h. Scope is "",
 // "TEMP", "PUBLIC", or "PRIVATE". The trailing query is either a single Query

@@ -1842,6 +1842,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "MODEL") {
 		return p.parseCreateModelStatement(createTok, scope, isOrReplace)
 	}
+	// CREATE [OR REPLACE] [scope] CONSTANT [IF NOT EXISTS] <path> = <expr>; see
+	// create_constant_statement in googlesql.tm.
+	if isKeyword(p.peek(), "CONSTANT") {
+		return p.parseCreateConstantStatement(createTok, scope, isOrReplace)
+	}
 	// CREATE [OR REPLACE] [scope] EXTERNAL TABLE FUNCTION is recognized only to
 	// diagnose it; see create_external_table_function_statement in
 	// googlesql.tm. The error points at the EXTERNAL keyword.
@@ -1889,6 +1894,12 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// an unexpected keyword rather than a missing TABLE keyword.
 	if isKeyword(p.peek(), "MODULE") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(p.peek().Image))
+	}
+	// A backtick-quoted object type is by design never a supported generic
+	// entity type; the backticks are kept as part of the reported name. See
+	// generic_entity_type_unchecked in googlesql.tm.
+	if p.peek().Kind == token.QUOTED_IDENT {
+		return nil, p.errorf(p.peek().Pos, "%s is not a supported object type", p.peek().Image)
 	}
 	if _, err := p.expectKeyword("TABLE"); err != nil {
 		return nil, err
@@ -2447,6 +2458,44 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 // [REMOTE] [WITH CONNECTION ...] [OPTIONS(...)] [AS query | AS
 // (aliased_query_list)]"; see create_model_statement in googlesql.tm. MODEL is
 // the next token.
+// parseCreateConstantStatement parses the tail of "CREATE [OR REPLACE]
+// [scope] CONSTANT [IF NOT EXISTS] <path> = <expression>"; see
+// create_constant_statement in googlesql.tm. The CONSTANT keyword is the next
+// token.
+func (p *parser) parseCreateConstantStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // CONSTANT
+	stmt := &ast.CreateConstantStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	// A leading token that cannot begin a path_expression identifier is
+	// reported as "Unexpected" rather than "Expected identifier".
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	// The path_expression is followed by "="; a different token yields the
+	// combined "." or "=" diagnostic because a path may still continue on ".".
+	if p.peek().Kind != token.EQ {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "." or "=" but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // =
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Value = value
+	stmt.Stop = p.extEnd(value)
+	return stmt, nil
+}
+
 func (p *parser) parseCreateModelStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
 	p.advance() // MODEL
 	stmt := &ast.CreateModelStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
