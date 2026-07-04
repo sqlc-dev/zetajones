@@ -31,6 +31,13 @@ func Lex(sql string) ([]token.Token, error) {
 		if err != nil {
 			return nil, err
 		}
+		if tok.Kind == token.EOF && len(toks) > 0 && tok.Pos > l.prev.End {
+			// ZetaSQL reports end-of-input at the end of the last real token,
+			// not past trailing whitespace/comments, so "Unexpected end of
+			// statement" points just after the final token.
+			tok.Pos = l.prev.End
+			tok.End = l.prev.End
+		}
 		toks = append(toks, tok)
 		l.updateLookback(tok)
 		if tok.Kind == token.EOF {
