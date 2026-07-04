@@ -29,8 +29,17 @@ func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
 		}
 		return nil, p.errorf(qualifyTok.Pos, "QUALIFY clause must be used in conjunction with WHERE or GROUP BY or HAVING clause")
 	}
-	for isKeyword(p.peek(), "MATCH_RECOGNIZE") {
-		clause, err := p.parseMatchRecognizeClause()
+	for {
+		var clause ast.Node
+		var err error
+		switch {
+		case isKeyword(p.peek(), "MATCH_RECOGNIZE"):
+			clause, err = p.parseMatchRecognizeClause()
+		case isKeyword(p.peek(), "TABLESAMPLE"):
+			clause, err = p.parseSampleClause()
+		default:
+			return node, nil
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -51,7 +60,139 @@ func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
 			return node, nil
 		}
 	}
-	return node, nil
+}
+
+// parseSampleClause parses "TABLESAMPLE <method> ( <size> ) [<suffix>]"; the
+// TABLESAMPLE keyword is the next token. See sample_clause in googlesql.tm.
+func (p *parser) parseSampleClause() (*ast.SampleClause, error) {
+	tsTok := p.advance() // TABLESAMPLE
+	clause := &ast.SampleClause{Span: span(tsTok.Pos, 0)}
+	method, err := p.parseAliasIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	clause.Method = method
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	size, err := p.parseSampleSize()
+	if err != nil {
+		return nil, err
+	}
+	clause.Size = size
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	clause.Stop = rparen.End
+	suffix, err := p.parseOptionalSampleSuffix()
+	if err != nil {
+		return nil, err
+	}
+	if suffix != nil {
+		clause.Suffix = suffix
+		clause.Stop = suffix.End()
+	}
+	return clause, nil
+}
+
+// parseSampleSize parses "<value> ( ROWS | PERCENT ) [ PARTITION BY ... ]";
+// see sample_size in googlesql.tm.
+func (p *parser) parseSampleSize() (*ast.SampleSize, error) {
+	start := p.peek().Pos
+	var value ast.Node
+	var err error
+	if p.peek().Kind == token.FLOAT {
+		tok := p.advance()
+		value = &ast.FloatLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
+	} else {
+		value, err = p.parsePossiblyCastIntLiteralOrParameter()
+		if err != nil {
+			return nil, err
+		}
+	}
+	size := &ast.SampleSize{Span: span(start, p.extEnd(value)), Value: value}
+	switch {
+	case isKeyword(p.peek(), "ROWS"):
+		size.Unit = "ROWS"
+	case isKeyword(p.peek(), "PERCENT"):
+		size.Unit = "PERCENT"
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword ROWS or keyword PERCENT but got %s", describeToken(p.peek()))
+	}
+	unitTok := p.advance()
+	size.Stop = unitTok.End
+	// An optional PARTITION BY (without a hint); see
+	// opt_partition_by_clause_no_hint in googlesql.tm.
+	if isKeyword(p.peek(), "PARTITION") {
+		partitionBy, err := p.parsePartitionBy()
+		if err != nil {
+			return nil, err
+		}
+		size.PartitionBy = partitionBy
+		size.Stop = partitionBy.End()
+	}
+	return size, nil
+}
+
+// parseOptionalSampleSuffix parses the optional TABLESAMPLE suffix: a
+// REPEATABLE clause and/or a WITH WEIGHT clause; see
+// opt_sample_clause_suffix in googlesql.tm.
+func (p *parser) parseOptionalSampleSuffix() (*ast.SampleSuffix, error) {
+	switch {
+	case isKeyword(p.peek(), "REPEATABLE"):
+		repeatable, err := p.parseRepeatableClause()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SampleSuffix{Span: span(repeatable.Pos(), repeatable.End()), Repeatable: repeatable}, nil
+	case isKeyword(p.peek(), "WITH"):
+		withTok := p.advance() // WITH
+		if _, err := p.expectKeyword("WEIGHT"); err != nil {
+			return nil, err
+		}
+		weight := &ast.WithWeight{Span: span(withTok.Pos, p.prevEnd())}
+		// Optional [AS] alias identifier.
+		if isKeyword(p.peek(), "AS") || p.peek().Kind == token.IDENT && !isReserved(p.peek()) || p.peek().Kind == token.QUOTED_IDENT {
+			alias, err := p.parseOptionalAlias()
+			if err != nil {
+				return nil, err
+			}
+			if alias != nil {
+				weight.Alias = alias
+				weight.Stop = alias.End()
+			}
+		}
+		suffix := &ast.SampleSuffix{Span: span(withTok.Pos, weight.End()), Weight: weight}
+		if isKeyword(p.peek(), "REPEATABLE") {
+			repeatable, err := p.parseRepeatableClause()
+			if err != nil {
+				return nil, err
+			}
+			suffix.Repeatable = repeatable
+			suffix.Stop = repeatable.End()
+		}
+		return suffix, nil
+	}
+	return nil, nil
+}
+
+// parseRepeatableClause parses "REPEATABLE ( <value> )"; see
+// repeatable_clause in googlesql.tm.
+func (p *parser) parseRepeatableClause() (*ast.RepeatableClause, error) {
+	repTok := p.advance() // REPEATABLE
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	value, err := p.parsePossiblyCastIntLiteralOrParameter()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RepeatableClause{Span: span(repTok.Pos, rparen.End), Value: value}, nil
 }
 
 // parseMatchRecognizeClause parses "MATCH_RECOGNIZE ( ... ) [alias]"; the

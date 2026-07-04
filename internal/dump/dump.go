@@ -418,6 +418,16 @@ func nodeString(n ast.Node) string {
 		return "PipeMatchRecognize"
 	case *ast.MatchRecognizeClause:
 		return "MatchRecognizeClause"
+	case *ast.SampleClause:
+		return "SampleClause"
+	case *ast.SampleSize:
+		return "SampleSize"
+	case *ast.SampleSuffix:
+		return "SampleSuffix"
+	case *ast.WithWeight:
+		return "WithWeight"
+	case *ast.RepeatableClause:
+		return "RepeatableClause"
 	case *ast.AfterMatchSkipClause:
 		return "AfterMatchSkipClause"
 	case *ast.RowPatternOperation:

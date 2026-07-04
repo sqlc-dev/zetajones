@@ -3013,6 +3013,16 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 	if p.peek().Kind == token.DOT && p.peekAt(1).Kind == token.LPAREN {
 		return nil, p.errorf(p.peekAt(1).Pos, "Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
 	}
+	// An optional hint (@{...}) between the table path and the alias; see
+	// "table_path_expression_base hint? as_alias?" in googlesql.tm.
+	if p.peek().Kind == token.ATSIGN {
+		hint, err := p.parseOptionalHint()
+		if err != nil {
+			return nil, err
+		}
+		table.Hint = hint
+		table.Stop = hint.End()
+	}
 	// A non-reserved QUALIFY keyword immediately followed by an expression is a
 	// QUALIFY clause in the postfix table operator position, not a table alias;
 	// leave it for parsePostfixTableOperators (see qualify_clause_nonreserved
@@ -4689,9 +4699,27 @@ func (p *parser) parseArrayConstructor(start int) (ast.Node, error) {
 	return arr, nil
 }
 
+// isCurrentDatetimeName reports whether name is one of the CURRENT_* date/time
+// functions that may be called without parentheses (CURRENT_DATE,
+// CURRENT_TIME, CURRENT_DATETIME, CURRENT_TIMESTAMP); see the path_expression
+// rule in googlesql.tm.
+func isCurrentDatetimeName(name string) bool {
+	switch strings.ToLower(name) {
+	case "current_date", "current_time", "current_datetime", "current_timestamp":
+		return true
+	}
+	return false
+}
+
 // parsePathOrCall parses a path expression, possibly followed by a function
 // call argument list.
 func (p *parser) parsePathOrCall() (ast.Node, error) {
+	// A bare, unquoted reference to a CURRENT_DATE/TIME/DATETIME/TIMESTAMP
+	// function is parsed as a parenthesis-less function call; see the
+	// path_expression rule in googlesql.tm that sets
+	// is_current_date_time_without_parentheses.
+	first := p.peek()
+	isCurrentDatetime := first.Kind == token.IDENT && isCurrentDatetimeName(first.Image)
 	prevAllow := p.allowGeneralizedField
 	p.allowGeneralizedField = true
 	path, err := p.parsePathExpression()
@@ -4700,6 +4728,9 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 		return nil, err
 	}
 	if p.peek().Kind != token.LPAREN {
+		if isCurrentDatetime && len(path.Names) == 1 {
+			return &ast.FunctionCall{Span: span(path.Pos(), path.End()), Function: path}, nil
+		}
 		return path, nil
 	}
 	p.advance() // consume (

@@ -545,8 +545,10 @@ type TablePathExpression struct {
 	Span
 	Path       *PathExpression   `json:"path,omitempty"`
 	UnnestExpr *UnnestExpression `json:"unnest_expr,omitempty"`
-	Alias      *Alias            `json:"alias,omitempty"`
-	Offset     *WithOffset       `json:"offset,omitempty"`
+	// Hint is an optional hint (@{...}) between the path and the alias.
+	Hint   *Hint       `json:"hint,omitempty"`
+	Alias  *Alias      `json:"alias,omitempty"`
+	Offset *WithOffset `json:"offset,omitempty"`
 	// ForSystemTime is the optional FOR SYSTEM TIME AS OF clause.
 	ForSystemTime *ForSystemTime `json:"for_system_time,omitempty"`
 	// PostfixOperators holds trailing postfix table operators such as
@@ -556,7 +558,7 @@ type TablePathExpression struct {
 }
 
 func (n *TablePathExpression) Children() []Node {
-	out := children(n.Path, n.UnnestExpr, n.Alias, n.Offset, n.ForSystemTime)
+	out := children(n.Path, n.UnnestExpr, n.Hint, n.Alias, n.Offset, n.ForSystemTime)
 	return append(out, n.PostfixOperators...)
 }
 
@@ -666,6 +668,69 @@ type ForSystemTime struct {
 
 func (n *ForSystemTime) Children() []Node {
 	return children(n.Expr)
+}
+
+// SampleClause is a TABLESAMPLE clause: "TABLESAMPLE <method> ( <size> )
+// [<suffix>]"; see ASTSampleClause in googlesql/parser/parse_tree.h.
+type SampleClause struct {
+	Span
+	Method *Identifier   `json:"method"`
+	Size   *SampleSize   `json:"size"`
+	Suffix *SampleSuffix `json:"suffix,omitempty"`
+}
+
+func (n *SampleClause) Children() []Node {
+	return children(n.Method, n.Size, n.Suffix)
+}
+
+// SampleSize is the size portion of a TABLESAMPLE clause: "<value> ROWS" or
+// "<value> PERCENT", with an optional PARTITION BY; see ASTSampleSize in
+// googlesql/parser/parse_tree.h. Unit is stored but not shown in the debug
+// string.
+type SampleSize struct {
+	Span
+	Value       Node         `json:"value"`
+	Unit        string       `json:"unit"` // "ROWS" or "PERCENT"
+	PartitionBy *PartitionBy `json:"partition_by,omitempty"`
+}
+
+func (n *SampleSize) Children() []Node {
+	return children(n.Value, n.PartitionBy)
+}
+
+// SampleSuffix is the optional suffix of a TABLESAMPLE clause: a REPEATABLE
+// clause and/or a WITH WEIGHT clause; see ASTSampleSuffix in
+// googlesql/parser/parse_tree.h.
+type SampleSuffix struct {
+	Span
+	Weight     *WithWeight       `json:"weight,omitempty"`
+	Repeatable *RepeatableClause `json:"repeatable,omitempty"`
+}
+
+func (n *SampleSuffix) Children() []Node {
+	return children(n.Weight, n.Repeatable)
+}
+
+// WithWeight is the "WITH WEIGHT [[AS] alias]" part of a TABLESAMPLE suffix;
+// see ASTWithWeight in googlesql/parser/parse_tree.h.
+type WithWeight struct {
+	Span
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *WithWeight) Children() []Node {
+	return children(n.Alias)
+}
+
+// RepeatableClause is the "REPEATABLE ( <value> )" part of a TABLESAMPLE
+// suffix; see ASTRepeatableClause in googlesql/parser/parse_tree.h.
+type RepeatableClause struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *RepeatableClause) Children() []Node {
+	return children(n.Value)
 }
 
 // Join is a JOIN between two table expressions, including comma joins; see
