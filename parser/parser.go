@@ -2185,6 +2185,10 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 	consumeSecond := func() { p.advance(); p.advance() }
 	second := p.peekAt(1)
 	switch {
+	case isKeyword(kindTok, "ROW"):
+		return p.parseAlterRowAccessPolicyStatement(alterTok)
+	case isKeyword(kindTok, "ALL"):
+		return p.parseAlterAllRowAccessPoliciesStatement(alterTok)
 	case isKeyword(kindTok, "TABLE") && isKeyword(second, "FUNCTION"):
 		consumeSecond()
 		unsupported = "TABLE FUNCTION"
@@ -2240,6 +2244,12 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 		consumeSecond()
 		unsupported = "PROPERTY GRAPH"
 	default:
+		// A non-keyword identifier is treated as a generic entity type, which
+		// the parser does not support; see alter_statement in googlesql.tm.
+		// No "Syntax error: " prefix.
+		if kindTok.Kind == token.IDENT && !keywordNames[strings.ToLower(kindTok.Image)] {
+			return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+		}
 		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
 	}
 
@@ -2268,6 +2278,236 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 		return nil, p.errorf(kindTok.Pos, "ALTER %s is not supported", unsupported)
 	}
 	return stmt, nil
+}
+
+// parseAlterRowAccessPolicyStatement parses
+// "ALTER ROW ACCESS POLICY [IF EXISTS] name ON path alter_action_list"; see
+// alter_row_access_policy_statement in googlesql.tm. The ALTER keyword and the
+// ROW keyword lookahead are already consumed by the caller's dispatch.
+func (p *parser) parseAlterRowAccessPolicyStatement(alterTok token.Token) (ast.Statement, error) {
+	p.advance() // ROW
+	if _, err := p.expectKeyword("ACCESS"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("POLICY"); err != nil {
+		return nil, err
+	}
+	stmt := &ast.AlterRowAccessPolicyStatement{}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "EXISTS") {
+		p.advance()
+		p.advance()
+		stmt.IsIfExists = true
+	}
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Path = path
+	actions, err := p.parseRowAccessPolicyAlterActionList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Actions = actions
+	stmt.Span = span(alterTok.Pos, actions.End())
+	return stmt, nil
+}
+
+// parseAlterAllRowAccessPoliciesStatement parses
+// "ALTER ALL ROW ACCESS POLICIES ON path revoke_from_clause"; see
+// alter_all_row_access_policies_statement in googlesql.tm. The ALTER keyword
+// and the ALL keyword lookahead are already consumed by the caller's dispatch.
+func (p *parser) parseAlterAllRowAccessPoliciesStatement(alterTok token.Token) (ast.Statement, error) {
+	p.advance() // ALL
+	if _, err := p.expectKeyword("ROW"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("ACCESS"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("POLICIES"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	revoke, err := p.parseRevokeFromClause()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.AlterAllRowAccessPoliciesStatement{
+		Span:   span(alterTok.Pos, revoke.End()),
+		Path:   path,
+		Revoke: revoke,
+	}, nil
+}
+
+// parseRowAccessPolicyAlterActionList parses the comma-separated list of row
+// access policy alter actions (RENAME TO, GRANT TO, REVOKE FROM, FILTER USING).
+func (p *parser) parseRowAccessPolicyAlterActionList() (*ast.AlterActionList, error) {
+	first, err := p.parseRowAccessPolicyAlterAction(true)
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.AlterActionList{Span: span(first.Pos(), first.End()), Actions: []ast.Node{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance()
+		action, err := p.parseRowAccessPolicyAlterAction(false)
+		if err != nil {
+			return nil, err
+		}
+		list.Actions = append(list.Actions, action)
+		list.Stop = action.End()
+	}
+	return list, nil
+}
+
+// parseRowAccessPolicyAlterAction parses a single row access policy alter
+// action; see row_access_policy_alter_action in googlesql.tm. isFirst selects
+// the error message used when no valid action keyword follows.
+func (p *parser) parseRowAccessPolicyAlterAction(isFirst bool) (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "RENAME"):
+		renameTok := p.advance()
+		if _, err := p.expectKeyword("TO"); err != nil {
+			return nil, err
+		}
+		id, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		newName := &ast.PathExpression{Span: span(id.Pos(), id.End()), Names: []*ast.Identifier{id}}
+		return &ast.RenameToClause{Span: span(renameTok.Pos, newName.End()), NewName: newName}, nil
+	case isKeyword(tok, "GRANT"):
+		return p.parseGrantToClause()
+	case isKeyword(tok, "REVOKE"):
+		return p.parseRevokeFromClause()
+	case isKeyword(tok, "FILTER"):
+		return p.parseFilterUsingClause()
+	}
+	if isFirst {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword FILTER or keyword GRANT or keyword RENAME or keyword REVOKE but got %s", describeToken(tok))
+}
+
+// parseGrantToClause parses "GRANT TO (grantee_list)"; see grant_to_clause in
+// googlesql.tm.
+func (p *parser) parseGrantToClause() (*ast.GrantToClause, error) {
+	grantTok := p.advance() // GRANT
+	if _, err := p.expectKeyword("TO"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	grantees, err := p.parseGranteeList()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GrantToClause{Span: span(grantTok.Pos, rparen.End), Grantees: grantees}, nil
+}
+
+// parseRevokeFromClause parses "REVOKE FROM (grantee_list)" or
+// "REVOKE FROM ALL"; see revoke_from_clause in googlesql.tm.
+func (p *parser) parseRevokeFromClause() (*ast.RevokeFromClause, error) {
+	revokeTok := p.advance() // REVOKE
+	if _, err := p.expectKeyword("FROM"); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "ALL") {
+		allTok := p.advance()
+		return &ast.RevokeFromClause{Span: span(revokeTok.Pos, allTok.End), IsRevokeFromAll: true}, nil
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or keyword ALL but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // (
+	grantees, err := p.parseGranteeList()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RevokeFromClause{Span: span(revokeTok.Pos, rparen.End), Grantees: grantees}, nil
+}
+
+// parseFilterUsingClause parses "FILTER USING (expr)"; see filter_using_clause
+// in googlesql.tm.
+func (p *parser) parseFilterUsingClause() (*ast.FilterUsingClause, error) {
+	filterTok := p.advance() // FILTER
+	if _, err := p.expectKeyword("USING"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.FilterUsingClause{Span: span(filterTok.Pos, rparen.End), Predicate: expr}, nil
+}
+
+// parseGranteeList parses one or more comma-separated grantees; the opening
+// "(" has already been consumed and the caller consumes the closing ")". Each
+// grantee is a string literal, a query parameter, or a system variable; see
+// grantee_list in googlesql.tm.
+func (p *parser) parseGranteeList() (*ast.GranteeList, error) {
+	first, err := p.parseGrantee()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.GranteeList{Span: span(first.Pos(), first.End()), Grantees: []ast.Node{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance()
+		g, err := p.parseGrantee()
+		if err != nil {
+			return nil, err
+		}
+		list.Grantees = append(list.Grantees, g)
+		list.Stop = g.End()
+	}
+	return list, nil
+}
+
+// parseGrantee parses a single grantee: a string literal, a query parameter,
+// or a system variable; see grantee in googlesql.tm.
+func (p *parser) parseGrantee() (ast.Node, error) {
+	tok := p.peek()
+	switch tok.Kind {
+	case token.STRING:
+		return p.parseStringLiteral()
+	case token.PARAM:
+		p.advance()
+		name := &ast.Identifier{Span: span(tok.Pos+1, tok.End), Name: tok.Image[1:]}
+		return &ast.ParameterExpr{Span: span(tok.Pos, tok.End), Name: name}, nil
+	case token.SYSTEM_VARIABLE:
+		return p.parseSystemVariableExpr()
+	}
+	return nil, p.errorf(tok.Pos, `Syntax error: Expected "@" or "@@" or string literal but got %s`, describeToken(tok))
 }
 
 // parseAlterActionList parses one or more comma-separated alter actions.
@@ -5222,6 +5462,11 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// followed by "(" (see keywords.cc); otherwise it falls through
 			// to the identifier cases below.
 			return p.parseCastExpression()
+		case isKeyword(tok, "EXTRACT") && p.peekAt(1).Kind == token.LPAREN:
+			// EXTRACT is non-reserved: it is only the extract keyword when
+			// followed by "(" (see keywords.cc); otherwise it falls through
+			// to the identifier cases below.
+			return p.parseExtractExpression()
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACKET:
 			p.advance() // ARRAY; the constructor's span starts at the keyword.
 			return p.parseArrayConstructor(tok.Pos)
@@ -6327,6 +6572,47 @@ func (p *parser) parseCastExpression() (ast.Node, error) {
 		Format:     format,
 		IsSafeCast: isSafe,
 	}, nil
+}
+
+// parseExtractExpression parses "EXTRACT(part FROM expr [AT TIME ZONE tz])";
+// see extract_expression in googlesql.tm.
+func (p *parser) parseExtractExpression() (ast.Node, error) {
+	kw := p.advance() // EXTRACT
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	lhs, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("FROM"); err != nil {
+		return nil, err
+	}
+	rhs, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	ext := &ast.ExtractExpression{LhsExpr: lhs, RhsExpr: rhs}
+	if isKeyword(p.peek(), "AT") {
+		p.advance() // AT
+		if _, err := p.expectKeyword("TIME"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("ZONE"); err != nil {
+			return nil, err
+		}
+		tz, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		ext.TimeZone = tz
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	ext.Span = span(kw.Pos, rparen.End)
+	return ext, nil
 }
 
 // parseFormatClause parses "FORMAT expr [AT TIME ZONE expr]"; see format and

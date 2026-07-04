@@ -263,8 +263,26 @@ func nodeString(n ast.Node) string {
 			out += "(" + strings.Join(mods, ", ") + ")"
 		}
 		return out
+	case *ast.AlterRowAccessPolicyStatement:
+		if t.IsIfExists {
+			return "AlterRowAccessPolicyStatement(is_if_exists)"
+		}
+		return "AlterRowAccessPolicyStatement"
+	case *ast.AlterAllRowAccessPoliciesStatement:
+		return "AlterAllRowAccessPoliciesStatement"
 	case *ast.AlterActionList:
 		return "AlterActionList"
+	case *ast.GrantToClause:
+		return "GrantToClause"
+	case *ast.RevokeFromClause:
+		if t.IsRevokeFromAll {
+			return "RevokeFromClause(is_revoke_from_all)"
+		}
+		return "RevokeFromClause"
+	case *ast.FilterUsingClause:
+		return "FilterUsingClause"
+	case *ast.GranteeList:
+		return "GranteeList"
 	case *ast.RenameToClause:
 		return "RenameToClause"
 	case *ast.SetOptionsAction:
@@ -548,6 +566,8 @@ func nodeString(n ast.Node) string {
 			return "CastExpression(return_null_on_error=true)"
 		}
 		return "CastExpression"
+	case *ast.ExtractExpression:
+		return "ExtractExpression"
 	case *ast.FormatClause:
 		return "FormatClause"
 	case *ast.SimpleType:

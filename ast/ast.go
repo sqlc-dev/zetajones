@@ -1944,6 +1944,83 @@ func (n *RenameToClause) Children() []Node {
 	return children(n.NewName)
 }
 
+// AlterRowAccessPolicyStatement is
+// "ALTER ROW ACCESS POLICY [IF EXISTS] name ON path alter_action_list"; see
+// ASTAlterRowAccessPolicyStatement in googlesql/parser/parse_tree.h.
+type AlterRowAccessPolicyStatement struct {
+	Span
+	IsIfExists bool             `json:"is_if_exists,omitempty"`
+	Name       *Identifier      `json:"name"`
+	Path       *PathExpression  `json:"path"`
+	Actions    *AlterActionList `json:"actions"`
+}
+
+func (n *AlterRowAccessPolicyStatement) statementNode() {}
+func (n *AlterRowAccessPolicyStatement) Children() []Node {
+	return children(n.Name, n.Path, n.Actions)
+}
+
+// AlterAllRowAccessPoliciesStatement is
+// "ALTER ALL ROW ACCESS POLICIES ON path revoke_from_clause"; see
+// ASTAlterAllRowAccessPoliciesStatement in googlesql/parser/parse_tree.h.
+type AlterAllRowAccessPoliciesStatement struct {
+	Span
+	Path   *PathExpression   `json:"path"`
+	Revoke *RevokeFromClause `json:"revoke"`
+}
+
+func (n *AlterAllRowAccessPoliciesStatement) statementNode() {}
+func (n *AlterAllRowAccessPoliciesStatement) Children() []Node {
+	return children(n.Path, n.Revoke)
+}
+
+// GrantToClause is a "GRANT TO (grantee_list)" row access policy alter action;
+// see ASTGrantToClause in googlesql/parser/parse_tree.h.
+type GrantToClause struct {
+	Span
+	Grantees *GranteeList `json:"grantees"`
+}
+
+func (n *GrantToClause) Children() []Node {
+	return children(n.Grantees)
+}
+
+// RevokeFromClause is a "REVOKE FROM (grantee_list)" or "REVOKE FROM ALL" row
+// access policy alter action; see ASTRevokeFromClause in
+// googlesql/parser/parse_tree.h.
+type RevokeFromClause struct {
+	Span
+	Grantees        *GranteeList `json:"grantees,omitempty"`
+	IsRevokeFromAll bool         `json:"is_revoke_from_all,omitempty"`
+}
+
+func (n *RevokeFromClause) Children() []Node {
+	return children(n.Grantees)
+}
+
+// FilterUsingClause is a "FILTER USING (expr)" row access policy alter action;
+// see ASTFilterUsingClause in googlesql/parser/parse_tree.h.
+type FilterUsingClause struct {
+	Span
+	Predicate Node `json:"predicate"`
+}
+
+func (n *FilterUsingClause) Children() []Node {
+	return children(n.Predicate)
+}
+
+// GranteeList is a parenthesized comma-separated list of grantees (string
+// literals, parameters, or system variables); see ASTGranteeList in
+// googlesql/parser/parse_tree.h.
+type GranteeList struct {
+	Span
+	Grantees []Node `json:"grantees"`
+}
+
+func (n *GranteeList) Children() []Node {
+	return append([]Node(nil), n.Grantees...)
+}
+
 // SetOptionsAction is a SET OPTIONS (...) alter action.
 type SetOptionsAction struct {
 	Span
@@ -2598,6 +2675,19 @@ type CastExpression struct {
 
 func (n *CastExpression) Children() []Node {
 	return children(n.Expr, n.Type, n.Format)
+}
+
+// ExtractExpression is "EXTRACT(part FROM expr [AT TIME ZONE tz])"; see
+// ASTExtractExpression in googlesql/parser/parse_tree.h.
+type ExtractExpression struct {
+	Span
+	LhsExpr  Node `json:"lhs_expr"`
+	RhsExpr  Node `json:"rhs_expr"`
+	TimeZone Node `json:"time_zone_expr,omitempty"`
+}
+
+func (n *ExtractExpression) Children() []Node {
+	return children(n.LhsExpr, n.RhsExpr, n.TimeZone)
 }
 
 // FormatClause is the "FORMAT expr [AT TIME ZONE expr]" clause of a cast;
