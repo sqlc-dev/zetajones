@@ -3169,6 +3169,21 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 		}
 		clause := &ast.ConnectionClause{Span: span(tok.Pos, path.End()), Path: path}
 		return &ast.TVFArgument{Span: clause.Span, Expr: clause}, nil
+	case isPathStart(tok) && p.peekAt(1).Kind == token.LAMBDA:
+		// named_argument: identifier "=>" expression; see tvf_argument in
+		// googlesql.tm.
+		name := p.parseIdentifierToken(p.advance())
+		p.advance() // consume =>
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		named := &ast.NamedArgument{
+			Span:  span(name.Pos(), p.extEnd(value)),
+			Name:  name,
+			Value: value,
+		}
+		return &ast.TVFArgument{Span: named.Span, Expr: named}, nil
 	}
 	expr, err := p.parseExpression()
 	if err != nil {
@@ -4752,10 +4767,27 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 		!isKeyword(p.peek(), "LIMIT") {
 		for {
 			var arg ast.Node
-			if p.peek().Kind == token.STAR {
+			switch {
+			case p.peek().Kind == token.STAR:
 				star := p.advance()
 				arg = &ast.Star{Span: span(star.Pos, star.End), Image: star.Image}
-			} else {
+			case p.peekAt(1).Kind == token.LAMBDA &&
+				(p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
+				!isReserved(p.peek()):
+				// named_argument: identifier "=>" expression; see
+				// function_call_argument in googlesql.tm.
+				name := p.parseIdentifierToken(p.advance())
+				p.advance() // consume =>
+				value, verr := p.parseExpression()
+				if verr != nil {
+					return nil, verr
+				}
+				arg = &ast.NamedArgument{
+					Span:  span(name.Pos(), p.extEnd(value)),
+					Name:  name,
+					Value: value,
+				}
+			default:
 				arg, err = p.parseExpression()
 				if err != nil {
 					return nil, err

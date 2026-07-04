@@ -1824,6 +1824,18 @@ func (n *FunctionCall) Children() []Node {
 	return out
 }
 
+// NamedArgument is a "name => value" argument in a function or table-valued
+// function call; see ASTNamedArgument in googlesql/parser/parse_tree.h.
+type NamedArgument struct {
+	Span
+	Name  *Identifier `json:"name"`
+	Value Node        `json:"value"`
+}
+
+func (n *NamedArgument) Children() []Node {
+	return children(n.Name, n.Value)
+}
+
 // HavingModifier is the "HAVING MAX <expr>" or "HAVING MIN <expr>" modifier
 // on aggregate function calls; see ASTHavingModifier in
 // googlesql/parser/parse_tree.h.

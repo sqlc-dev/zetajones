@@ -328,6 +328,8 @@ func nodeString(n ast.Node) string {
 		return "ClampedBetweenModifier"
 	case *ast.HavingModifier:
 		return "HavingModifier"
+	case *ast.NamedArgument:
+		return "NamedArgument"
 	case *ast.StructConstructorWithParens:
 		return "StructConstructorWithParens"
 	case *ast.StructConstructorWithKeyword:
