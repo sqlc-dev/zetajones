@@ -243,6 +243,26 @@ func nodeString(n ast.Node) string {
 			return t.NodeName + "(is_if_exists)"
 		}
 		return t.NodeName
+	case *ast.DropStatement:
+		// See ASTDropStatement / ASTDropFunctionStatement /
+		// ASTDropSnapshotTableStatement etc. SingleNodeDebugString in
+		// parse_tree.cc: the generic node prints the schema object kind name,
+		// then any modifiers (is_if_exists, drop_mode) in parentheses.
+		out := t.NodeName
+		if t.ObjectKind != "" {
+			out += " " + t.ObjectKind
+		}
+		var mods []string
+		if t.IsIfExists {
+			mods = append(mods, "is_if_exists")
+		}
+		if t.DropMode != "" {
+			mods = append(mods, "drop_mode="+t.DropMode)
+		}
+		if len(mods) > 0 {
+			out += "(" + strings.Join(mods, ", ") + ")"
+		}
+		return out
 	case *ast.AlterActionList:
 		return "AlterActionList"
 	case *ast.RenameToClause:

@@ -593,6 +593,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseCreateStatement()
 	case isKeyword(tok, "DELETE"):
 		return p.parseDeleteStatement()
+	case isKeyword(tok, "DROP"):
+		return p.parseDropStatement()
 	case isKeyword(tok, "EXECUTE"):
 		return p.parseExecuteImmediateStatement()
 	case isKeyword(tok, "INSERT"):
@@ -2043,6 +2045,131 @@ func (p *parser) beginsType(tok token.Token) bool {
 		return true
 	}
 	return false
+}
+
+// parseDropStatement parses a DROP <object kind> [IF EXISTS] <path> statement;
+// see drop_statement in googlesql.tm. Most object kinds share the generic
+// ASTDropStatement node (which records the schema object kind name); FUNCTION,
+// TABLE FUNCTION, MATERIALIZED VIEW and SNAPSHOT TABLE use their own node
+// classes. Object kinds the reference grammar recognizes but does not support
+// (AGGREGATE FUNCTION, EXTERNAL TABLE FUNCTION) are diagnosed here.
+func (p *parser) parseDropStatement() (ast.Statement, error) {
+	dropTok := p.advance() // DROP
+	kindTok := p.peek()
+	second := p.peekAt(1)
+	third := p.peekAt(2)
+	consumeSecond := func() { p.advance(); p.advance() }
+
+	// nodeName is the parse tree node class; objectKind is the schema object
+	// kind name shown by the generic DropStatement node and in drop_mode
+	// errors; parsesDropMode reports whether opt_drop_mode is part of the
+	// rule for this kind (TABLE FUNCTION and SNAPSHOT TABLE do not parse it,
+	// so a trailing RESTRICT/CASCADE is reported as an unexpected token).
+	nodeName := "DropStatement"
+	var objectKind string
+	parsesDropMode := true
+	isSchema := false
+
+	switch {
+	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "TABLE") && isKeyword(third, "FUNCTION"):
+		// No "Syntax error: " prefix; see drop_statement in googlesql.tm.
+		return nil, p.errorf(kindTok.Pos, "EXTERNAL TABLE FUNCTION is not supported")
+	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "TABLE"):
+		consumeSecond()
+		objectKind = "EXTERNAL TABLE"
+	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "SCHEMA"):
+		consumeSecond()
+		objectKind = "EXTERNAL SCHEMA"
+	case isKeyword(kindTok, "AGGREGATE") && isKeyword(second, "FUNCTION"):
+		return nil, p.errorf(kindTok.Pos, "DROP AGGREGATE FUNCTION is not supported, use DROP FUNCTION")
+	case isKeyword(kindTok, "MATERIALIZED") && isKeyword(second, "VIEW"):
+		consumeSecond()
+		nodeName = "DropMaterializedViewStatement"
+		objectKind = "MATERIALIZED VIEW"
+	case isKeyword(kindTok, "SNAPSHOT") && isKeyword(second, "TABLE"):
+		consumeSecond()
+		nodeName = "DropSnapshotTableStatement"
+		parsesDropMode = false
+	case isKeyword(kindTok, "TABLE") && isKeyword(second, "FUNCTION"):
+		consumeSecond()
+		nodeName = "DropTableFunctionStatement"
+		parsesDropMode = false
+	case isKeyword(kindTok, "FUNCTION"):
+		p.advance()
+		nodeName = "DropFunctionStatement"
+		objectKind = "FUNCTION"
+	case isKeyword(kindTok, "SCHEMA"):
+		p.advance()
+		objectKind = "SCHEMA"
+		isSchema = true
+	case isKeyword(kindTok, "TABLE"):
+		// DROP TABLE has its own grammar rule (using a maybe-dashed path) and
+		// does not accept opt_drop_mode, so a trailing RESTRICT/CASCADE is an
+		// unexpected token rather than an "unsupported drop mode" error.
+		p.advance()
+		objectKind = "TABLE"
+		parsesDropMode = false
+	case isKeyword(kindTok, "SEQUENCE"), isKeyword(kindTok, "CONNECTION"),
+		isKeyword(kindTok, "CONSTANT"), isKeyword(kindTok, "DATABASE"),
+		isKeyword(kindTok, "INDEX"), isKeyword(kindTok, "MODEL"),
+		isKeyword(kindTok, "PROCEDURE"), isKeyword(kindTok, "VIEW"):
+		p.advance()
+		objectKind = strings.ToUpper(kindTok.Image)
+	case kindTok.Kind == token.IDENT && !keywordNames[strings.ToLower(kindTok.Image)]:
+		// A plain identifier is not a recognized schema object kind; see the
+		// generic error in the drop_statement reduce action.
+		return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+	default:
+		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
+	}
+
+	// For DropFunctionStatement the generic node still needs the schema object
+	// kind name for drop_mode errors, but it is not shown in the debug string.
+	errKind := objectKind
+	if nodeName == "DropFunctionStatement" {
+		errKind = "FUNCTION"
+		objectKind = ""
+	} else if nodeName != "DropStatement" {
+		objectKind = ""
+	}
+
+	stmt := &ast.DropStatement{Span: span(dropTok.Pos, 0), NodeName: nodeName, ObjectKind: objectKind}
+	if isKeyword(p.peek(), "IF") {
+		p.advance() // IF
+		if _, err := p.expectKeyword("EXISTS"); err != nil {
+			return nil, err
+		}
+		stmt.IsIfExists = true
+	}
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Path = path
+	stmt.Stop = path.End()
+
+	// Empty or populated function parameters are not accepted for these kinds;
+	// the reference reports the "(" as an unexpected token.
+	if p.peek().Kind == token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Unexpected "("`)
+	}
+
+	if parsesDropMode {
+		if tok := p.peek(); isKeyword(tok, "RESTRICT") || isKeyword(tok, "CASCADE") {
+			mode := strings.ToUpper(tok.Image)
+			if isSchema {
+				p.advance()
+				stmt.DropMode = mode
+				stmt.Stop = tok.End
+			} else {
+				return nil, p.errorf(tok.Pos, "Syntax error: '%s' is not supported for DROP %s", mode, errKind)
+			}
+		}
+	}
+	return stmt, nil
 }
 
 // parseAlterStatement parses ALTER <schema object kind> [IF EXISTS] <path>

@@ -1903,6 +1903,26 @@ func (n *AlterStatement) Children() []Node {
 	return children(n.Path, n.Actions)
 }
 
+// DropStatement is a DROP <object kind> statement. NodeName holds the
+// per-object-kind parse tree node name: the generic "DropStatement" (which
+// also shows ObjectKind, e.g. "TABLE" or "EXTERNAL SCHEMA"), or one of the
+// distinct node classes "DropFunctionStatement",
+// "DropTableFunctionStatement", "DropMaterializedViewStatement" and
+// "DropSnapshotTableStatement", matching the reference implementation.
+type DropStatement struct {
+	Span
+	NodeName   string          `json:"node_name"`
+	ObjectKind string          `json:"object_kind,omitempty"`
+	IsIfExists bool            `json:"is_if_exists,omitempty"`
+	DropMode   string          `json:"drop_mode,omitempty"`
+	Path       *PathExpression `json:"path"`
+}
+
+func (n *DropStatement) statementNode() {}
+func (n *DropStatement) Children() []Node {
+	return children(n.Path)
+}
+
 // AlterActionList is the comma-separated list of actions in an ALTER
 // statement.
 type AlterActionList struct {
