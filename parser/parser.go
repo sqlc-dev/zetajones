@@ -365,6 +365,57 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 	return stmt, nil
 }
 
+// ParseScript parses a whole script: a sequence of statements separated by ";"
+// with an optional trailing ";", wrapped in a Script node. It corresponds to
+// the reference driver's "mode=script" test mode; see the script rule in
+// googlesql.tm.
+func ParseScript(sql string) (ast.Node, error) {
+	return ParseScriptWithOptions(sql, Options{})
+}
+
+// ParseScriptWithOptions parses a whole script; see ParseScript.
+func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
+	toks, err := lexer.Lex(sql)
+	if err != nil {
+		var lerr *lexer.Error
+		if errors.As(err, &lerr) {
+			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
+		}
+		return nil, err
+	}
+	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	// An empty script resolves to a Script wrapping an empty statement list.
+	if p.peek().Kind == token.EOF {
+		empty := &ast.StatementList{Span: span(0, 0)}
+		return &ast.Script{Span: span(0, 0), Statements: empty}, nil
+	}
+	list := &ast.StatementList{Span: span(p.peek().Pos, 0)}
+	for {
+		stmt, err := p.parseScriptStatement()
+		if err != nil {
+			return nil, err
+		}
+		list.Statements = append(list.Statements, stmt)
+		list.Stop = stmt.End()
+		if p.peek().Kind == token.SEMICOLON {
+			// The trailing ";" extends the statement list (WithEndLocation);
+			// an internal ";" between statements does not, since the next
+			// statement re-extends the list to its own end.
+			semi := p.advance()
+			list.Stop = semi.End
+			if p.peek().Kind == token.EOF {
+				break
+			}
+			continue
+		}
+		if p.peek().Kind == token.EOF {
+			break
+		}
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
+	}
+	return &ast.Script{Span: span(list.Start, list.Stop), Statements: list}, nil
+}
+
 // ParseType parses a single standalone type (outside of any query), allowing
 // an optional trailing semicolon. It corresponds to the reference driver's
 // "mode=type" test mode.
@@ -1874,6 +1925,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	}
 	if isKeyword(p.peek(), "FUNCTION") {
 		return p.parseCreateFunctionStatement(createTok, scope, isOrReplace, isAggregate)
+	}
+	// CREATE [OR REPLACE] [scope] PROCEDURE ...; see
+	// create_procedure_statement in googlesql.tm.
+	if isKeyword(p.peek(), "PROCEDURE") {
+		return p.parseCreateProcedureStatement(createTok, scope, isOrReplace)
 	}
 	// CREATE [OR REPLACE] ROW [ACCESS] POLICY ...; see
 	// create_row_access_policy_statement in googlesql.tm. Scope modifiers
@@ -3494,6 +3550,364 @@ func (p *parser) parseTVFSchemaColumn() (*ast.TVFSchemaColumn, error) {
 		start = name.Pos()
 	}
 	return &ast.TVFSchemaColumn{Span: span(start, typ.End()), Name: name, Type: typ}, nil
+}
+
+// parseCreateProcedureStatement parses the tail of "CREATE [OR REPLACE] [scope]
+// PROCEDURE [IF NOT EXISTS] path(params) [EXTERNAL SECURITY ...]
+// [WITH CONNECTION ...] [OPTIONS ...] (begin_end_block | LANGUAGE id [AS str])";
+// see create_procedure_statement in googlesql.tm. The PROCEDURE keyword is the
+// next token.
+func (p *parser) parseCreateProcedureStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // PROCEDURE
+	stmt := &ast.CreateProcedureStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	// A missing procedure name reports a generic "Unexpected" error rather than
+	// "Expected identifier"; see create_procedure_statement in googlesql.tm.
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	// After the path, the parameter list must open with "("; the path could
+	// also have continued with ".", so the error mentions both.
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or "." but got %s`, describeToken(p.peek()))
+	}
+	params, err := p.parseProcedureParameters()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Parameters = params
+	stmt.Stop = params.End()
+
+	// EXTERNAL SECURITY (INVOKER | DEFINER).
+	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "SECURITY") {
+		p.advance() // EXTERNAL
+		p.advance() // SECURITY
+		switch {
+		case isKeyword(p.peek(), "INVOKER"):
+			stmt.ExternalSecurity = "INVOKER"
+		case isKeyword(p.peek(), "DEFINER"):
+			stmt.ExternalSecurity = "DEFINER"
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword DEFINER or keyword INVOKER but got %s", describeToken(p.peek()))
+		}
+		stmt.Stop = p.advance().End
+	}
+
+	// Optional WITH CONNECTION clause.
+	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "CONNECTION") {
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+		stmt.Stop = wc.End()
+	}
+
+	// Optional OPTIONS list.
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+
+	// Body: either a BEGIN/END block (wrapped in a Script) or a
+	// "LANGUAGE identifier [AS string]" external body.
+	switch {
+	case isKeyword(p.peek(), "BEGIN"):
+		beb, err := p.parseBeginEndBlock()
+		if err != nil {
+			return nil, err
+		}
+		stmtList := &ast.StatementList{Span: span(beb.Pos(), beb.End()), Statements: []ast.Node{beb}}
+		script := &ast.Script{Span: span(beb.Pos(), beb.End()), Statements: stmtList}
+		stmt.Body = script
+		stmt.Stop = script.End()
+	case isKeyword(p.peek(), "LANGUAGE"):
+		langKw := p.advance() // LANGUAGE
+		tok := p.peek()
+		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		lang := p.parseIdentifierToken(p.advance())
+		// The reference extends the language identifier's start to the LANGUAGE
+		// keyword (WithStartLocation); see create_procedure_statement in
+		// googlesql.tm.
+		lang.Start = langKw.Pos
+		stmt.Language = lang
+		stmt.Stop = lang.End()
+		if isKeyword(p.peek(), "AS") {
+			p.advance() // AS
+			code, err := p.parseStringLiteralValue()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Code = code
+			stmt.Stop = code.End()
+		}
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	return stmt, nil
+}
+
+// parseProcedureParameters parses "( [procedure_parameter [, ...]] )"; see
+// procedure_parameters in googlesql.tm. The opening parenthesis is the next
+// token.
+func (p *parser) parseProcedureParameters() (*ast.FunctionParameters, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	fp := &ast.FunctionParameters{Span: span(lparen.Pos, 0)}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			param, err := p.parseProcedureParameter()
+			if err != nil {
+				return nil, err
+			}
+			fp.Parameters = append(fp.Parameters, param)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	fp.Stop = rparen.End
+	return fp, nil
+}
+
+// parseProcedureParameter parses "[mode] identifier type_or_tvf_schema"; see
+// procedure_parameter in googlesql.tm. The mode (IN/OUT/INOUT) is recognized
+// only as an unquoted keyword.
+func (p *parser) parseProcedureParameter() (*ast.FunctionParameter, error) {
+	start := p.peek().Pos
+	mode := ""
+	switch {
+	case isKeyword(p.peek(), "IN"):
+		mode = "IN"
+		p.advance()
+	case isKeyword(p.peek(), "OUT"):
+		mode = "OUT"
+		p.advance()
+	case isKeyword(p.peek(), "INOUT"):
+		mode = "INOUT"
+		p.advance()
+	}
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	// The type is required; hitting ")" or "," instead yields the reference's
+	// tailored "end of parameter" diagnostic; see procedure_parameter in
+	// googlesql.tm.
+	if p.peek().Kind == token.RPAREN || p.peek().Kind == token.COMMA {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected end of parameter. Parameters should be in the format [<parameter mode>] <parameter name> <type>. If IN/OUT/INOUT is intended to be the name of a parameter, it must be escaped with backticks")
+	}
+	typ, err := p.parseProcedureParameterType()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.FunctionParameter{Span: span(start, typ.End()), Name: name, Type: typ, Mode: mode}, nil
+}
+
+// parseProcedureParameterType parses a procedure-parameter type, which may be a
+// templated "ANY ..." type or a "TABLE<...>" TVF schema in addition to an
+// ordinary type; see type_or_tvf_schema in googlesql.tm.
+func (p *parser) parseProcedureParameterType() (ast.Node, error) {
+	switch {
+	case isKeyword(p.peek(), "ANY"):
+		return p.parseTemplatedParameterType()
+	case isKeyword(p.peek(), "TABLE"):
+		return p.parseTVFSchema()
+	}
+	return p.parseType()
+}
+
+// parseBeginEndBlock parses "BEGIN statement_list END"; see begin_end_block in
+// googlesql.tm. BEGIN is the next token. Exception handlers are not yet
+// supported.
+func (p *parser) parseBeginEndBlock() (*ast.BeginEndBlock, error) {
+	beginTok := p.advance() // BEGIN
+	list, err := p.parseScriptStatementList(beginTok.End, func() bool {
+		return isKeyword(p.peek(), "END") || isKeyword(p.peek(), "EXCEPTION")
+	})
+	if err != nil {
+		return nil, err
+	}
+	endTok, err := p.expectKeyword("END")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.BeginEndBlock{Span: span(beginTok.Pos, endTok.End), Statements: list}, nil
+}
+
+// parseScriptStatementList parses a "statement_list": a sequence of statements
+// each terminated by ";", stopping when isEnd reports the terminator keyword;
+// see statement_list in googlesql.tm. An empty list is located at emptyPos.
+func (p *parser) parseScriptStatementList(emptyPos int, isEnd func() bool) (*ast.StatementList, error) {
+	if isEnd() {
+		return &ast.StatementList{Span: span(emptyPos, emptyPos)}, nil
+	}
+	list := &ast.StatementList{Span: span(p.peek().Pos, 0)}
+	for {
+		stmt, err := p.parseScriptStatement()
+		if err != nil {
+			return nil, err
+		}
+		list.Statements = append(list.Statements, stmt)
+		semi, err := p.expect(token.SEMICOLON, `";"`)
+		if err != nil {
+			return nil, err
+		}
+		list.Stop = semi.End
+		if isEnd() || p.peek().Kind == token.EOF {
+			break
+		}
+	}
+	return list, nil
+}
+
+// parseScriptStatement parses a single statement that may appear in a script or
+// block body: the script-only statements (DECLARE/IF/RETURN/BEGIN) plus any
+// ordinary SQL statement; see unterminated_statement in googlesql.tm.
+func (p *parser) parseScriptStatement() (ast.Statement, error) {
+	switch {
+	case isKeyword(p.peek(), "DECLARE"):
+		return p.parseVariableDeclaration()
+	case isKeyword(p.peek(), "IF"):
+		return p.parseIfStatement()
+	case isKeyword(p.peek(), "RETURN"):
+		return p.parseReturnStatement()
+	case isKeyword(p.peek(), "BEGIN"):
+		return p.parseBeginEndBlock()
+	}
+	return p.parseStatement()
+}
+
+// parseVariableDeclaration parses "DECLARE identifier_list (type [DEFAULT expr]
+// | DEFAULT expr)"; see variable_declaration in googlesql.tm. DECLARE is the
+// next token.
+func (p *parser) parseVariableDeclaration() (ast.Statement, error) {
+	declTok := p.advance() // DECLARE
+	list, err := p.parseIdentifierList()
+	if err != nil {
+		return nil, err
+	}
+	vd := &ast.VariableDeclaration{Span: span(declTok.Pos, list.End()), Variables: list}
+	if isKeyword(p.peek(), "DEFAULT") {
+		p.advance()
+		def, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		vd.DefaultValue = def
+		vd.Stop = p.extEnd(def)
+		return vd, nil
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	vd.Type = typ
+	vd.Stop = typ.End()
+	if isKeyword(p.peek(), "DEFAULT") {
+		p.advance()
+		def, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		vd.DefaultValue = def
+		vd.Stop = p.extEnd(def)
+	}
+	return vd, nil
+}
+
+// parseReturnStatement parses the "RETURN" script statement; see
+// return_statement in googlesql.tm.
+func (p *parser) parseReturnStatement() (ast.Statement, error) {
+	tok := p.advance() // RETURN
+	return &ast.ReturnStatement{Span: span(tok.Pos, tok.End)}, nil
+}
+
+// parseIfStatement parses "IF expr THEN stmts [ELSEIF ...] [ELSE stmts] END IF";
+// see if_statement in googlesql.tm. IF is the next token.
+func (p *parser) parseIfStatement() (ast.Statement, error) {
+	ifTok := p.advance() // IF
+	cond, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("THEN"); err != nil {
+		return nil, err
+	}
+	isBodyEnd := func() bool {
+		return isKeyword(p.peek(), "ELSEIF") || isKeyword(p.peek(), "ELSE") || isKeyword(p.peek(), "END")
+	}
+	thenList, err := p.parseScriptStatementList(p.prevEnd(), isBodyEnd)
+	if err != nil {
+		return nil, err
+	}
+	var elifList *ast.ElseifClauseList
+	for isKeyword(p.peek(), "ELSEIF") {
+		elifTok := p.advance() // ELSEIF
+		econd, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("THEN"); err != nil {
+			return nil, err
+		}
+		ebody, err := p.parseScriptStatementList(p.prevEnd(), isBodyEnd)
+		if err != nil {
+			return nil, err
+		}
+		clause := &ast.ElseifClause{Span: span(elifTok.Pos, ebody.End()), Condition: econd, Body: ebody}
+		if elifList == nil {
+			elifList = &ast.ElseifClauseList{Span: span(elifTok.Pos, ebody.End())}
+		}
+		elifList.Clauses = append(elifList.Clauses, clause)
+		elifList.Stop = ebody.End()
+	}
+	var elseList *ast.StatementList
+	if isKeyword(p.peek(), "ELSE") {
+		elseTok := p.advance() // ELSE
+		elseList, err = p.parseScriptStatementList(elseTok.End, isBodyEnd)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, err := p.expectKeyword("END"); err != nil {
+		return nil, err
+	}
+	ifEnd, err := p.expectKeyword("IF")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.IfStatement{
+		Span:          span(ifTok.Pos, ifEnd.End),
+		Condition:     cond,
+		ThenList:      thenList,
+		ElseifClauses: elifList,
+		ElseList:      elseList,
+	}, nil
 }
 
 // beginsType reports whether tok can begin a type; see raw_type in

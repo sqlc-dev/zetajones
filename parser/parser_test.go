@@ -45,6 +45,8 @@ func runCase(c *testfile.Case) string {
 	switch mode {
 	case "type":
 		node, err = parser.ParseTypeWithOptions(c.SQL, opts)
+	case "script":
+		node, err = parser.ParseScriptWithOptions(c.SQL, opts)
 	default:
 		var stmt ast.Statement
 		stmt, err = parser.ParseStatementWithOptions(c.SQL, opts)

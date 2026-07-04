@@ -925,6 +925,50 @@ func nodeString(n ast.Node) string {
 			out += "(SQL SECURITY " + t.SqlSecurity + ")"
 		}
 		return out
+	case *ast.CreateProcedureStatement:
+		// Base ASTCreateStatement modifiers come first as one group, then the
+		// external-security modifier as its own parenthesized group; see
+		// ASTCreateProcedureStatement::SingleNodeDebugString in
+		// googlesql/parser/parse_tree.cc.
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		out := "CreateProcedureStatement"
+		if len(mods) > 0 {
+			out += "(" + strings.Join(mods, ", ") + ")"
+		}
+		if t.ExternalSecurity != "" {
+			out += "(EXTERNAL SECURITY " + t.ExternalSecurity + ")"
+		}
+		return out
+	case *ast.Script:
+		return "Script"
+	case *ast.StatementList:
+		return "StatementList"
+	case *ast.BeginEndBlock:
+		return "BeginEndBlock"
+	case *ast.VariableDeclaration:
+		return "VariableDeclaration"
+	case *ast.IfStatement:
+		return "IfStatement"
+	case *ast.ElseifClause:
+		return "ElseifClause"
+	case *ast.ElseifClauseList:
+		return "ElseifClauseList"
+	case *ast.ReturnStatement:
+		return "ReturnStatement"
 	case *ast.SqlFunctionBody:
 		return "SqlFunctionBody"
 	case *ast.TemplatedParameterType:
@@ -936,12 +980,17 @@ func nodeString(n ast.Node) string {
 	case *ast.FunctionParameters:
 		return "FunctionParameters"
 	case *ast.FunctionParameter:
+		// Modifier order matches ASTFunctionParameter::SingleNodeDebugString in
+		// googlesql/parser/parse_tree.cc: is_not_aggregate, mode, default_value.
 		var mods []string
-		if t.DefaultValue != nil {
-			mods = append(mods, "default_value=("+nodeString(t.DefaultValue)+")")
-		}
 		if t.IsNotAggregate {
 			mods = append(mods, "is_not_aggregate=true")
+		}
+		if t.Mode != "" {
+			mods = append(mods, "mode="+t.Mode)
+		}
+		if t.DefaultValue != nil {
+			mods = append(mods, "default_value=("+nodeString(t.DefaultValue)+")")
 		}
 		if len(mods) == 0 {
 			return "FunctionParameter"

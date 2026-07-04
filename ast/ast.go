@@ -157,6 +157,98 @@ func (n *AssignmentFromStruct) Children() []Node {
 	return children(n.Variables, n.Value)
 }
 
+// Script is the top-level or procedure-body wrapper around a StatementList;
+// see ASTScript in googlesql/parser/parse_tree.h.
+type Script struct {
+	Span
+	Statements *StatementList `json:"statements"`
+}
+
+func (n *Script) statementNode()   {}
+func (n *Script) Children() []Node { return children(n.Statements) }
+
+// StatementList is a sequence of statements, e.g. a script body or the body of
+// a BEGIN/END block; see ASTStatementList in googlesql/parser/parse_tree.h.
+type StatementList struct {
+	Span
+	Statements []Node `json:"statements,omitempty"`
+}
+
+func (n *StatementList) Children() []Node { return append([]Node(nil), n.Statements...) }
+
+// BeginEndBlock is a "BEGIN statement_list [EXCEPTION ...] END" block; see
+// ASTBeginEndBlock in googlesql/parser/parse_tree.h.
+type BeginEndBlock struct {
+	Span
+	Statements *StatementList `json:"statements"`
+}
+
+func (n *BeginEndBlock) statementNode()   {}
+func (n *BeginEndBlock) Children() []Node { return children(n.Statements) }
+
+// VariableDeclaration is "DECLARE identifier_list [type] [DEFAULT expr]"; see
+// ASTVariableDeclaration in googlesql/parser/parse_tree.h.
+type VariableDeclaration struct {
+	Span
+	Variables    *IdentifierList `json:"variables"`
+	Type         Node            `json:"type,omitempty"`
+	DefaultValue Node            `json:"default_value,omitempty"`
+}
+
+func (n *VariableDeclaration) statementNode() {}
+func (n *VariableDeclaration) Children() []Node {
+	return children(n.Variables, n.Type, n.DefaultValue)
+}
+
+// IfStatement is "IF expr THEN stmts [ELSEIF ...] [ELSE stmts] END IF"; see
+// ASTIfStatement in googlesql/parser/parse_tree.h.
+type IfStatement struct {
+	Span
+	Condition     Node              `json:"condition"`
+	ThenList      *StatementList    `json:"then_list"`
+	ElseifClauses *ElseifClauseList `json:"elseif_clauses,omitempty"`
+	ElseList      *StatementList    `json:"else_list,omitempty"`
+}
+
+func (n *IfStatement) statementNode() {}
+func (n *IfStatement) Children() []Node {
+	return children(n.Condition, n.ThenList, n.ElseifClauses, n.ElseList)
+}
+
+// ElseifClause is a single "ELSEIF expr THEN stmts" clause; see ASTElseifClause
+// in googlesql/parser/parse_tree.h.
+type ElseifClause struct {
+	Span
+	Condition Node           `json:"condition"`
+	Body      *StatementList `json:"body"`
+}
+
+func (n *ElseifClause) Children() []Node { return children(n.Condition, n.Body) }
+
+// ElseifClauseList is the list of ELSEIF clauses in an IF statement; see
+// ASTElseifClauseList in googlesql/parser/parse_tree.h.
+type ElseifClauseList struct {
+	Span
+	Clauses []*ElseifClause `json:"clauses"`
+}
+
+func (n *ElseifClauseList) Children() []Node {
+	out := make([]Node, 0, len(n.Clauses))
+	for _, c := range n.Clauses {
+		out = append(out, c)
+	}
+	return out
+}
+
+// ReturnStatement is the "RETURN" script statement; see ASTReturnStatement in
+// googlesql/parser/parse_tree.h. It has no children.
+type ReturnStatement struct {
+	Span
+}
+
+func (n *ReturnStatement) statementNode()   {}
+func (n *ReturnStatement) Children() []Node { return nil }
+
 // ModuleStatement is "MODULE path_expression [OPTIONS(...)]"; see
 // ASTModuleStatement in googlesql/parser/parse_tree.h.
 type ModuleStatement struct {
@@ -2889,6 +2981,30 @@ func (n *CreateFunctionStatement) Children() []Node {
 	return children(n.Declaration, n.ReturnType, n.Language, n.WithConnection, n.Body, n.Options)
 }
 
+// CreateProcedureStatement is a CREATE PROCEDURE statement; see
+// ASTCreateProcedureStatement in googlesql/parser/parse_tree.h. Scope is "",
+// "TEMP", "PUBLIC", or "PRIVATE". ExternalSecurity is "", "INVOKER", or
+// "DEFINER".
+type CreateProcedureStatement struct {
+	Span
+	Scope            string                `json:"scope,omitempty"`
+	IsOrReplace      bool                  `json:"is_or_replace,omitempty"`
+	IsIfNotExists    bool                  `json:"is_if_not_exists,omitempty"`
+	ExternalSecurity string                `json:"external_security,omitempty"`
+	Name             *PathExpression       `json:"name"`
+	Parameters       *FunctionParameters   `json:"parameters"`
+	Options          *OptionsList          `json:"options,omitempty"`
+	Body             *Script               `json:"body,omitempty"`
+	WithConnection   *WithConnectionClause `json:"with_connection,omitempty"`
+	Language         *Identifier           `json:"language,omitempty"`
+	Code             Node                  `json:"code,omitempty"`
+}
+
+func (n *CreateProcedureStatement) statementNode() {}
+func (n *CreateProcedureStatement) Children() []Node {
+	return children(n.Name, n.Parameters, n.Options, n.Body, n.WithConnection, n.Language, n.Code)
+}
+
 // SqlFunctionBody is the "(expression)" body of a SQL-defined function; see
 // ASTSqlFunctionBody in googlesql/parser/parse_tree.h. Its span includes the
 // enclosing parentheses; its single child is the body expression.
@@ -2961,6 +3077,8 @@ type FunctionParameter struct {
 	Alias          *Alias      `json:"alias,omitempty"`
 	DefaultValue   Node        `json:"default_value,omitempty"`
 	IsNotAggregate bool        `json:"is_not_aggregate,omitempty"`
+	// Mode is the procedure-parameter mode: "", "IN", "OUT", or "INOUT".
+	Mode string `json:"mode,omitempty"`
 }
 
 func (n *FunctionParameter) Children() []Node {
