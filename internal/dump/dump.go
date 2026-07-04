@@ -240,6 +240,8 @@ func nodeString(n ast.Node) string {
 		return "WindowFrameExpr(" + t.BoundaryType + ")"
 	case *ast.PartitionBy:
 		return "PartitionBy"
+	case *ast.ClusterBy:
+		return "ClusterBy"
 	case *ast.LimitOffset:
 		return "LimitOffset"
 	case *ast.Limit:

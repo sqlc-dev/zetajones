@@ -2153,16 +2153,23 @@ func (n *ArrayElement) Children() []Node {
 // "TEMP").
 type CreateTableStatement struct {
 	Span
-	Scope         string          `json:"scope,omitempty"`
-	IsOrReplace   bool            `json:"is_or_replace,omitempty"`
-	IsIfNotExists bool            `json:"is_if_not_exists,omitempty"`
-	Name          *PathExpression `json:"name"`
-	Query         *Query          `json:"query,omitempty"`
+	Scope            string                `json:"scope,omitempty"`
+	IsOrReplace      bool                  `json:"is_or_replace,omitempty"`
+	IsIfNotExists    bool                  `json:"is_if_not_exists,omitempty"`
+	Name             *PathExpression       `json:"name"`
+	TableElementList *TableElementList     `json:"table_element_list,omitempty"`
+	LikeName         *PathExpression       `json:"like_name,omitempty"`
+	PartitionBy      *PartitionBy          `json:"partition_by,omitempty"`
+	ClusterBy        *ClusterBy            `json:"cluster_by,omitempty"`
+	WithConnection   *WithConnectionClause `json:"with_connection,omitempty"`
+	Options          *OptionsList          `json:"options,omitempty"`
+	Query            *Query                `json:"query,omitempty"`
 }
 
 func (n *CreateTableStatement) statementNode() {}
 func (n *CreateTableStatement) Children() []Node {
-	return children(n.Name, n.Query)
+	return children(n.Name, n.TableElementList, n.LikeName,
+		n.PartitionBy, n.ClusterBy, n.WithConnection, n.Options, n.Query)
 }
 
 // CreateExternalTableStatement is a CREATE EXTERNAL TABLE statement; see
@@ -2815,6 +2822,17 @@ type PartitionBy struct {
 func (n *PartitionBy) Children() []Node {
 	out := children(n.Hint)
 	return append(out, n.Expressions...)
+}
+
+// ClusterBy is a "CLUSTER BY expr, ..." clause in a CREATE TABLE-family
+// statement; see ASTClusterBy in googlesql/parser/parse_tree.h.
+type ClusterBy struct {
+	Span
+	Expressions []Node `json:"expressions"`
+}
+
+func (n *ClusterBy) Children() []Node {
+	return append([]Node(nil), n.Expressions...)
 }
 
 // SetOperation is a chain of query primaries combined with the same set

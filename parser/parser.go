@@ -1666,6 +1666,70 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	}
 	stmt.Name = name
 	stmt.Stop = name.End()
+
+	// opt_table_element_list: "(column definitions and constraints)".
+	if p.peek().Kind == token.LPAREN {
+		tel, err := p.parseTableElementList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.TableElementList = tel
+		stmt.Stop = tel.End()
+	}
+
+	// opt_like_path_expression: "LIKE table_name".
+	if isKeyword(p.peek(), "LIKE") {
+		p.advance()
+		like, err := p.parseMaybeDashedPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.LikeName = like
+		stmt.Stop = like.End()
+	}
+
+	// opt_partition_by_clause_no_hint: "PARTITION BY expr, ...".
+	if isKeyword(p.peek(), "PARTITION") {
+		pb, err := p.parsePartitionBy()
+		if err != nil {
+			return nil, err
+		}
+		stmt.PartitionBy = pb
+		stmt.Stop = pb.End()
+	}
+
+	// opt_cluster_by_clause_no_hint: "CLUSTER BY expr, ...".
+	if isKeyword(p.peek(), "CLUSTER") {
+		cb, err := p.parseClusterBy()
+		if err != nil {
+			return nil, err
+		}
+		stmt.ClusterBy = cb
+		stmt.Stop = cb.End()
+	}
+
+	// opt_with_connection_clause: "WITH CONNECTION connection".
+	if isKeyword(p.peek(), "WITH") {
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+		stmt.Stop = wc.End()
+	}
+
+	// opt_options_list: "OPTIONS(...)".
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+
+	// opt_as_query: "AS query".
 	if isKeyword(p.peek(), "AS") {
 		p.advance()
 		query, err := p.parseQuery()
@@ -1679,6 +1743,29 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = p.prevEnd()
 	}
 	return stmt, nil
+}
+
+// parseClusterBy parses "CLUSTER BY expression, ..."; see
+// cluster_by_clause_prefix_no_hint in googlesql.tm. CLUSTER is the next token.
+func (p *parser) parseClusterBy() (*ast.ClusterBy, error) {
+	clusterTok := p.advance() // CLUSTER
+	if _, err := p.expectKeyword("BY"); err != nil {
+		return nil, err
+	}
+	clusterBy := &ast.ClusterBy{Span: span(clusterTok.Pos, 0)}
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		clusterBy.Expressions = append(clusterBy.Expressions, expr)
+		clusterBy.Stop = p.extEnd(expr)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	return clusterBy, nil
 }
 
 // parseCreateExternalTableStatement parses the tail of "CREATE [OR REPLACE]
