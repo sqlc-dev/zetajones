@@ -297,8 +297,9 @@ var reservedKeywords = map[string]bool{
 	"FROM": true,
 	"FULL": true, "GROUP": true, "HAVING": true, "IN": true, "INNER": true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LEFT": true, "LIKE": true,
-	"LIMIT": true, "NOT": true, "NULL": true, "ON": true, "OR": true,
-	"ORDER": true, "OUTER": true, "RIGHT": true, "SELECT": true, "SET": true,
+	"LIMIT": true, "NOT": true, "NULL": true, "NULLS": true, "ON": true,
+	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
+	"RIGHT": true, "SELECT": true, "SET": true,
 	"TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
 	"WITH": true,
 }
@@ -1539,24 +1540,18 @@ func (p *parser) parseOrderBy() (*ast.OrderBy, error) {
 	if err != nil {
 		return nil, err
 	}
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
 	if _, err := p.expectKeyword("BY"); err != nil {
 		return nil, err
 	}
-	orderBy := &ast.OrderBy{Span: span(orderTok.Pos, orderTok.End)}
+	orderBy := &ast.OrderBy{Span: span(orderTok.Pos, orderTok.End), Hint: hint}
 	for {
-		expr, err := p.parseExpression()
+		item, err := p.parseOrderingExpression()
 		if err != nil {
 			return nil, err
-		}
-		item := &ast.OrderingExpression{Span: span(expr.Pos(), expr.End()), Expr: expr}
-		if isKeyword(p.peek(), "ASC") {
-			tok := p.advance()
-			item.HasAsc = true
-			item.Stop = tok.End
-		} else if isKeyword(p.peek(), "DESC") {
-			tok := p.advance()
-			item.Descending = true
-			item.Stop = tok.End
 		}
 		orderBy.Items = append(orderBy.Items, item)
 		orderBy.Stop = item.End()
@@ -1566,6 +1561,138 @@ func (p *parser) parseOrderBy() (*ast.OrderBy, error) {
 		p.advance()
 	}
 	return orderBy, nil
+}
+
+// parseOrderingExpression parses "expression [COLLATE collation] [ASC|DESC]
+// [NULLS FIRST|NULLS LAST]"; see ordering_expression in googlesql.tm.
+func (p *parser) parseOrderingExpression() (*ast.OrderingExpression, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	item := &ast.OrderingExpression{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	if isKeyword(p.peek(), "COLLATE") {
+		collate, err := p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+		item.Collate = collate
+		item.Stop = collate.End()
+	}
+	if isKeyword(p.peek(), "ASC") {
+		tok := p.advance()
+		item.HasAsc = true
+		item.Stop = tok.End
+	} else if isKeyword(p.peek(), "DESC") {
+		tok := p.advance()
+		item.Descending = true
+		item.Stop = tok.End
+	}
+	if isKeyword(p.peek(), "NULLS") {
+		nullsTok := p.advance()
+		var nullsFirst bool
+		switch {
+		case isKeyword(p.peek(), "FIRST"):
+			nullsFirst = true
+		case isKeyword(p.peek(), "LAST"):
+			nullsFirst = false
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword FIRST or keyword LAST but got %s", describeToken(p.peek()))
+		}
+		endTok := p.advance()
+		item.NullOrder = &ast.NullOrder{Span: span(nullsTok.Pos, endTok.End), NullsFirst: nullsFirst}
+		item.Stop = endTok.End
+	}
+	return item, nil
+}
+
+// parseCollate parses "COLLATE <string literal>" with the COLLATE keyword as
+// the next token; see collate_clause in googlesql.tm. Parameters and system
+// variables as collation names are not implemented yet.
+func (p *parser) parseCollate() (*ast.Collate, error) {
+	collateTok := p.advance() // COLLATE
+	if p.peek().Kind != token.STRING {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "@" or "@@" or string literal but got %s`, describeToken(p.peek()))
+	}
+	name, err := p.parseStringLiteral()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.Collate{Span: span(collateTok.Pos, name.End()), Name: name}, nil
+}
+
+// parseOptionalHint parses a "@{name=value, ...}" hint if one starts at the
+// current position; see hint in googlesql.tm. Integer hints ("@<int>") are
+// not implemented yet.
+func (p *parser) parseOptionalHint() (*ast.Hint, error) {
+	if p.peek().Kind != token.ATSIGN {
+		return nil, nil
+	}
+	at := p.advance() // @
+	if _, err := p.expect(token.LBRACE, `"{"`); err != nil {
+		return nil, err
+	}
+	hint := &ast.Hint{Span: span(at.Pos, 0)}
+	for {
+		entry, err := p.parseHintEntry()
+		if err != nil {
+			return nil, err
+		}
+		hint.Entries = append(hint.Entries, entry)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rbrace, err := p.expect(token.RBRACE, `"}"`)
+	if err != nil {
+		return nil, err
+	}
+	hint.Stop = rbrace.End
+	return hint, nil
+}
+
+// parseHintEntry parses "[qualifier.]name = expression"; see hint_entry in
+// googlesql.tm.
+func (p *parser) parseHintEntry() (*ast.HintEntry, error) {
+	name, err := p.parseIdentifierInHints()
+	if err != nil {
+		return nil, err
+	}
+	entry := &ast.HintEntry{Span: span(name.Pos(), 0), Name: name}
+	if p.peek().Kind == token.DOT {
+		p.advance()
+		second, err := p.parseIdentifierInHints()
+		if err != nil {
+			return nil, err
+		}
+		entry.Qualifier = name
+		entry.Name = second
+	}
+	if _, err := p.expect(token.EQ, `"="`); err != nil {
+		return nil, err
+	}
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	entry.Value = value
+	entry.Stop = value.End()
+	return entry, nil
+}
+
+// parseIdentifierInHints parses a hint name identifier. The reserved keywords
+// HASH, PROTO, and PARTITION are also allowed as hint names; see
+// identifier_in_hints in googlesql.tm.
+func (p *parser) parseIdentifierInHints() (*ast.Identifier, error) {
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+	}
+	if isReserved(tok) && !isKeyword(tok, "HASH") && !isKeyword(tok, "PROTO") && !isKeyword(tok, "PARTITION") {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	}
+	return p.parseIdentifierToken(p.advance()), nil
 }
 
 func (p *parser) parseLimitOffset() (*ast.LimitOffset, error) {
@@ -2099,7 +2226,90 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 		return nil, err
 	}
 	call.Stop = rparen.End
+	if isKeyword(p.peek(), "OVER") {
+		p.advance()
+		windowSpec, err := p.parseWindowSpecification()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AnalyticFunctionCall{
+			Span:       span(call.Pos(), windowSpec.End()),
+			Expr:       call,
+			WindowSpec: windowSpec,
+		}, nil
+	}
 	return call, nil
+}
+
+// parseWindowSpecification parses the window after OVER: a base window name,
+// or "( [name] [PARTITION BY ...] [ORDER BY ...] )"; see window_specification
+// in googlesql.tm. Window frame clauses (ROWS/RANGE) are not implemented yet.
+func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
+	tok := p.peek()
+	if tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT {
+		if isReserved(tok) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+		}
+		ident := p.parseIdentifierToken(p.advance())
+		return &ast.WindowSpecification{Span: span(ident.Pos(), ident.End()), Name: ident}, nil
+	}
+	if tok.Kind != token.LPAREN {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	lparen := p.advance()
+	windowSpec := &ast.WindowSpecification{Span: span(lparen.Pos, 0)}
+	tok = p.peek()
+	if (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok) &&
+		!isKeyword(tok, "PARTITION") && !isKeyword(tok, "ORDER") {
+		windowSpec.Name = p.parseIdentifierToken(p.advance())
+	}
+	if isKeyword(p.peek(), "PARTITION") {
+		partitionBy, err := p.parsePartitionBy()
+		if err != nil {
+			return nil, err
+		}
+		windowSpec.PartitionBy = partitionBy
+	}
+	if isKeyword(p.peek(), "ORDER") {
+		orderBy, err := p.parseOrderBy()
+		if err != nil {
+			return nil, err
+		}
+		windowSpec.OrderBy = orderBy
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	windowSpec.Stop = rparen.End
+	return windowSpec, nil
+}
+
+// parsePartitionBy parses "PARTITION [hint] BY expression, ..."; see
+// partition_by_clause_prefix in googlesql.tm.
+func (p *parser) parsePartitionBy() (*ast.PartitionBy, error) {
+	partitionTok := p.advance() // PARTITION
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("BY"); err != nil {
+		return nil, err
+	}
+	partitionBy := &ast.PartitionBy{Span: span(partitionTok.Pos, 0), Hint: hint}
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		partitionBy.Expressions = append(partitionBy.Expressions, expr)
+		partitionBy.Stop = expr.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	return partitionBy, nil
 }
 
 func (p *parser) parsePathExpression() (*ast.PathExpression, error) {

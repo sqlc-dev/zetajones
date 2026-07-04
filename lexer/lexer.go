@@ -179,6 +179,10 @@ func (l *lexer) next() (token.Token, error) {
 		for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
 			l.pos++
 		}
+		if l.pos == start+1 {
+			// A bare "@" with no name, e.g. the "@" opening a hint.
+			return l.emit(token.ATSIGN, start), nil
+		}
 		return l.emit(token.PARAM, start), nil
 	}
 

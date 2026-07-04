@@ -118,6 +118,23 @@ func nodeString(n ast.Node) string {
 			return "OrderingExpression(ASC EXPLICITLY)"
 		}
 		return "OrderingExpression(ASC)"
+	case *ast.Collate:
+		return "Collate"
+	case *ast.NullOrder:
+		if t.NullsFirst {
+			return "NullOrder(NULLS FIRST)"
+		}
+		return "NullOrder(NULLS LAST)"
+	case *ast.Hint:
+		return "Hint"
+	case *ast.HintEntry:
+		return "HintEntry"
+	case *ast.AnalyticFunctionCall:
+		return "AnalyticFunctionCall"
+	case *ast.WindowSpecification:
+		return "WindowSpecification"
+	case *ast.PartitionBy:
+		return "PartitionBy"
 	case *ast.LimitOffset:
 		return "LimitOffset"
 	case *ast.Limit:

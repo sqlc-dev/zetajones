@@ -16,6 +16,7 @@ const (
 	BYTES           // bytes literal (any quoting form, including raw)
 	PARAM           // @named query parameter
 	SYSTEM_VARIABLE // @@system_variable
+	ATSIGN          // bare @ (hint prefix)
 
 	// Operators and punctuation
 	PLUS       // +

@@ -367,11 +367,12 @@ func (n *Having) Children() []Node {
 // OrderBy is an ORDER BY clause.
 type OrderBy struct {
 	Span
+	Hint  *Hint                 `json:"hint,omitempty"`
 	Items []*OrderingExpression `json:"items"`
 }
 
 func (n *OrderBy) Children() []Node {
-	var out []Node
+	out := children(n.Hint)
 	for _, item := range n.Items {
 		out = append(out, item)
 	}
@@ -381,13 +382,65 @@ func (n *OrderBy) Children() []Node {
 // OrderingExpression is a single ORDER BY item.
 type OrderingExpression struct {
 	Span
-	Expr       Node `json:"expr"`
-	Descending bool `json:"descending,omitempty"`
-	HasAsc     bool `json:"has_asc,omitempty"` // explicit ASC keyword present
+	Expr       Node       `json:"expr"`
+	Collate    *Collate   `json:"collate,omitempty"`
+	NullOrder  *NullOrder `json:"null_order,omitempty"`
+	Descending bool       `json:"descending,omitempty"`
+	HasAsc     bool       `json:"has_asc,omitempty"` // explicit ASC keyword present
 }
 
 func (n *OrderingExpression) Children() []Node {
-	return children(n.Expr)
+	return children(n.Expr, n.Collate, n.NullOrder)
+}
+
+// Collate is a "COLLATE <string literal or parameter>" clause; see ASTCollate
+// in googlesql/parser/parse_tree.h. The span includes the COLLATE keyword.
+type Collate struct {
+	Span
+	Name Node `json:"name"`
+}
+
+func (n *Collate) Children() []Node {
+	return children(n.Name)
+}
+
+// NullOrder is a "NULLS FIRST" or "NULLS LAST" clause on an ordering
+// expression; see ASTNullOrder in googlesql/parser/parse_tree.h.
+type NullOrder struct {
+	Span
+	NullsFirst bool `json:"nulls_first"`
+}
+
+func (n *NullOrder) Children() []Node { return nil }
+
+// Hint is a "@{name=value, ...}" hint annotation, optionally preceded by an
+// integer shard count as in "@4"; see ASTHint in
+// googlesql/parser/parse_tree.h. The span starts at the "@".
+type Hint struct {
+	Span
+	NumShardsHint Node         `json:"num_shards_hint,omitempty"` // integer literal in @<int>
+	Entries       []*HintEntry `json:"entries,omitempty"`
+}
+
+func (n *Hint) Children() []Node {
+	out := children(n.NumShardsHint)
+	for _, e := range n.Entries {
+		out = append(out, e)
+	}
+	return out
+}
+
+// HintEntry is a single "[qualifier.]name = value" entry in a hint; see
+// ASTHintEntry in googlesql/parser/parse_tree.h.
+type HintEntry struct {
+	Span
+	Qualifier *Identifier `json:"qualifier,omitempty"`
+	Name      *Identifier `json:"name"`
+	Value     Node        `json:"value"`
+}
+
+func (n *HintEntry) Children() []Node {
+	return children(n.Qualifier, n.Name, n.Value)
 }
 
 // LimitOffset is a LIMIT [OFFSET] clause.
@@ -850,4 +903,44 @@ func (n *FunctionCall) Children() []Node {
 	out := children(n.Function)
 	out = append(out, n.Args...)
 	return out
+}
+
+// AnalyticFunctionCall is a function call followed by an OVER clause; see
+// ASTAnalyticFunctionCall in googlesql/parser/parse_tree.h.
+type AnalyticFunctionCall struct {
+	Span
+	Expr       Node                 `json:"expr"` // the *FunctionCall
+	WindowSpec *WindowSpecification `json:"window_spec"`
+}
+
+func (n *AnalyticFunctionCall) Children() []Node {
+	return children(n.Expr, n.WindowSpec)
+}
+
+// WindowSpecification is the window after OVER: either a base window name, or
+// "( [base window name] [PARTITION BY ...] [ORDER BY ...] [frame] )"; see
+// ASTWindowSpecification in googlesql/parser/parse_tree.h. For the
+// parenthesized form the span includes the parentheses.
+type WindowSpecification struct {
+	Span
+	Name        *Identifier  `json:"name,omitempty"`
+	PartitionBy *PartitionBy `json:"partition_by,omitempty"`
+	OrderBy     *OrderBy     `json:"order_by,omitempty"`
+}
+
+func (n *WindowSpecification) Children() []Node {
+	return children(n.Name, n.PartitionBy, n.OrderBy)
+}
+
+// PartitionBy is a "PARTITION [hint] BY expr, ..." clause; see ASTPartitionBy
+// in googlesql/parser/parse_tree.h.
+type PartitionBy struct {
+	Span
+	Hint        *Hint  `json:"hint,omitempty"`
+	Expressions []Node `json:"expressions"`
+}
+
+func (n *PartitionBy) Children() []Node {
+	out := children(n.Hint)
+	return append(out, n.Expressions...)
 }

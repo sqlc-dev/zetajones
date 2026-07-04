@@ -5,11 +5,8 @@
     "case_12": true,
     "case_15": true,
     "case_2": true,
-    "case_3": true,
     "case_4": true,
-    "case_5": true,
-    "case_6": true,
-    "case_8": true
+    "case_6": true
   },
   "alternations": {
     "case_1": true,
