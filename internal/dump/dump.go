@@ -269,6 +269,8 @@ func nodeString(n ast.Node) string {
 		return "BetweenExpression(BETWEEN)"
 	case *ast.ClampedBetweenModifier:
 		return "ClampedBetweenModifier"
+	case *ast.HavingModifier:
+		return "HavingModifier"
 	case *ast.StructConstructorWithParens:
 		return "StructConstructorWithParens"
 	case *ast.FromQuery:

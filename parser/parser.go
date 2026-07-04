@@ -3360,7 +3360,17 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 		p.advance()
 		call.Distinct = true
 	}
-	if p.peek().Kind != token.RPAREN {
+	// null_handling_modifier in googlesql.tm: with an empty argument list,
+	// "IGNORE NULLS" / "RESPECT NULLS" is still a modifier, not arguments.
+	nullHandlingAhead := func() bool {
+		return (isKeyword(p.peek(), "IGNORE") || isKeyword(p.peek(), "RESPECT")) &&
+			isKeyword(p.peekAt(1), "NULLS")
+	}
+	// HAVING, ORDER, and LIMIT are reserved keywords that cannot start an
+	// expression; with an empty argument list they begin trailing modifiers.
+	if p.peek().Kind != token.RPAREN && !nullHandlingAhead() &&
+		!isKeyword(p.peek(), "HAVING") && !isKeyword(p.peek(), "ORDER") &&
+		!isKeyword(p.peek(), "LIMIT") {
 		for {
 			var arg ast.Node
 			if p.peek().Kind == token.STAR {
@@ -3377,6 +3387,41 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 				break
 			}
 			p.advance()
+		}
+	}
+	if nullHandlingAhead() {
+		if isKeyword(p.peek(), "IGNORE") {
+			call.NullHandling = "IGNORE_NULLS"
+		} else {
+			call.NullHandling = "RESPECT_NULLS"
+		}
+		p.advance() // consume IGNORE or RESPECT
+		p.advance() // consume NULLS
+	}
+	// having_modifier in googlesql.tm: "HAVING" ("MAX" | "MIN") expression.
+	if isKeyword(p.peek(), "HAVING") {
+		havingTok := p.advance()
+		var kind string
+		switch {
+		case isKeyword(p.peek(), "MAX"):
+			kind = "MAX"
+			p.advance()
+		case isKeyword(p.peek(), "MIN"):
+			kind = "MIN"
+			p.advance()
+		default:
+			return nil, p.errorf(p.peek().Pos,
+				"Syntax error: Expected keyword MAX or keyword MIN but got %s",
+				describeToken(p.peek()))
+		}
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		call.Having = &ast.HavingModifier{
+			Span: span(havingTok.Pos, p.extEnd(expr)),
+			Kind: kind,
+			Expr: expr,
 		}
 	}
 	// clamped_between_modifier in googlesql.tm. It requires at least one
@@ -3401,6 +3446,21 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 			Low:  low,
 			High: high,
 		}
+	}
+	// order_by_clause? opt_limit_offset_clause in function_call_expression.
+	if isKeyword(p.peek(), "ORDER") {
+		orderBy, err := p.parseOrderBy(false)
+		if err != nil {
+			return nil, err
+		}
+		call.OrderBy = orderBy
+	}
+	if isKeyword(p.peek(), "LIMIT") {
+		limitOffset, err := p.parseLimitOffset()
+		if err != nil {
+			return nil, err
+		}
+		call.LimitOffset = limitOffset
 	}
 	rparen, err := p.expect(token.RPAREN, `")"`)
 	if err != nil {

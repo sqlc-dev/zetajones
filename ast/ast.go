@@ -1236,19 +1236,48 @@ func (n *CreateTableStatement) Children() []Node {
 // FunctionCall is a function call expression.
 type FunctionCall struct {
 	Span
-	Function       *PathExpression         `json:"function"`
-	Args           []Node                  `json:"args"`
-	Distinct       bool                    `json:"distinct,omitempty"`
+	Function *PathExpression `json:"function"`
+	Args     []Node          `json:"args"`
+	Distinct bool            `json:"distinct,omitempty"`
+	// NullHandling is "IGNORE_NULLS" or "RESPECT_NULLS" when the call has an
+	// "IGNORE NULLS" or "RESPECT NULLS" modifier; empty otherwise. It is not
+	// shown in the debug tree; see ASTFunctionCall::NullHandlingModifier.
+	NullHandling   string                  `json:"null_handling_modifier,omitempty"`
+	Having         *HavingModifier         `json:"having_modifier,omitempty"`
 	ClampedBetween *ClampedBetweenModifier `json:"clamped_between_modifier,omitempty"`
+	OrderBy        *OrderBy                `json:"order_by,omitempty"`
+	LimitOffset    *LimitOffset            `json:"limit_offset,omitempty"`
 }
 
 func (n *FunctionCall) Children() []Node {
 	out := children(n.Function)
 	out = append(out, n.Args...)
+	if n.Having != nil {
+		out = append(out, n.Having)
+	}
 	if n.ClampedBetween != nil {
 		out = append(out, n.ClampedBetween)
 	}
+	if n.OrderBy != nil {
+		out = append(out, n.OrderBy)
+	}
+	if n.LimitOffset != nil {
+		out = append(out, n.LimitOffset)
+	}
 	return out
+}
+
+// HavingModifier is the "HAVING MAX <expr>" or "HAVING MIN <expr>" modifier
+// on aggregate function calls; see ASTHavingModifier in
+// googlesql/parser/parse_tree.h.
+type HavingModifier struct {
+	Span
+	Kind string `json:"kind"` // "MAX" or "MIN"
+	Expr Node   `json:"expr"`
+}
+
+func (n *HavingModifier) Children() []Node {
+	return children(n.Expr)
 }
 
 // AnalyticFunctionCall is a function call followed by an OVER clause; see
