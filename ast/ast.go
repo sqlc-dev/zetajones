@@ -180,11 +180,76 @@ func (n *StatementList) Children() []Node { return append([]Node(nil), n.Stateme
 // ASTBeginEndBlock in googlesql/parser/parse_tree.h.
 type BeginEndBlock struct {
 	Span
-	Statements *StatementList `json:"statements"`
+	Statements *StatementList        `json:"statements"`
+	Handlers   *ExceptionHandlerList `json:"handlers,omitempty"`
 }
 
-func (n *BeginEndBlock) statementNode()   {}
-func (n *BeginEndBlock) Children() []Node { return children(n.Statements) }
+func (n *BeginEndBlock) statementNode() {}
+func (n *BeginEndBlock) Children() []Node {
+	out := children(n.Statements)
+	if n.Handlers != nil {
+		out = append(out, n.Handlers)
+	}
+	return out
+}
+
+// ExceptionHandler is a single "WHEN ERROR THEN statement_list" handler; see
+// ASTExceptionHandler in googlesql/parser/parse_tree.h.
+type ExceptionHandler struct {
+	Span
+	Body *StatementList `json:"body"`
+}
+
+func (n *ExceptionHandler) Children() []Node { return children(n.Body) }
+
+// ExceptionHandlerList is the list of exception handlers on a BEGIN/END block;
+// see ASTExceptionHandlerList in googlesql/parser/parse_tree.h. The grammar
+// currently allows exactly one handler.
+type ExceptionHandlerList struct {
+	Span
+	Handlers []*ExceptionHandler `json:"handlers"`
+}
+
+func (n *ExceptionHandlerList) Children() []Node {
+	out := make([]Node, 0, len(n.Handlers))
+	for _, h := range n.Handlers {
+		out = append(out, h)
+	}
+	return out
+}
+
+// RaiseStatement is a "RAISE [USING MESSAGE = expr]" script statement; see
+// ASTRaiseStatement in googlesql/parser/parse_tree.h. Message is nil for a
+// bare rethrow.
+type RaiseStatement struct {
+	Span
+	Message Node `json:"message,omitempty"`
+}
+
+func (n *RaiseStatement) statementNode()   {}
+func (n *RaiseStatement) Children() []Node { return children(n.Message) }
+
+// BreakStatement is a "BREAK" or "LEAVE" script statement; both parse to
+// ASTBreakStatement (Keyword records which spelling was used). See
+// ASTBreakStatement in googlesql/parser/parse_tree.h.
+type BreakStatement struct {
+	Span
+	Keyword string `json:"keyword"`
+}
+
+func (n *BreakStatement) statementNode()   {}
+func (n *BreakStatement) Children() []Node { return nil }
+
+// ContinueStatement is a "CONTINUE" or "ITERATE" script statement; both parse
+// to ASTContinueStatement (Keyword records which spelling was used). See
+// ASTContinueStatement in googlesql/parser/parse_tree.h.
+type ContinueStatement struct {
+	Span
+	Keyword string `json:"keyword"`
+}
+
+func (n *ContinueStatement) statementNode()   {}
+func (n *ContinueStatement) Children() []Node { return nil }
 
 // VariableDeclaration is "DECLARE identifier_list [type] [DEFAULT expr]"; see
 // ASTVariableDeclaration in googlesql/parser/parse_tree.h.

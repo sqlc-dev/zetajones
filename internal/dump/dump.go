@@ -959,6 +959,16 @@ func nodeString(n ast.Node) string {
 		return "StatementList"
 	case *ast.BeginEndBlock:
 		return "BeginEndBlock"
+	case *ast.ExceptionHandler:
+		return "ExceptionHandler"
+	case *ast.ExceptionHandlerList:
+		return "ExceptionHandlerList"
+	case *ast.RaiseStatement:
+		return "RaiseStatement"
+	case *ast.BreakStatement:
+		return "BreakStatement"
+	case *ast.ContinueStatement:
+		return "ContinueStatement"
 	case *ast.VariableDeclaration:
 		return "VariableDeclaration"
 	case *ast.IfStatement:

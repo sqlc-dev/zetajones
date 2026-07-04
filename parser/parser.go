@@ -3760,9 +3760,8 @@ func (p *parser) parseProcedureParameterType() (ast.Node, error) {
 	return p.parseType()
 }
 
-// parseBeginEndBlock parses "BEGIN statement_list END"; see begin_end_block in
-// googlesql.tm. BEGIN is the next token. Exception handlers are not yet
-// supported.
+// parseBeginEndBlock parses "BEGIN statement_list [exception_handler] END"; see
+// begin_end_block in googlesql.tm. BEGIN is the next token.
 func (p *parser) parseBeginEndBlock() (*ast.BeginEndBlock, error) {
 	beginTok := p.advance() // BEGIN
 	list, err := p.parseScriptStatementList(beginTok.End, func() bool {
@@ -3771,11 +3770,45 @@ func (p *parser) parseBeginEndBlock() (*ast.BeginEndBlock, error) {
 	if err != nil {
 		return nil, err
 	}
+	var handlers *ast.ExceptionHandlerList
+	if isKeyword(p.peek(), "EXCEPTION") {
+		handlers, err = p.parseExceptionHandler()
+		if err != nil {
+			return nil, err
+		}
+	}
 	endTok, err := p.expectKeyword("END")
 	if err != nil {
 		return nil, err
 	}
-	return &ast.BeginEndBlock{Span: span(beginTok.Pos, endTok.End), Statements: list}, nil
+	return &ast.BeginEndBlock{Span: span(beginTok.Pos, endTok.End), Statements: list, Handlers: handlers}, nil
+}
+
+// parseExceptionHandler parses "EXCEPTION WHEN ERROR THEN statement_list",
+// producing a single-element ASTExceptionHandlerList; see exception_handler in
+// googlesql.tm. EXCEPTION is the next token. The handler node starts at the
+// WHEN keyword (WithStartLocation in the reference), while the list starts at
+// EXCEPTION.
+func (p *parser) parseExceptionHandler() (*ast.ExceptionHandlerList, error) {
+	excTok := p.advance() // EXCEPTION
+	whenTok, err := p.expectKeyword("WHEN")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("ERROR"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("THEN"); err != nil {
+		return nil, err
+	}
+	body, err := p.parseScriptStatementList(p.prevEnd(), func() bool {
+		return isKeyword(p.peek(), "END")
+	})
+	if err != nil {
+		return nil, err
+	}
+	handler := &ast.ExceptionHandler{Span: span(whenTok.Pos, body.End()), Body: body}
+	return &ast.ExceptionHandlerList{Span: span(excTok.Pos, body.End()), Handlers: []*ast.ExceptionHandler{handler}}, nil
 }
 
 // parseScriptStatementList parses a "statement_list": a sequence of statements
@@ -3825,8 +3858,51 @@ func (p *parser) parseScriptStatement() (ast.Statement, error) {
 		return p.parseRepeatStatement()
 	case isKeyword(p.peek(), "FOR"):
 		return p.parseForInStatement()
+	case isKeyword(p.peek(), "RAISE"):
+		return p.parseRaiseStatement()
+	case isKeyword(p.peek(), "BREAK"), isKeyword(p.peek(), "LEAVE"):
+		return p.parseBreakStatement()
+	case isKeyword(p.peek(), "CONTINUE"), isKeyword(p.peek(), "ITERATE"):
+		return p.parseContinueStatement()
 	}
 	return p.parseStatement()
+}
+
+// parseRaiseStatement parses "RAISE" or "RAISE USING MESSAGE = expression"; see
+// raise_statement in googlesql.tm. RAISE is the next token.
+func (p *parser) parseRaiseStatement() (ast.Statement, error) {
+	raiseTok := p.advance() // RAISE
+	if !isKeyword(p.peek(), "USING") {
+		return &ast.RaiseStatement{Span: span(raiseTok.Pos, raiseTok.End)}, nil
+	}
+	p.advance() // USING
+	if _, err := p.expectKeyword("MESSAGE"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.EQ, `"="`); err != nil {
+		return nil, err
+	}
+	msg, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RaiseStatement{Span: span(raiseTok.Pos, p.extEnd(msg)), Message: msg}, nil
+}
+
+// parseBreakStatement parses "BREAK" or "LEAVE"; both produce an
+// ASTBreakStatement. See break_statement in googlesql.tm. The keyword is the
+// next token.
+func (p *parser) parseBreakStatement() (ast.Statement, error) {
+	tok := p.advance() // BREAK / LEAVE
+	return &ast.BreakStatement{Span: span(tok.Pos, tok.End), Keyword: strings.ToUpper(tok.Image)}, nil
+}
+
+// parseContinueStatement parses "CONTINUE" or "ITERATE"; both produce an
+// ASTContinueStatement. See continue_statement in googlesql.tm. The keyword is
+// the next token.
+func (p *parser) parseContinueStatement() (ast.Statement, error) {
+	tok := p.advance() // CONTINUE / ITERATE
+	return &ast.ContinueStatement{Span: span(tok.Pos, tok.End), Keyword: strings.ToUpper(tok.Image)}, nil
 }
 
 // isLoopBodyEnd reports whether the next token terminates a loop/for/repeat
