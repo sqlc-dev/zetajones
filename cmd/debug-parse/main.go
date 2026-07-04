@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sqlc-dev/zetajones/ast"
 	"github.com/sqlc-dev/zetajones/internal/dump"
 	"github.com/sqlc-dev/zetajones/parser"
 )
@@ -14,11 +15,20 @@ import (
 func main() {
 	feats := flag.String("features", "NONE", "")
 	noloc := flag.Bool("noloc", false, "")
+	mode := flag.String("mode", "statement", "statement or script")
 	flag.Parse()
 	sql := strings.Join(flag.Args(), " ")
 	var opts parser.Options
 	opts.Features = parser.ParseFeatureSet(*feats)
-	stmt, err := parser.ParseStatementWithOptions(sql, opts)
+	var (
+		node ast.Node
+		err  error
+	)
+	if *mode == "script" {
+		node, err = parser.ParseScriptWithOptions(sql, opts)
+	} else {
+		node, err = parser.ParseStatementWithOptions(sql, opts)
+	}
 	if err != nil {
 		var perr *parser.Error
 		if errors.As(err, &perr) {
@@ -28,5 +38,5 @@ func main() {
 		fmt.Println("ERROR: " + err.Error())
 		os.Exit(0)
 	}
-	fmt.Println(dump.Tree(stmt, dump.Options{SQL: sql, ShowLocationText: !*noloc}))
+	fmt.Println(dump.Tree(node, dump.Options{SQL: sql, ShowLocationText: !*noloc}))
 }

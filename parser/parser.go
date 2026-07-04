@@ -253,6 +253,16 @@ const FeatureOrderedPrimaryKeys Feature = "ORDERED_PRIMARY_KEYS"
 // supported.".
 const FeatureTtl Feature = "TTL"
 
+// FeatureRepeat gates the "REPEAT ... UNTIL ... END REPEAT" script statement
+// (FEATURE_REPEAT); see repeat_statement in googlesql.tm. When off, it reports
+// "REPEAT is not supported".
+const FeatureRepeat Feature = "REPEAT"
+
+// FeatureForIn gates the "FOR ... IN (...) DO ... END FOR" script statement
+// (FEATURE_FOR_IN); see for_in_statement in googlesql.tm. When off, it reports
+// "FOR...IN is not supported".
+const FeatureForIn Feature = "FOR_IN"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -270,6 +280,8 @@ var featureInMaximum = map[Feature]bool{
 	FeatureAllowDashesInTableName:               true,
 	FeatureOrderedPrimaryKeys:                   false, // in_development
 	FeatureTtl:                                  true,
+	FeatureRepeat:                               true,
+	FeatureForIn:                                true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -382,6 +394,13 @@ func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
 			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
 		}
 		return nil, err
+	}
+	// The reference tokenizer terminates a script with a sentinel whose
+	// syntax-error wording is "end of script"; stash that in the EOF token so
+	// describeToken reports it. See GetParserModeName in
+	// googlesql/parser/parser_internal.cc.
+	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
+		toks[n-1].Image = "end of script"
 	}
 	p := &parser{sql: sql, toks: toks, features: opts.Features}
 	// An empty script resolves to a Script wrapping an empty statement list.
@@ -3798,8 +3817,138 @@ func (p *parser) parseScriptStatement() (ast.Statement, error) {
 		return p.parseReturnStatement()
 	case isKeyword(p.peek(), "BEGIN"):
 		return p.parseBeginEndBlock()
+	case isKeyword(p.peek(), "LOOP"):
+		return p.parseLoopStatement()
+	case isKeyword(p.peek(), "WHILE"):
+		return p.parseWhileStatement()
+	case isKeyword(p.peek(), "REPEAT"):
+		return p.parseRepeatStatement()
+	case isKeyword(p.peek(), "FOR"):
+		return p.parseForInStatement()
 	}
 	return p.parseStatement()
+}
+
+// isLoopBodyEnd reports whether the next token terminates a loop/for/repeat
+// body statement_list: the body's own END keyword or (for a REPEAT body) the
+// UNTIL keyword. Stopping here lets the enclosing construct report the precise
+// "Expected keyword END/UNTIL but got ..." error via expectKeyword.
+func (p *parser) isLoopBodyEnd() bool {
+	return isKeyword(p.peek(), "END") || isKeyword(p.peek(), "UNTIL")
+}
+
+// parseLoopStatement parses "LOOP statement_list END LOOP"; it produces an
+// ASTWhileStatement with no condition. See loop_statement in googlesql.tm. LOOP
+// is the next token.
+func (p *parser) parseLoopStatement() (ast.Statement, error) {
+	loopTok := p.advance() // LOOP
+	body, err := p.parseScriptStatementList(loopTok.End, p.isLoopBodyEnd)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("END"); err != nil {
+		return nil, err
+	}
+	endTok, err := p.expectKeyword("LOOP")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.WhileStatement{Span: span(loopTok.Pos, endTok.End), Body: body}, nil
+}
+
+// parseWhileStatement parses "WHILE expression DO statement_list END WHILE"; see
+// while_statement in googlesql.tm. WHILE is the next token.
+func (p *parser) parseWhileStatement() (ast.Statement, error) {
+	whileTok := p.advance() // WHILE
+	cond, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("DO"); err != nil {
+		return nil, err
+	}
+	body, err := p.parseScriptStatementList(p.prevEnd(), p.isLoopBodyEnd)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("END"); err != nil {
+		return nil, err
+	}
+	endTok, err := p.expectKeyword("WHILE")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.WhileStatement{Span: span(whileTok.Pos, endTok.End), Condition: cond, Body: body}, nil
+}
+
+// parseRepeatStatement parses "REPEAT statement_list until_clause END REPEAT";
+// see repeat_statement in googlesql.tm. REPEAT is the next token.
+func (p *parser) parseRepeatStatement() (ast.Statement, error) {
+	repeatTok := p.advance() // REPEAT
+	if !p.features.Enabled(FeatureRepeat) {
+		// No "Syntax error: " prefix; see repeat_statement in googlesql.tm.
+		return nil, p.errorf(repeatTok.Pos, "REPEAT is not supported")
+	}
+	body, err := p.parseScriptStatementList(repeatTok.End, p.isLoopBodyEnd)
+	if err != nil {
+		return nil, err
+	}
+	untilTok, err := p.expectKeyword("UNTIL")
+	if err != nil {
+		return nil, err
+	}
+	cond, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	until := &ast.UntilClause{Span: span(untilTok.Pos, p.extEnd(cond)), Condition: cond}
+	if _, err := p.expectKeyword("END"); err != nil {
+		return nil, err
+	}
+	endTok, err := p.expectKeyword("REPEAT")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RepeatStatement{Span: span(repeatTok.Pos, endTok.End), Body: body, Until: until}, nil
+}
+
+// parseForInStatement parses "FOR identifier IN ( query ) DO statement_list END
+// FOR"; see for_in_statement in googlesql.tm. FOR is the next token.
+func (p *parser) parseForInStatement() (ast.Statement, error) {
+	forTok := p.advance() // FOR
+	if !p.features.Enabled(FeatureForIn) {
+		// No "Syntax error: " prefix; see for_in_statement in googlesql.tm.
+		return nil, p.errorf(forTok.Pos, "FOR...IN is not supported")
+	}
+	variable, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("IN"); err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected %s but got %s", `"("`, describeToken(p.peek()))
+	}
+	query, _, err := p.parseParenthesizedQuery()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("DO"); err != nil {
+		return nil, err
+	}
+	body, err := p.parseScriptStatementList(p.prevEnd(), p.isLoopBodyEnd)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("END"); err != nil {
+		return nil, err
+	}
+	endTok, err := p.expectKeyword("FOR")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ForInStatement{Span: span(forTok.Pos, endTok.End), Variable: variable, Query: query, Body: body}, nil
 }
 
 // parseVariableDeclaration parses "DECLARE identifier_list (type [DEFAULT expr]

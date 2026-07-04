@@ -249,6 +249,51 @@ type ReturnStatement struct {
 func (n *ReturnStatement) statementNode()   {}
 func (n *ReturnStatement) Children() []Node { return nil }
 
+// WhileStatement is a "LOOP statement_list END LOOP" or "WHILE expression DO
+// statement_list END WHILE" loop; both parse to ASTWhileStatement (Condition is
+// nil for the LOOP form). See ASTWhileStatement in
+// googlesql/parser/parse_tree.h.
+type WhileStatement struct {
+	Span
+	Condition Node           `json:"condition,omitempty"`
+	Body      *StatementList `json:"body"`
+}
+
+func (n *WhileStatement) statementNode()   {}
+func (n *WhileStatement) Children() []Node { return children(n.Condition, n.Body) }
+
+// UntilClause is the "UNTIL expression" clause of a REPEAT statement; see
+// ASTUntilClause in googlesql/parser/parse_tree.h.
+type UntilClause struct {
+	Span
+	Condition Node `json:"condition"`
+}
+
+func (n *UntilClause) Children() []Node { return children(n.Condition) }
+
+// RepeatStatement is "REPEAT statement_list until_clause END REPEAT"; see
+// ASTRepeatStatement in googlesql/parser/parse_tree.h.
+type RepeatStatement struct {
+	Span
+	Body  *StatementList `json:"body"`
+	Until *UntilClause   `json:"until"`
+}
+
+func (n *RepeatStatement) statementNode()   {}
+func (n *RepeatStatement) Children() []Node { return children(n.Body, n.Until) }
+
+// ForInStatement is "FOR identifier IN ( query ) DO statement_list END FOR";
+// see ASTForInStatement in googlesql/parser/parse_tree.h.
+type ForInStatement struct {
+	Span
+	Variable *Identifier    `json:"variable"`
+	Query    *Query         `json:"query"`
+	Body     *StatementList `json:"body"`
+}
+
+func (n *ForInStatement) statementNode()   {}
+func (n *ForInStatement) Children() []Node { return children(n.Variable, n.Query, n.Body) }
+
 // ModuleStatement is "MODULE path_expression [OPTIONS(...)]"; see
 // ASTModuleStatement in googlesql/parser/parse_tree.h.
 type ModuleStatement struct {

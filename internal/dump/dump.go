@@ -969,6 +969,14 @@ func nodeString(n ast.Node) string {
 		return "ElseifClauseList"
 	case *ast.ReturnStatement:
 		return "ReturnStatement"
+	case *ast.WhileStatement:
+		return "WhileStatement"
+	case *ast.UntilClause:
+		return "UntilClause"
+	case *ast.RepeatStatement:
+		return "RepeatStatement"
+	case *ast.ForInStatement:
+		return "ForInStatement"
 	case *ast.SqlFunctionBody:
 		return "SqlFunctionBody"
 	case *ast.TemplatedParameterType:
