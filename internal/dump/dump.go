@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sqlc-dev/zetajones/ast"
+	"github.com/sqlc-dev/zetajones/token"
 )
 
 // Options controls the debug output format.
@@ -189,7 +190,7 @@ func nodeString(n ast.Node) string {
 	case *ast.OptionsEntry:
 		return "OptionsEntry"
 	case *ast.Identifier:
-		return fmt.Sprintf("Identifier(%s)", t.Name)
+		return fmt.Sprintf("Identifier(%s)", identifierLiteral(t.Name))
 	case *ast.PathExpression:
 		return "PathExpression"
 	case *ast.NullLiteral:
@@ -259,6 +260,12 @@ func nodeString(n ast.Node) string {
 		return "DefaultLiteral"
 	case *ast.CallStatement:
 		return "CallStatement"
+	case *ast.CaseValueExpression:
+		return "CaseValueExpression"
+	case *ast.CaseNoValueExpression:
+		return "CaseNoValueExpression"
+	case *ast.DotIdentifier:
+		return "DotIdentifier"
 	case *ast.ParameterExpr:
 		// Positional parameters show their 1-based position; see
 		// ASTParameterExpr::SingleNodeDebugString.
@@ -447,4 +454,73 @@ func isASCIISpace(r rune) bool {
 
 func isASCIISpaceByte(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f'
+}
+
+// identifierLiteral renders an identifier name the way ZetaSQL's
+// ToIdentifierLiteral (googlesql/public/strings.cc, Apache 2.0) does: names
+// that are valid unquoted identifiers — and not keywords whose meaning would
+// change without quoting — print as-is; everything else is backquoted with
+// C-style escaping.
+func identifierLiteral(name string) string {
+	if isValidUnquotedIdentifier(name) && !token.NonReservedIdentifierMustBeBackquoted(name) {
+		return name
+	}
+	return "`" + escapeIdentifier(name) + "`"
+}
+
+// isValidUnquotedIdentifier ports IsValidUnquotedIdentifier from
+// googlesql/public/strings.cc with all reservable keywords enabled and
+// allow_reserved_keywords=false, which is how ToIdentifierLiteral calls it.
+func isValidUnquotedIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	if !isIdentStartByte(s[0]) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !isIdentStartByte(c) && !(c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return !token.IsReservableKeyword(s)
+}
+
+func isIdentStartByte(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// escapeIdentifier ports CEscapeInternal from googlesql/public/strings.cc
+// (Apache 2.0) with utf8_safe=true and '`' as the quote char to escape.
+func escapeIdentifier(s string) string {
+	var b strings.Builder
+	lastHexEscape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isHexEscape := false
+		switch c {
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '`':
+			b.WriteString("\\`")
+		default:
+			isPrint := c >= 0x20 && c < 0x7f
+			isXDigit := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if c < 0x80 && (!isPrint || (lastHexEscape && isXDigit)) {
+				fmt.Fprintf(&b, `\x%02X`, c)
+				isHexEscape = true
+			} else {
+				b.WriteByte(c)
+			}
+		}
+		lastHexEscape = isHexEscape
+	}
+	return b.String()
 }

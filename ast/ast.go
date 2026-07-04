@@ -1014,6 +1014,44 @@ func (n *ExpressionSubquery) Children() []Node {
 	return children(n.Query)
 }
 
+// CaseValueExpression is "CASE value WHEN ... THEN ... [ELSE ...] END"; see
+// ASTCaseValueExpression in googlesql/parser/parse_tree.h. Arguments holds
+// the value expression, then alternating WHEN/THEN expression pairs, then
+// the optional ELSE expression.
+type CaseValueExpression struct {
+	Span
+	Arguments []Node `json:"arguments"`
+}
+
+func (n *CaseValueExpression) Children() []Node {
+	return children(n.Arguments...)
+}
+
+// CaseNoValueExpression is "CASE WHEN ... THEN ... [ELSE ...] END"; see
+// ASTCaseNoValueExpression in googlesql/parser/parse_tree.h. Arguments holds
+// alternating WHEN/THEN expression pairs, then the optional ELSE expression.
+type CaseNoValueExpression struct {
+	Span
+	Arguments []Node `json:"arguments"`
+}
+
+func (n *CaseNoValueExpression) Children() []Node {
+	return children(n.Arguments...)
+}
+
+// DotIdentifier is "expression . identifier" where the expression is not a
+// plain path expression (e.g. a parenthesized expression or a CASE
+// expression); see ASTDotIdentifier in googlesql/parser/parse_tree.h.
+type DotIdentifier struct {
+	Span
+	Expr Node        `json:"expr"`
+	Name *Identifier `json:"name"`
+}
+
+func (n *DotIdentifier) Children() []Node {
+	return children(n.Expr, n.Name)
+}
+
 // CreateTableStatement is a CREATE TABLE statement, optionally with an AS
 // query; see ASTCreateTableStatement in googlesql/parser/parse_tree.h.
 // Scope is "", "TEMP", "PUBLIC", or "PRIVATE" (TEMPORARY normalizes to

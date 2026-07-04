@@ -2641,7 +2641,100 @@ func (p *parser) parseUnary() (ast.Node, error) {
 			Operand: operand,
 		}, nil
 	}
-	return p.parsePrimary()
+	return p.parsePostfix()
+}
+
+// parsePostfix parses a primary expression followed by postfix operators,
+// currently ". identifier" (generalized field access); see the
+// expression_higher_prec_than_and "." rules in googlesql.tm.
+func (p *parser) parsePostfix() (ast.Node, error) {
+	expr, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().Kind == token.DOT {
+		next := p.peekAt(1)
+		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+			break
+		}
+		p.advance() // .
+		ident := p.parseIdentifierToken(p.advance())
+		// A non-parenthesized path expression is extended in place; anything
+		// else becomes a generalized DotIdentifier (see the
+		// expression_higher_prec_than_and "." identifier rule in googlesql.tm).
+		if path, ok := expr.(*ast.PathExpression); ok {
+			if _, parenthesized := p.extents[path]; !parenthesized {
+				path.Names = append(path.Names, ident)
+				path.Stop = ident.End()
+				continue
+			}
+		}
+		expr = &ast.DotIdentifier{
+			Span: span(p.extStart(expr), ident.End()),
+			Expr: expr,
+			Name: ident,
+		}
+	}
+	return expr, nil
+}
+
+// parseCaseExpression parses "CASE [value] WHEN expr THEN expr ...
+// [ELSE expr] END" with the CASE keyword as the next token; see
+// case_no_value_expression_prefix and case_value_expression_prefix in
+// googlesql.tm.
+func (p *parser) parseCaseExpression() (ast.Node, error) {
+	caseTok := p.advance() // CASE
+	var value ast.Node
+	if !isKeyword(p.peek(), "WHEN") {
+		var err error
+		value, err = p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+	}
+	var args []ast.Node
+	for {
+		if _, err := p.expectKeyword("WHEN"); err != nil {
+			return nil, err
+		}
+		when, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("THEN"); err != nil {
+			return nil, err
+		}
+		then, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, when, then)
+		if !isKeyword(p.peek(), "WHEN") {
+			break
+		}
+	}
+	if isKeyword(p.peek(), "ELSE") {
+		p.advance()
+		elseExpr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, elseExpr)
+	}
+	end, err := p.expectKeyword("END")
+	if err != nil {
+		return nil, err
+	}
+	if value != nil {
+		return &ast.CaseValueExpression{
+			Span:      span(caseTok.Pos, end.End),
+			Arguments: append([]ast.Node{value}, args...),
+		}, nil
+	}
+	return &ast.CaseNoValueExpression{
+		Span:      span(caseTok.Pos, end.End),
+		Arguments: args,
+	}, nil
 }
 
 func (p *parser) parsePrimary() (ast.Node, error) {
@@ -2727,6 +2820,8 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isKeyword(tok, "EXISTS") && p.peekAt(1).Kind == token.LPAREN:
 			p.advance() // EXISTS; the subquery's span starts at the keyword.
 			return p.parseModifiedSubquery(tok.Pos, "EXISTS")
+		case isKeyword(tok, "CASE"):
+			return p.parseCaseExpression()
 		case isReserved(tok):
 			if err := p.exceptClashError(); err != nil {
 				return nil, err
