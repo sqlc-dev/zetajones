@@ -2811,6 +2811,20 @@ func (n *RangeType) Children() []Node {
 	return children(n.ElementType, n.TypeParameters, n.Collate)
 }
 
+// MapType is "MAP<key_type, value_type>"; see ASTMapType in
+// googlesql/parser/parse_tree.h.
+type MapType struct {
+	Span
+	KeyType        Node               `json:"key_type"`
+	ValueType      Node               `json:"value_type"`
+	TypeParameters *TypeParameterList `json:"type_parameters,omitempty"`
+	Collate        *Collate           `json:"collate,omitempty"`
+}
+
+func (n *MapType) Children() []Node {
+	return children(n.KeyType, n.ValueType, n.TypeParameters, n.Collate)
+}
+
 // FunctionType is "FUNCTION<argtypes -> returntype>"; see ASTFunctionType in
 // googlesql/parser/parse_tree.h. Children are the argument list, the return
 // type, and then any trailing type parameters and collation.

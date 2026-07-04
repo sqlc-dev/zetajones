@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sqlc-dev/zetajones/ast"
 	"github.com/sqlc-dev/zetajones/internal/dump"
 	"github.com/sqlc-dev/zetajones/internal/testfile"
 	"github.com/sqlc-dev/zetajones/parser"
@@ -28,12 +29,27 @@ func runCase(c *testfile.Case) string {
 	// [default ...] options. The reference test driver defaults to NONE; see
 	// run_parser_test.cc.
 	opts.Features = parser.ParseFeatureSet("NONE")
+	mode := "statement"
 	for _, opt := range c.Options {
 		if spec, ok := strings.CutPrefix(opt, "language_features="); ok {
 			opts.Features = parser.ParseFeatureSet(spec)
 		}
+		if m, ok := strings.CutPrefix(opt, "mode="); ok {
+			mode = m
+		}
 	}
-	stmt, err := parser.ParseStatementWithOptions(c.SQL, opts)
+	var (
+		node ast.Node
+		err  error
+	)
+	switch mode {
+	case "type":
+		node, err = parser.ParseTypeWithOptions(c.SQL, opts)
+	default:
+		var stmt ast.Statement
+		stmt, err = parser.ParseStatementWithOptions(c.SQL, opts)
+		node = stmt
+	}
 	if err != nil {
 		var perr *parser.Error
 		if errors.As(err, &perr) {
@@ -41,7 +57,7 @@ func runCase(c *testfile.Case) string {
 		}
 		return "ERROR: " + err.Error()
 	}
-	return dump.Tree(stmt, dump.Options{
+	return dump.Tree(node, dump.Options{
 		SQL:              c.SQL,
 		ShowLocationText: !c.HasOption("no_show_parse_location_text"),
 	})

@@ -343,6 +343,43 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 	return stmt, nil
 }
 
+// ParseType parses a single standalone type (outside of any query), allowing
+// an optional trailing semicolon. It corresponds to the reference driver's
+// "mode=type" test mode.
+func ParseType(sql string) (ast.Node, error) {
+	return ParseTypeWithOptions(sql, Options{})
+}
+
+// ParseTypeWithOptions parses a single standalone type; see ParseType.
+func ParseTypeWithOptions(sql string, opts Options) (ast.Node, error) {
+	toks, err := lexer.Lex(sql)
+	if err != nil {
+		var lerr *lexer.Error
+		if errors.As(err, &lerr) {
+			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
+		}
+		return nil, err
+	}
+	// The reference tokenizer terminates a standalone type with a sentinel
+	// whose syntax-error wording is "end of type"; stash that in the EOF
+	// token so describeToken reports it.
+	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
+		toks[n-1].Image = "end of type"
+	}
+	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == token.SEMICOLON {
+		p.advance()
+	}
+	if p.peek().Kind != token.EOF {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
+	}
+	return typ, nil
+}
+
 type parser struct {
 	sql      string
 	toks     []token.Token
@@ -442,6 +479,12 @@ func (p *parser) errorf(offset int, format string, args ...any) error {
 func describeToken(tok token.Token) string {
 	switch tok.Kind {
 	case token.EOF:
+		// In standalone-type mode the reference driver describes the end
+		// sentinel as "end of type" rather than "end of statement"; the
+		// entry point stashes that wording in the EOF token's Image.
+		if tok.Image != "" {
+			return tok.Image
+		}
 		return "end of statement"
 	case token.IDENT:
 		if keywordNames[strings.ToLower(tok.Image)] {
@@ -488,7 +531,7 @@ var reservedKeywords = map[string]bool{
 	"BETWEEN": true,
 	"BY":      true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
 	"DESC": true, "DISTINCT": true,
-	"ELSE": true, "END": true, "EXCEPT": true, "FALSE": true, "FOR": true,
+	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "FALSE": true, "FOR": true,
 	"FROM": true,
 	"FULL": true, "GROUP": true, "GROUPS": true, "HASH": true, "HAVING": true,
 	"IGNORE": true, "IN": true,
@@ -502,6 +545,7 @@ var reservedKeywords = map[string]bool{
 	"NATURAL":         true, "NOT": true, "NULL": true,
 	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
+	"PROTO":   true,
 	"RESPECT": true, "RIGHT": true, "ROWS": true, "SELECT": true, "SET": true, "STRUCT": true,
 	"TABLESAMPLE": true,
 	"TRUE":        true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
@@ -4540,15 +4584,21 @@ func (p *parser) parseOrderingExpression() (*ast.OrderingExpression, error) {
 	return item, nil
 }
 
-// parseCollate parses "COLLATE <string literal>" with the COLLATE keyword as
-// the next token; see collate_clause in googlesql.tm. Parameters and system
-// variables as collation names are not implemented yet.
+// parseCollate parses "COLLATE <collation>" with the COLLATE keyword as the
+// next token; see collate_clause in googlesql.tm. The collation name is a
+// string literal, a query parameter, or a system variable.
 func (p *parser) parseCollate() (*ast.Collate, error) {
 	collateTok := p.advance() // COLLATE
-	if p.peek().Kind != token.STRING {
+	var name ast.Node
+	var err error
+	switch p.peek().Kind {
+	case token.STRING:
+		name, err = p.parseStringLiteral()
+	case token.PARAM, token.QUESTION, token.SYSTEM_VARIABLE:
+		name, err = p.parseIntLiteralOrParameter()
+	default:
 		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "@" or "@@" or string literal but got %s`, describeToken(p.peek()))
 	}
-	name, err := p.parseStringLiteral()
 	if err != nil {
 		return nil, err
 	}
@@ -6853,6 +6903,8 @@ func (p *parser) parseType() (ast.Node, error) {
 		t.TypeParameters, t.Collate, t.Stop = params, collate, end
 	case *ast.RangeType:
 		t.TypeParameters, t.Collate, t.Stop = params, collate, end
+	case *ast.MapType:
+		t.TypeParameters, t.Collate, t.Stop = params, collate, end
 	case *ast.FunctionType:
 		t.TypeParameters, t.Collate, t.Stop = params, collate, end
 	}
@@ -6932,6 +6984,8 @@ func (p *parser) parseRawType() (ast.Node, error) {
 		return p.parseStructType()
 	case isKeyword(tok, "RANGE"):
 		return p.parseRangeType()
+	case isKeyword(tok, "MAP"):
+		return p.parseMapType()
 	case isKeyword(tok, "FUNCTION"):
 		return p.parseFunctionType()
 	case isKeyword(tok, "INTERVAL"):
@@ -6943,6 +6997,11 @@ func (p *parser) parseRawType() (ast.Node, error) {
 	}
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	// A reserved keyword such as PROTO or ENUM cannot name a type; the
+	// non-type-introducing reserved keywords were already handled above.
+	if tok.Kind == token.IDENT && isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	path, err := p.parsePathExpression()
 	if err != nil {
@@ -6979,7 +7038,10 @@ func (p *parser) expectTemplateClose() (token.Token, error) {
 // parseArrayType parses "ARRAY<type>"; see array_type in googlesql.tm.
 func (p *parser) parseArrayType() (*ast.ArrayType, error) {
 	arrayTok := p.advance() // ARRAY
-	if _, err := p.expectTemplateOpen(); err != nil {
+	// Unlike STRUCT, ARRAY has no empty form, so a "<>" token is not split
+	// into "<" ">"; the reference reports it as an unexpected token where
+	// only "<" is allowed.
+	if _, err := p.expect(token.LT, `"<"`); err != nil {
 		return nil, err
 	}
 	elem, err := p.parseType()
@@ -6996,7 +7058,8 @@ func (p *parser) parseArrayType() (*ast.ArrayType, error) {
 // parseRangeType parses "RANGE<type>"; see range_type in googlesql.tm.
 func (p *parser) parseRangeType() (*ast.RangeType, error) {
 	rangeTok := p.advance() // RANGE
-	if _, err := p.expectTemplateOpen(); err != nil {
+	// RANGE has no empty form; see parseArrayType for the "<>" handling.
+	if _, err := p.expect(token.LT, `"<"`); err != nil {
 		return nil, err
 	}
 	elem, err := p.parseType()
@@ -7008,6 +7071,32 @@ func (p *parser) parseRangeType() (*ast.RangeType, error) {
 		return nil, err
 	}
 	return &ast.RangeType{Span: span(rangeTok.Pos, closeTok.End), ElementType: elem}, nil
+}
+
+// parseMapType parses "MAP<key_type, value_type>"; see map_type in
+// googlesql.tm.
+func (p *parser) parseMapType() (*ast.MapType, error) {
+	mapTok := p.advance() // MAP
+	// MAP has no empty form; see parseArrayType for the "<>" handling.
+	if _, err := p.expect(token.LT, `"<"`); err != nil {
+		return nil, err
+	}
+	key, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.COMMA, `","`); err != nil {
+		return nil, err
+	}
+	value, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.MapType{Span: span(mapTok.Pos, closeTok.End), KeyType: key, ValueType: value}, nil
 }
 
 // parseRangeLiteral parses "RANGE<type> '...'"; see range_literal in
@@ -7071,7 +7160,10 @@ func (p *parser) parseStructType() (*ast.StructType, error) {
 		return nil, err
 	}
 	st := &ast.StructType{Span: span(structTok.Pos, 0)}
-	if p.peek().Kind != token.GT && p.peek().Kind != token.RSHIFT {
+	// At EOF there is no field to parse; fall through to expectTemplateClose
+	// so the error is the reference's `Expected ">" but got end of type`
+	// rather than an "unexpected end of type" from the field parser.
+	if p.peek().Kind != token.GT && p.peek().Kind != token.RSHIFT && p.peek().Kind != token.EOF {
 		for {
 			field, err := p.parseStructField()
 			if err != nil {
@@ -7133,9 +7225,12 @@ func (p *parser) parseTypeParameterList() (*ast.TypeParameterList, error) {
 		}
 	}
 	list.Stop = list.Parameters[len(list.Parameters)-1].End()
-	if _, err := p.expect(token.RPAREN, `")"`); err != nil {
-		return nil, err
+	// A parameter must be followed by "," or ")"; the reference lists both
+	// in the error since either could continue the list.
+	if p.peek().Kind != token.RPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or "," but got %s`, describeToken(p.peek()))
 	}
+	p.advance()
 	return list, nil
 }
 

@@ -582,6 +582,8 @@ func nodeString(n ast.Node) string {
 		return "StructField"
 	case *ast.RangeType:
 		return "RangeType"
+	case *ast.MapType:
+		return "MapType"
 	case *ast.FunctionType:
 		return "FunctionType"
 	case *ast.FunctionTypeArgList:
