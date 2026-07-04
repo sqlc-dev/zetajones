@@ -213,6 +213,20 @@ func (n *TablePathExpression) Children() []Node {
 	return children(n.Path, n.UnnestExpr, n.Alias, n.Offset)
 }
 
+// TableSubquery is a parenthesized query used as a table in a FROM clause,
+// with an optional alias; see ASTTableSubquery in
+// googlesql/parser/parse_tree.h. The span includes the parentheses and the
+// alias, but the query's own location excludes the parentheses.
+type TableSubquery struct {
+	Span
+	Query *Query `json:"query"`
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *TableSubquery) Children() []Node {
+	return children(n.Query, n.Alias)
+}
+
 // UnnestExpression is UNNEST(expr [AS alias], ...); see ASTUnnestExpression
 // in googlesql/parser/parse_tree.h. The span includes the UNNEST keyword and
 // the closing parenthesis.

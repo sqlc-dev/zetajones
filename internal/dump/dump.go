@@ -84,6 +84,8 @@ func nodeString(n ast.Node) string {
 		return "FromClause"
 	case *ast.TablePathExpression:
 		return "TablePathExpression"
+	case *ast.TableSubquery:
+		return "TableSubquery"
 	case *ast.UnnestExpression:
 		return "UnnestExpression"
 	case *ast.ExpressionWithOptAlias:

@@ -1180,11 +1180,43 @@ func (p *parser) parseFromClause() (*ast.FromClause, error) {
 	if err != nil {
 		return nil, err
 	}
-	table, err := p.parseTablePathExpression()
+	table, err := p.parseTablePrimary()
 	if err != nil {
 		return nil, err
 	}
 	return &ast.FromClause{Span: span(fromTok.Pos, table.End()), TableExpression: table}, nil
+}
+
+// parseTablePrimary parses a single table item in a FROM clause: either a
+// parenthesized query used as a table subquery or a table path expression;
+// see table_primary in googlesql.tm.
+func (p *parser) parseTablePrimary() (ast.Node, error) {
+	if p.peek().Kind == token.LPAREN {
+		return p.parseTableSubquery()
+	}
+	return p.parseTablePathExpression()
+}
+
+// parseTableSubquery parses "( query ) [[AS] alias]" in a FROM clause; see
+// table_subquery in googlesql.tm. The node's location includes the
+// parentheses and the alias, while the inner query's location does not
+// include the parentheses.
+func (p *parser) parseTableSubquery() (*ast.TableSubquery, error) {
+	lparen := p.peek()
+	query, parenEnd, err := p.parseParenthesizedQuery()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.TableSubquery{Span: span(lparen.Pos, parenEnd), Query: query}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		node.Alias = alias
+		node.Stop = alias.End()
+	}
+	return node, nil
 }
 
 func (p *parser) parseTablePathExpression() (*ast.TablePathExpression, error) {
