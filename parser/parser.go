@@ -221,6 +221,10 @@ const FeatureBracedProtoConstructors Feature = "BRACED_PROTO_CONSTRUCTORS"
 // FeatureQualify gates the QUALIFY clause (FEATURE_QUALIFY).
 const FeatureQualify Feature = "QUALIFY"
 
+// FeatureForUpdate gates the FOR UPDATE lock mode clause in SELECT queries
+// (FEATURE_FOR_UPDATE).
+const FeatureForUpdate Feature = "FOR_UPDATE"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -232,6 +236,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureIsDistinct:              true,
 	FeatureBracedProtoConstructors: true,
 	FeatureQualify:                 true,
+	FeatureForUpdate:               true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -1824,6 +1829,9 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 	if isKeyword(p.peek(), "FOR") && isKeyword(p.peekAt(1), "UPDATE") {
 		forTok := p.advance()    // FOR
 		updateTok := p.advance() // UPDATE
+		if !p.features.Enabled(FeatureForUpdate) {
+			return nil, p.errorf(forTok.Pos, "FOR UPDATE is not supported")
+		}
 		lockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
 		end = lockMode.End()
 	}
@@ -2028,6 +2036,9 @@ func (p *parser) parseFromQueryTail(start int, with *ast.WithClause) (*ast.Query
 	if isKeyword(p.peek(), "FOR") && isKeyword(p.peekAt(1), "UPDATE") {
 		forTok := p.advance()    // FOR
 		updateTok := p.advance() // UPDATE
+		if !p.features.Enabled(FeatureForUpdate) {
+			return nil, p.errorf(forTok.Pos, "FOR UPDATE is not supported")
+		}
 		query.LockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
 		query.Stop = query.LockMode.End()
 	}

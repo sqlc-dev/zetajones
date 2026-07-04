@@ -170,6 +170,19 @@ func parseCase(lines []string, defaults *[]string) *Case {
 	for _, line := range optionLines {
 		if strings.Contains(line, "{{") {
 			optHasGroup = true
+			// The alternation expands the declaring case (via expandAlternations
+			// below), but for inheritance by *subsequent* cases the driver leaves
+			// the default resolved to the last-iterated alternative (the last
+			// alternative of each group, since the last group varies fastest).
+			// Inherit that resolved value so later cases carry the right options.
+			resolved := resolveLastAlternative(line)
+			if opts, ok := parseOptionsLine(resolved); ok {
+				for _, opt := range opts {
+					if rest, isDefault := strings.CutPrefix(opt, "default "); isDefault {
+						*defaults = append(*defaults, rest)
+					}
+				}
+			}
 			continue
 		}
 		opts, _ := parseOptionsLine(line)
@@ -224,6 +237,23 @@ func parseCase(lines []string, defaults *[]string) *Case {
 	}
 
 	return c
+}
+
+// resolveLastAlternative substitutes each {{a|b|c}} group in a single option
+// line with the group's last alternative. This mirrors the file_based_test
+// driver leaving a [default ...{{...}}...] value resolved to the final
+// enumerated combination (the last group varies fastest) for inheritance by
+// subsequent cases.
+func resolveLastAlternative(line string) string {
+	literals, groups, ok := splitAlternationGroups(line)
+	if !ok {
+		return line
+	}
+	idx := make([]int, len(groups))
+	for i := range groups {
+		idx[i] = len(groups[i]) - 1
+	}
+	return substitute(literals, groups, idx)
 }
 
 // joinAll concatenates the raw lines of all parts, used only for cheap
