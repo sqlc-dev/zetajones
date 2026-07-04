@@ -868,6 +868,11 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 		if err != nil {
 			return nil, err
 		}
+		// "( query ) AS alias" is only valid with pipes; see the
+		// parenthesized_query alternative of query_primary in googlesql.tm.
+		if isKeyword(p.peek(), "AS") && !p.features.Enabled(FeaturePipes) {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Alias not allowed on parenthesized outer query")
+		}
 		primary, primaryEnd = inner, parenEnd
 	default:
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
@@ -964,6 +969,11 @@ func (p *parser) parseWithClause() (*ast.WithClause, error) {
 		}
 		wc.Entries = append(wc.Entries, entry)
 		wc.Stop = entry.End()
+		if entry.AliasedQuery != nil && isKeyword(p.peek(), "WITH") && !isKeyword(p.peekAt(1), "DEPTH") {
+			// After an aliased query, WITH can only start a recursion depth
+			// modifier; see recursion_depth_modifier in googlesql.tm.
+			return nil, p.errorf(p.peekAt(1).Pos, "Syntax error: Expected keyword DEPTH but got %s", describeToken(p.peekAt(1)))
+		}
 		if p.peek().Kind != token.COMMA {
 			break
 		}
@@ -972,6 +982,12 @@ func (p *parser) parseWithClause() (*ast.WithClause, error) {
 		if isKeyword(next, "SELECT") || isKeyword(next, "FROM") {
 			// See with_clause_with_trailing_comma in googlesql.tm.
 			return nil, p.errorf(next.Pos, "Syntax error: Trailing comma after the WITH clause before the main query is not allowed")
+		}
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			// Only another WITH entry (starting with an identifier) or the
+			// main query may follow the comma; the reference LALR state
+			// reports only SELECT here.
+			return nil, p.errorf(next.Pos, "Syntax error: Expected keyword SELECT but got %s", describeToken(next))
 		}
 	}
 	if p.peek().Kind == token.PIPE_INPUT {
@@ -1019,9 +1035,12 @@ func (p *parser) parseWithClauseEntry() (*ast.WithClauseEntry, error) {
 		agr := &ast.AliasedGroupRows{Span: span(ident.Pos(), rowsTok.End), Identifier: ident}
 		return &ast.WithClauseEntry{Span: agr.Span, AliasedGroupRows: agr}, nil
 	}
-	if _, err := p.expectKeyword("AS"); err != nil {
-		return nil, err
+	if !isKeyword(p.peek(), "AS") {
+		// Both "identifier ( ) AS GROUP ROWS" and "identifier AS ( query )"
+		// are possible here; see with_clause_entry in googlesql.tm.
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or keyword AS but got %s`, describeToken(p.peek()))
 	}
+	p.advance() // AS
 	lparen := p.peek()
 	if lparen.Kind != token.LPAREN {
 		return nil, p.errorf(lparen.Pos, `Syntax error: Expected "(" but got %s`, describeToken(lparen))
@@ -1353,6 +1372,11 @@ func (p *parser) parseQueryPrimary() (ast.Node, error) {
 		query, _, err := p.parseParenthesizedQuery()
 		if err != nil {
 			return nil, err
+		}
+		// "( query ) AS alias" is only valid with pipes; see the
+		// parenthesized_query alternative of query_primary in googlesql.tm.
+		if isKeyword(p.peek(), "AS") && !p.features.Enabled(FeaturePipes) {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Alias not allowed on parenthesized outer query")
 		}
 		return query, nil
 	}
@@ -2005,7 +2029,23 @@ func (p *parser) parseTablePrimary() (ast.Node, error) {
 	}
 	if p.peek().Kind == token.LPAREN {
 		if p.lparenStartsQuery() {
-			return p.parseTableSubquery()
+			start := p.pos
+			node, subErr := p.parseTableSubquery()
+			if subErr == nil {
+				return node, nil
+			}
+			// "((query) join ...)" is a parenthesized join whose first
+			// item is a table subquery; lparenStartsQuery sees through the
+			// extra parenthesis, so retry from the opening parenthesis.
+			if p.toks[start+1].Kind == token.LPAREN {
+				p.pos = start
+				join, joinErr := p.parseParenthesizedJoin()
+				if joinErr == nil {
+					return join, nil
+				}
+				return nil, furthestError(subErr, joinErr)
+			}
+			return nil, subErr
 		}
 		return p.parseParenthesizedJoin()
 	}

@@ -167,7 +167,7 @@ func (p *parser) parseOnOrUsingClauses() ([]ast.Node, error) {
 			if err != nil {
 				return nil, err
 			}
-			clause = &ast.OnClause{Span: span(onTok.Pos, expr.End()), Expr: expr}
+			clause = &ast.OnClause{Span: span(onTok.Pos, p.extEnd(expr)), Expr: expr}
 		case isKeyword(p.peek(), "USING"):
 			uc, err := p.parseUsingClause()
 			if err != nil {
@@ -342,7 +342,7 @@ func (p *parser) parsePipeJoin(pipeTok token.Token) (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		clauses = append(clauses, &ast.OnClause{Span: span(onTok.Pos, expr.End()), Expr: expr})
+		clauses = append(clauses, &ast.OnClause{Span: span(onTok.Pos, p.extEnd(expr)), Expr: expr})
 	case isKeyword(p.peek(), "USING"):
 		uc, err := p.parseUsingClause()
 		if err != nil {
