@@ -2758,9 +2758,19 @@ func (p *parser) parseComparison() (ast.Node, error) {
 	// [NOT] BETWEEN
 	if isKeyword(p.peek(), "BETWEEN") {
 		betweenTok := p.advance()
-		low, err := p.parseBitwiseOr()
+		// The middle operand is an expression_higher_prec_than_and (see the
+		// between rule in googlesql.tm): it may itself parse a comparison,
+		// nested BETWEEN, or unary NOT, but such operators are disallowed
+		// unless parenthesized because BETWEEN is not associative.
+		low, err := p.parseNot()
 		if err != nil {
 			return nil, err
+		}
+		if !p.isAllowedInComparison(low) {
+			return nil, p.errorf(p.extStart(low), "Syntax error: Expression in BETWEEN must be parenthesized")
+		}
+		if p.peek().Kind == token.EOF {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected end of statement")
 		}
 		if _, err := p.expectKeyword("AND"); err != nil {
 			return nil, err
@@ -2768,9 +2778,6 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		high, err := p.parseBitwiseOr()
 		if err != nil {
 			return nil, err
-		}
-		if isKeyword(p.peek(), "BETWEEN") {
-			return nil, p.errorf(p.peek().Pos, "Syntax error: Expression in BETWEEN must be parenthesized")
 		}
 		return p.finishComparison(&ast.BetweenExpression{
 			Span:            span(p.extStart(lhs), p.extEnd(high)),
@@ -2966,6 +2973,32 @@ func (p *parser) finishComparison(n ast.Node) (ast.Node, error) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	return n, nil
+}
+
+// isAllowedInComparison reports whether n may appear unparenthesized as an
+// operand of a non-associative comparison-level operator (e.g. the middle
+// operand of BETWEEN). It mirrors ASTNode::IsAllowedInComparison in
+// googlesql/parser/parse_tree.cc: parenthesized expressions are always
+// allowed, while unparenthesized AND/OR/BETWEEN, comparison/LIKE/IS binary
+// expressions, and unary NOT are not.
+func (p *parser) isAllowedInComparison(n ast.Node) bool {
+	if _, ok := p.extents[n]; ok {
+		// A recorded extent means the node was parenthesized.
+		return true
+	}
+	switch e := n.(type) {
+	case *ast.AndExpr, *ast.OrExpr, *ast.BetweenExpression:
+		return false
+	case *ast.UnaryExpression:
+		return e.Op != "NOT"
+	case *ast.BinaryExpression:
+		switch e.Op {
+		case "LIKE", "IS", "=", "!=", "<>", ">", "<", ">=", "<=":
+			return false
+		}
+		return true
+	}
+	return true
 }
 
 // parseInRhs parses the parenthesized right-hand side of an IN or (with
