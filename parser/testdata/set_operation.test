@@ -1,0 +1,1071 @@
+select abc from T
+UNION ALL
+select 5
+UNION DISTINCT
+select null from T2
+--
+QueryStatement [0-71] [select abc...null from T2]
+  Query [0-71] [select abc...null from T2]
+    SetOperation(UNION ALL) [0-71] [select abc...null from T2]
+      SetOperationMetadataList [18-51] [UNION ALL...UNION DISTINCT]
+        SetOperationMetadata [18-27] [UNION ALL]
+          SetOperationType [18-23] [UNION]
+          SetOperationAllOrDistinct [24-27] [ALL]
+        SetOperationMetadata [37-51] [UNION DISTINCT]
+          SetOperationType [37-42] [UNION]
+          SetOperationAllOrDistinct [43-51] [DISTINCT]
+      Select [0-17] [select abc from T]
+        SelectList [7-10] [abc]
+          SelectColumn [7-10] [abc]
+            PathExpression [7-10] [abc]
+              Identifier(abc) [7-10] [abc]
+        FromClause [11-17] [from T]
+          TablePathExpression [16-17] [T]
+            PathExpression [16-17] [T]
+              Identifier(T) [16-17] [T]
+      Select [28-36] [select 5]
+        SelectList [35-36] [5]
+          SelectColumn [35-36] [5]
+            IntLiteral(5) [35-36] [5]
+      Select [52-71] [select null from T2]
+        SelectList [59-63] [null]
+          SelectColumn [59-63] [null]
+            NullLiteral(null) [59-63] [null]
+        FromClause [64-71] [from T2]
+          TablePathExpression [69-71] [T2]
+            PathExpression [69-71] [T2]
+              Identifier(T2) [69-71] [T2]
+--
+SELECT
+  abc
+FROM
+  T
+UNION ALL
+SELECT
+  5
+UNION DISTINCT
+SELECT
+  null
+FROM
+  T2
+==
+
+# UNION in a table subquery
+select 1
+from (select 2 UNION ALL select 3)
+--
+QueryStatement [0-43] [select 1 from...select 3)]
+  Query [0-43] [select 1 from...select 3)]
+    Select [0-43] [select 1 from...select 3)]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+      FromClause [9-43] [from (select...select 3)]
+        TableSubquery [14-43] [(select 2 UNION ALL select 3)]
+          Query [15-42] [select 2 UNION ALL select 3]
+            SetOperation(UNION ALL) [15-42] [select 2 UNION ALL select 3]
+              SetOperationMetadataList [24-33] [UNION ALL]
+                SetOperationMetadata [24-33] [UNION ALL]
+                  SetOperationType [24-29] [UNION]
+                  SetOperationAllOrDistinct [30-33] [ALL]
+              Select [15-23] [select 2]
+                SelectList [22-23] [2]
+                  SelectColumn [22-23] [2]
+                    IntLiteral(2) [22-23] [2]
+              Select [34-42] [select 3]
+                SelectList [41-42] [3]
+                  SelectColumn [41-42] [3]
+                    IntLiteral(3) [41-42] [3]
+--
+SELECT
+  1
+FROM
+  (
+    SELECT
+      2
+    UNION ALL
+    SELECT
+      3
+  )
+==
+
+select 1
+UNION DISTINCT
+select 2
+--
+QueryStatement [0-32] [select 1 UNION...INCT select 2]
+  Query [0-32] [select 1 UNION...INCT select 2]
+    SetOperation(UNION DISTINCT) [0-32] [select 1 UNION...INCT select 2]
+      SetOperationMetadataList [9-23] [UNION DISTINCT]
+        SetOperationMetadata [9-23] [UNION DISTINCT]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [15-23] [DISTINCT]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [24-32] [select 2]
+        SelectList [31-32] [2]
+          SelectColumn [31-32] [2]
+            IntLiteral(2) [31-32] [2]
+--
+SELECT
+  1
+UNION DISTINCT
+SELECT
+  2
+==
+
+# UNION without ALL or DISTINCT not supported. TODO: Better error.
+select 1
+UNION
+select 2
+--
+ERROR: Syntax error: Expected keyword ALL or keyword DISTINCT but got keyword SELECT [at 3:1]
+select 2
+^
+==
+
+select 1
+EXCEPT ALL
+select 2
+--
+QueryStatement [0-28] [select 1 EXCEPT ALL select 2]
+  Query [0-28] [select 1 EXCEPT ALL select 2]
+    SetOperation(EXCEPT ALL) [0-28] [select 1 EXCEPT ALL select 2]
+      SetOperationMetadataList [9-19] [EXCEPT ALL]
+        SetOperationMetadata [9-19] [EXCEPT ALL]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [16-19] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [20-28] [select 2]
+        SelectList [27-28] [2]
+          SelectColumn [27-28] [2]
+            IntLiteral(2) [27-28] [2]
+--
+SELECT
+  1
+EXCEPT ALL
+SELECT
+  2
+==
+
+select 1
+EXCEPT DISTINCT
+select 2
+--
+QueryStatement [0-33] [select 1 EXCEPT...NCT select 2]
+  Query [0-33] [select 1 EXCEPT...NCT select 2]
+    SetOperation(EXCEPT DISTINCT) [0-33] [select 1 EXCEPT...NCT select 2]
+      SetOperationMetadataList [9-24] [EXCEPT DISTINCT]
+        SetOperationMetadata [9-24] [EXCEPT DISTINCT]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [16-24] [DISTINCT]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [25-33] [select 2]
+        SelectList [32-33] [2]
+          SelectColumn [32-33] [2]
+            IntLiteral(2) [32-33] [2]
+--
+SELECT
+  1
+EXCEPT DISTINCT
+SELECT
+  2
+==
+
+# EXCEPT without ALL or DISTINCT not supported.
+select 1
+EXCEPT
+select 2
+--
+ERROR: EXCEPT must be followed by ALL, DISTINCT, or "(" [at 2:1]
+EXCEPT
+^
+==
+
+# EXCEPT with other garbage after gives the same error.
+SELECT * FROM Table
+EXCEPT
+{{Garbage|5|'abc'|FROM|;|+}}
+--
+ERROR: EXCEPT must be followed by ALL, DISTINCT, or "(" [at 2:1]
+EXCEPT
+^
+==
+
+select 1
+INTERSECT ALL
+select 2
+--
+QueryStatement [0-31] [select 1 INTERSEC...L select 2]
+  Query [0-31] [select 1 INTERSEC...L select 2]
+    SetOperation(INTERSECT ALL) [0-31] [select 1 INTERSEC...L select 2]
+      SetOperationMetadataList [9-22] [INTERSECT ALL]
+        SetOperationMetadata [9-22] [INTERSECT ALL]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [19-22] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [23-31] [select 2]
+        SelectList [30-31] [2]
+          SelectColumn [30-31] [2]
+            IntLiteral(2) [30-31] [2]
+--
+SELECT
+  1
+INTERSECT ALL
+SELECT
+  2
+==
+
+select 1
+INTERSECT DISTINCT
+select 2
+--
+QueryStatement [0-36] [select 1 INTERSEC...T select 2]
+  Query [0-36] [select 1 INTERSEC...T select 2]
+    SetOperation(INTERSECT DISTINCT) [0-36] [select 1 INTERSEC...T select 2]
+      SetOperationMetadataList [9-27] [INTERSECT DISTINCT]
+        SetOperationMetadata [9-27] [INTERSECT DISTINCT]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [19-27] [DISTINCT]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [28-36] [select 2]
+        SelectList [35-36] [2]
+          SelectColumn [35-36] [2]
+            IntLiteral(2) [35-36] [2]
+--
+SELECT
+  1
+INTERSECT DISTINCT
+SELECT
+  2
+==
+
+# INTERSECT without ALL or DISTINCT not supported.
+select 1
+INTERSECT
+select 2
+--
+ERROR: Syntax error: Expected keyword ALL or keyword DISTINCT but got keyword SELECT [at 3:1]
+select 2
+^
+==
+
+select 1
+UNION DISTINCT
+select 2
+UNION DISTINCT
+select 1
+--
+QueryStatement [0-56] [select 1 UNION...INCT select 1]
+  Query [0-56] [select 1 UNION...INCT select 1]
+    SetOperation(UNION DISTINCT) [0-56] [select 1 UNION...INCT select 1]
+      SetOperationMetadataList [9-47] [UNION DISTINCT...NION DISTINCT]
+        SetOperationMetadata [9-23] [UNION DISTINCT]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [15-23] [DISTINCT]
+        SetOperationMetadata [33-47] [UNION DISTINCT]
+          SetOperationType [33-38] [UNION]
+          SetOperationAllOrDistinct [39-47] [DISTINCT]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [24-32] [select 2]
+        SelectList [31-32] [2]
+          SelectColumn [31-32] [2]
+            IntLiteral(2) [31-32] [2]
+      Select [48-56] [select 1]
+        SelectList [55-56] [1]
+          SelectColumn [55-56] [1]
+            IntLiteral(1) [55-56] [1]
+--
+SELECT
+  1
+UNION DISTINCT
+SELECT
+  2
+UNION DISTINCT
+SELECT
+  1
+==
+
+select 1
+EXCEPT ALL
+select 2
+EXCEPT ALL
+select 3
+--
+QueryStatement [0-48] [select 1 EXCEPT...ALL select 3]
+  Query [0-48] [select 1 EXCEPT...ALL select 3]
+    SetOperation(EXCEPT ALL) [0-48] [select 1 EXCEPT...ALL select 3]
+      SetOperationMetadataList [9-39] [EXCEPT ALL select 2 EXCEPT ALL]
+        SetOperationMetadata [9-19] [EXCEPT ALL]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [16-19] [ALL]
+        SetOperationMetadata [29-39] [EXCEPT ALL]
+          SetOperationType [29-35] [EXCEPT]
+          SetOperationAllOrDistinct [36-39] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [20-28] [select 2]
+        SelectList [27-28] [2]
+          SelectColumn [27-28] [2]
+            IntLiteral(2) [27-28] [2]
+      Select [40-48] [select 3]
+        SelectList [47-48] [3]
+          SelectColumn [47-48] [3]
+            IntLiteral(3) [47-48] [3]
+--
+SELECT
+  1
+EXCEPT ALL
+SELECT
+  2
+EXCEPT ALL
+SELECT
+  3
+==
+
+select 1
+EXCEPT DISTINCT
+select 2
+EXCEPT DISTINCT
+select 1
+--
+QueryStatement [0-58] [select 1 EXCEPT...NCT select 1]
+  Query [0-58] [select 1 EXCEPT...NCT select 1]
+    SetOperation(EXCEPT DISTINCT) [0-58] [select 1 EXCEPT...NCT select 1]
+      SetOperationMetadataList [9-49] [EXCEPT DISTINCT...EPT DISTINCT]
+        SetOperationMetadata [9-24] [EXCEPT DISTINCT]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [16-24] [DISTINCT]
+        SetOperationMetadata [34-49] [EXCEPT DISTINCT]
+          SetOperationType [34-40] [EXCEPT]
+          SetOperationAllOrDistinct [41-49] [DISTINCT]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [25-33] [select 2]
+        SelectList [32-33] [2]
+          SelectColumn [32-33] [2]
+            IntLiteral(2) [32-33] [2]
+      Select [50-58] [select 1]
+        SelectList [57-58] [1]
+          SelectColumn [57-58] [1]
+            IntLiteral(1) [57-58] [1]
+--
+SELECT
+  1
+EXCEPT DISTINCT
+SELECT
+  2
+EXCEPT DISTINCT
+SELECT
+  1
+==
+
+select 1
+INTERSECT ALL
+select 2
+INTERSECT ALL
+select 3
+--
+QueryStatement [0-54] [select 1 INTERSEC...L select 3]
+  Query [0-54] [select 1 INTERSEC...L select 3]
+    SetOperation(INTERSECT ALL) [0-54] [select 1 INTERSEC...L select 3]
+      SetOperationMetadataList [9-45] [INTERSECT...INTERSECT ALL]
+        SetOperationMetadata [9-22] [INTERSECT ALL]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [19-22] [ALL]
+        SetOperationMetadata [32-45] [INTERSECT ALL]
+          SetOperationType [32-41] [INTERSECT]
+          SetOperationAllOrDistinct [42-45] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [23-31] [select 2]
+        SelectList [30-31] [2]
+          SelectColumn [30-31] [2]
+            IntLiteral(2) [30-31] [2]
+      Select [46-54] [select 3]
+        SelectList [53-54] [3]
+          SelectColumn [53-54] [3]
+            IntLiteral(3) [53-54] [3]
+--
+SELECT
+  1
+INTERSECT ALL
+SELECT
+  2
+INTERSECT ALL
+SELECT
+  3
+==
+
+select 1
+INTERSECT DISTINCT
+select 2
+INTERSECT DISTINCT
+select 3
+--
+QueryStatement [0-64] [select 1 INTERSEC...T select 3]
+  Query [0-64] [select 1 INTERSEC...T select 3]
+    SetOperation(INTERSECT DISTINCT) [0-64] [select 1 INTERSEC...T select 3]
+      SetOperationMetadataList [9-55] [INTERSECT...INTERSECT DISTINCT]
+        SetOperationMetadata [9-27] [INTERSECT DISTINCT]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [19-27] [DISTINCT]
+        SetOperationMetadata [37-55] [INTERSECT DISTINCT]
+          SetOperationType [37-46] [INTERSECT]
+          SetOperationAllOrDistinct [47-55] [DISTINCT]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [28-36] [select 2]
+        SelectList [35-36] [2]
+          SelectColumn [35-36] [2]
+            IntLiteral(2) [35-36] [2]
+      Select [56-64] [select 3]
+        SelectList [63-64] [3]
+          SelectColumn [63-64] [3]
+            IntLiteral(3) [63-64] [3]
+--
+SELECT
+  1
+INTERSECT DISTINCT
+SELECT
+  2
+INTERSECT DISTINCT
+SELECT
+  3
+==
+
+select 1
+UNION ALL
+select 2
+UNION
+select 3
+--
+ERROR: Syntax error: Expected keyword ALL or keyword DISTINCT but got keyword SELECT [at 5:1]
+select 3
+^
+==
+
+
+# Use paranthesis to make multiple set operations work in a single query.
+select 1
+UNION ALL
+(select 2 EXCEPT ALL select 3)
+--
+QueryStatement [0-49] [select 1 UNION...select 3)]
+  Query [0-49] [select 1 UNION...select 3)]
+    SetOperation(UNION ALL) [0-49] [select 1 UNION...select 3)]
+      SetOperationMetadataList [9-18] [UNION ALL]
+        SetOperationMetadata [9-18] [UNION ALL]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [15-18] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Query [20-48] [select 2 EXCEPT ALL select 3]
+        SetOperation(EXCEPT ALL) [20-48] [select 2 EXCEPT ALL select 3]
+          SetOperationMetadataList [29-39] [EXCEPT ALL]
+            SetOperationMetadata [29-39] [EXCEPT ALL]
+              SetOperationType [29-35] [EXCEPT]
+              SetOperationAllOrDistinct [36-39] [ALL]
+          Select [20-28] [select 2]
+            SelectList [27-28] [2]
+              SelectColumn [27-28] [2]
+                IntLiteral(2) [27-28] [2]
+          Select [40-48] [select 3]
+            SelectList [47-48] [3]
+              SelectColumn [47-48] [3]
+                IntLiteral(3) [47-48] [3]
+--
+SELECT
+  1
+UNION ALL(
+SELECT
+  2
+EXCEPT ALL
+SELECT
+  3
+)
+==
+
+select 1
+INTERSECT ALL
+(select 2 INTERSECT DISTINCT select 3)
+--
+QueryStatement [0-61] [select 1 INTERSEC...select 3)]
+  Query [0-61] [select 1 INTERSEC...select 3)]
+    SetOperation(INTERSECT ALL) [0-61] [select 1 INTERSEC...select 3)]
+      SetOperationMetadataList [9-22] [INTERSECT ALL]
+        SetOperationMetadata [9-22] [INTERSECT ALL]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [19-22] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Query [24-60] [select 2 INTERSEC...T select 3]
+        SetOperation(INTERSECT DISTINCT) [24-60] [select 2 INTERSEC...T select 3]
+          SetOperationMetadataList [33-51] [INTERSECT DISTINCT]
+            SetOperationMetadata [33-51] [INTERSECT DISTINCT]
+              SetOperationType [33-42] [INTERSECT]
+              SetOperationAllOrDistinct [43-51] [DISTINCT]
+          Select [24-32] [select 2]
+            SelectList [31-32] [2]
+              SelectColumn [31-32] [2]
+                IntLiteral(2) [31-32] [2]
+          Select [52-60] [select 3]
+            SelectList [59-60] [3]
+              SelectColumn [59-60] [3]
+                IntLiteral(3) [59-60] [3]
+--
+SELECT
+  1
+INTERSECT ALL(
+SELECT
+  2
+INTERSECT DISTINCT
+SELECT
+  3
+)
+==
+
+
+select 1
+UNION ALL
+(select 2
+ INTERSECT ALL
+ (select 3 EXCEPT ALL select 4))
+--
+QueryStatement [0-76] [select 1 UNION...select 4))]
+  Query [0-76] [select 1 UNION...select 4))]
+    SetOperation(UNION ALL) [0-76] [select 1 UNION...select 4))]
+      SetOperationMetadataList [9-18] [UNION ALL]
+        SetOperationMetadata [9-18] [UNION ALL]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [15-18] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Query [20-75] [select 2...select 4)]
+        SetOperation(INTERSECT ALL) [20-75] [select 2...select 4)]
+          SetOperationMetadataList [30-43] [INTERSECT ALL]
+            SetOperationMetadata [30-43] [INTERSECT ALL]
+              SetOperationType [30-39] [INTERSECT]
+              SetOperationAllOrDistinct [40-43] [ALL]
+          Select [20-28] [select 2]
+            SelectList [27-28] [2]
+              SelectColumn [27-28] [2]
+                IntLiteral(2) [27-28] [2]
+          Query [46-74] [select 3 EXCEPT ALL select 4]
+            SetOperation(EXCEPT ALL) [46-74] [select 3 EXCEPT ALL select 4]
+              SetOperationMetadataList [55-65] [EXCEPT ALL]
+                SetOperationMetadata [55-65] [EXCEPT ALL]
+                  SetOperationType [55-61] [EXCEPT]
+                  SetOperationAllOrDistinct [62-65] [ALL]
+              Select [46-54] [select 3]
+                SelectList [53-54] [3]
+                  SelectColumn [53-54] [3]
+                    IntLiteral(3) [53-54] [3]
+              Select [66-74] [select 4]
+                SelectList [73-74] [4]
+                  SelectColumn [73-74] [4]
+                    IntLiteral(4) [73-74] [4]
+--
+SELECT
+  1
+UNION ALL(
+SELECT
+  2
+INTERSECT ALL(
+SELECT
+  3
+EXCEPT ALL
+SELECT
+  4
+))
+==
+
+# 2 children and 1 simple hint (UNION ALL)
+# The extra whitespace below is intentional.
+select 1
+UNION  @{ key = 5 } ALL
+select 2
+--
+QueryStatement [0-41] [select 1 UNION...ALL select 2]
+  Query [0-41] [select 1 UNION...ALL select 2]
+    SetOperation(UNION ALL) [0-41] [select 1 UNION...ALL select 2]
+      SetOperationMetadataList [9-32] [UNION  @{ key = 5 } ALL]
+        SetOperationMetadata [9-32] [UNION  @{ key = 5 } ALL]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [29-32] [ALL]
+          Hint [16-28] [@{ key = 5 }]
+            HintEntry [19-26] [key = 5]
+              Identifier(key) [19-22] [key]
+              IntLiteral(5) [25-26] [5]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [33-41] [select 2]
+        SelectList [40-41] [2]
+          SelectColumn [40-41] [2]
+            IntLiteral(2) [40-41] [2]
+--
+SELECT
+  1
+UNION @{ key = 5 } ALL
+SELECT
+  2
+==
+
+# 2 children and 1 simple hint (INTERSECT ALL)
+# The extra whitespace below is intentional.
+select 1
+INTERSECT  @{ key = 5 } ALL
+select 2
+--
+QueryStatement [0-45] [select 1 INTERSEC...L select 2]
+  Query [0-45] [select 1 INTERSEC...L select 2]
+    SetOperation(INTERSECT ALL) [0-45] [select 1 INTERSEC...L select 2]
+      SetOperationMetadataList [9-36] [INTERSECT  @{ key = 5 } ALL]
+        SetOperationMetadata [9-36] [INTERSECT  @{ key = 5 } ALL]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [33-36] [ALL]
+          Hint [20-32] [@{ key = 5 }]
+            HintEntry [23-30] [key = 5]
+              Identifier(key) [23-26] [key]
+              IntLiteral(5) [29-30] [5]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [37-45] [select 2]
+        SelectList [44-45] [2]
+          SelectColumn [44-45] [2]
+            IntLiteral(2) [44-45] [2]
+--
+SELECT
+  1
+INTERSECT @{ key = 5 } ALL
+SELECT
+  2
+==
+
+# 2 children and 1 simple hint (EXCEPT ALL)
+# The extra whitespace below is intentional.
+select 1
+EXCEPT  @{ key = 5 } ALL
+select 2
+--
+QueryStatement [0-42] [select 1 EXCEPT...ALL select 2]
+  Query [0-42] [select 1 EXCEPT...ALL select 2]
+    SetOperation(EXCEPT ALL) [0-42] [select 1 EXCEPT...ALL select 2]
+      SetOperationMetadataList [9-33] [EXCEPT  @{ key = 5 } ALL]
+        SetOperationMetadata [9-33] [EXCEPT  @{ key = 5 } ALL]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [30-33] [ALL]
+          Hint [17-29] [@{ key = 5 }]
+            HintEntry [20-27] [key = 5]
+              Identifier(key) [20-23] [key]
+              IntLiteral(5) [26-27] [5]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [34-42] [select 2]
+        SelectList [41-42] [2]
+          SelectColumn [41-42] [2]
+            IntLiteral(2) [41-42] [2]
+--
+SELECT
+  1
+EXCEPT @{ key = 5 } ALL
+SELECT
+  2
+==
+
+# 2 children and 1 simple hint (UNION DISTINCT)
+# The extra whitespace below is intentional.
+select 1
+UNION  @{ key = 5 } DISTINCT
+select 2
+--
+QueryStatement [0-46] [select 1 UNION...INCT select 2]
+  Query [0-46] [select 1 UNION...INCT select 2]
+    SetOperation(UNION DISTINCT) [0-46] [select 1 UNION...INCT select 2]
+      SetOperationMetadataList [9-37] [UNION  @{ key = 5 } DISTINCT]
+        SetOperationMetadata [9-37] [UNION  @{ key = 5 } DISTINCT]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [29-37] [DISTINCT]
+          Hint [16-28] [@{ key = 5 }]
+            HintEntry [19-26] [key = 5]
+              Identifier(key) [19-22] [key]
+              IntLiteral(5) [25-26] [5]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [38-46] [select 2]
+        SelectList [45-46] [2]
+          SelectColumn [45-46] [2]
+            IntLiteral(2) [45-46] [2]
+--
+SELECT
+  1
+UNION @{ key = 5 } DISTINCT
+SELECT
+  2
+==
+
+# 2 children and 1 simple hint (INTERSECT DISTINCT)
+select 1
+INTERSECT @{ key = 5 } DISTINCT
+select 2
+--
+QueryStatement [0-49] [select 1 INTERSEC...T select 2]
+  Query [0-49] [select 1 INTERSEC...T select 2]
+    SetOperation(INTERSECT DISTINCT) [0-49] [select 1 INTERSEC...T select 2]
+      SetOperationMetadataList [9-40] [INTERSECT...} DISTINCT]
+        SetOperationMetadata [9-40] [INTERSECT...} DISTINCT]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [32-40] [DISTINCT]
+          Hint [19-31] [@{ key = 5 }]
+            HintEntry [22-29] [key = 5]
+              Identifier(key) [22-25] [key]
+              IntLiteral(5) [28-29] [5]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [41-49] [select 2]
+        SelectList [48-49] [2]
+          SelectColumn [48-49] [2]
+            IntLiteral(2) [48-49] [2]
+--
+SELECT
+  1
+INTERSECT @{ key = 5 } DISTINCT
+SELECT
+  2
+==
+
+# 2 children and 1 simple hint (EXCEPT DISTINCT)
+# The extra whitespace below is intentional.
+select 1
+EXCEPT  @{ key = 5 } DISTINCT
+select 2
+--
+QueryStatement [0-47] [select 1 EXCEPT...NCT select 2]
+  Query [0-47] [select 1 EXCEPT...NCT select 2]
+    SetOperation(EXCEPT DISTINCT) [0-47] [select 1 EXCEPT...NCT select 2]
+      SetOperationMetadataList [9-38] [EXCEPT  @{ key = 5 } DISTINCT]
+        SetOperationMetadata [9-38] [EXCEPT  @{ key = 5 } DISTINCT]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [30-38] [DISTINCT]
+          Hint [17-29] [@{ key = 5 }]
+            HintEntry [20-27] [key = 5]
+              Identifier(key) [20-23] [key]
+              IntLiteral(5) [26-27] [5]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [39-47] [select 2]
+        SelectList [46-47] [2]
+          SelectColumn [46-47] [2]
+            IntLiteral(2) [46-47] [2]
+--
+SELECT
+  1
+EXCEPT @{ key = 5 } DISTINCT
+SELECT
+  2
+==
+
+# 3 children and 1 simple hint
+select 1
+UNION @{ key = 5 } ALL
+select 2
+UNION ALL
+select 3
+--
+QueryStatement [0-59] [select 1 UNION...ALL select 3]
+  Query [0-59] [select 1 UNION...ALL select 3]
+    SetOperation(UNION ALL) [0-59] [select 1 UNION...ALL select 3]
+      SetOperationMetadataList [9-50] [UNION @{ key...UNION ALL]
+        SetOperationMetadata [9-31] [UNION @{ key = 5 } ALL]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [28-31] [ALL]
+          Hint [15-27] [@{ key = 5 }]
+            HintEntry [18-25] [key = 5]
+              Identifier(key) [18-21] [key]
+              IntLiteral(5) [24-25] [5]
+        SetOperationMetadata [41-50] [UNION ALL]
+          SetOperationType [41-46] [UNION]
+          SetOperationAllOrDistinct [47-50] [ALL]
+      Select [0-8] [select 1]
+        SelectList [7-8] [1]
+          SelectColumn [7-8] [1]
+            IntLiteral(1) [7-8] [1]
+      Select [32-40] [select 2]
+        SelectList [39-40] [2]
+          SelectColumn [39-40] [2]
+            IntLiteral(2) [39-40] [2]
+      Select [51-59] [select 3]
+        SelectList [58-59] [3]
+          SelectColumn [58-59] [3]
+            IntLiteral(3) [58-59] [3]
+--
+SELECT
+  1
+UNION @{ key = 5 } ALL
+SELECT
+  2
+UNION ALL
+SELECT
+  3
+==
+
+# More than one hint but in the proper location (expanding from left)
+(select 1
+  UNION @{ key = 1 } ALL
+  select 2)
+UNION @{ key = 2 } ALL
+select 3
+--
+QueryStatement [0-78] [(select 1...ALL select 3]
+  Query [0-78] [(select 1...ALL select 3]
+    SetOperation(UNION ALL) [0-78] [(select 1...ALL select 3]
+      SetOperationMetadataList [47-69] [UNION @{ key = 2 } ALL]
+        SetOperationMetadata [47-69] [UNION @{ key = 2 } ALL]
+          SetOperationType [47-52] [UNION]
+          SetOperationAllOrDistinct [66-69] [ALL]
+          Hint [53-65] [@{ key = 2 }]
+            HintEntry [56-63] [key = 2]
+              Identifier(key) [56-59] [key]
+              IntLiteral(2) [62-63] [2]
+      Query [1-45] [select 1...select 2]
+        SetOperation(UNION ALL) [1-45] [select 1...select 2]
+          SetOperationMetadataList [12-34] [UNION @{ key = 1 } ALL]
+            SetOperationMetadata [12-34] [UNION @{ key = 1 } ALL]
+              SetOperationType [12-17] [UNION]
+              SetOperationAllOrDistinct [31-34] [ALL]
+              Hint [18-30] [@{ key = 1 }]
+                HintEntry [21-28] [key = 1]
+                  Identifier(key) [21-24] [key]
+                  IntLiteral(1) [27-28] [1]
+          Select [1-9] [select 1]
+            SelectList [8-9] [1]
+              SelectColumn [8-9] [1]
+                IntLiteral(1) [8-9] [1]
+          Select [37-45] [select 2]
+            SelectList [44-45] [2]
+              SelectColumn [44-45] [2]
+                IntLiteral(2) [44-45] [2]
+      Select [70-78] [select 3]
+        SelectList [77-78] [3]
+          SelectColumn [77-78] [3]
+            IntLiteral(3) [77-78] [3]
+--
+(
+SELECT
+  1
+UNION @{ key = 1 } ALL
+SELECT
+  2
+) UNION @{ key = 2 } ALL
+SELECT
+  3
+==
+
+# More than one hint but in the proper location (expanding from right)
+select 3
+UNION @{ key = 2 } ALL
+  (select 1
+  UNION @{ key = 1 } ALL
+  select 2)
+--
+QueryStatement [0-80] [select 3 UNION...select 2)]
+  Query [0-80] [select 3 UNION...select 2)]
+    SetOperation(UNION ALL) [0-80] [select 3 UNION...select 2)]
+      SetOperationMetadataList [9-31] [UNION @{ key = 2 } ALL]
+        SetOperationMetadata [9-31] [UNION @{ key = 2 } ALL]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [28-31] [ALL]
+          Hint [15-27] [@{ key = 2 }]
+            HintEntry [18-25] [key = 2]
+              Identifier(key) [18-21] [key]
+              IntLiteral(2) [24-25] [2]
+      Select [0-8] [select 3]
+        SelectList [7-8] [3]
+          SelectColumn [7-8] [3]
+            IntLiteral(3) [7-8] [3]
+      Query [35-79] [select 1...select 2]
+        SetOperation(UNION ALL) [35-79] [select 1...select 2]
+          SetOperationMetadataList [46-68] [UNION @{ key = 1 } ALL]
+            SetOperationMetadata [46-68] [UNION @{ key = 1 } ALL]
+              SetOperationType [46-51] [UNION]
+              SetOperationAllOrDistinct [65-68] [ALL]
+              Hint [52-64] [@{ key = 1 }]
+                HintEntry [55-62] [key = 1]
+                  Identifier(key) [55-58] [key]
+                  IntLiteral(1) [61-62] [1]
+          Select [35-43] [select 1]
+            SelectList [42-43] [1]
+              SelectColumn [42-43] [1]
+                IntLiteral(1) [42-43] [1]
+          Select [71-79] [select 2]
+            SelectList [78-79] [2]
+              SelectColumn [78-79] [2]
+                IntLiteral(2) [78-79] [2]
+--
+SELECT
+  3
+UNION @{ key = 2 } ALL(
+SELECT
+  1
+UNION @{ key = 1 } ALL
+SELECT
+  2
+)
+==
+
+SELECT 3 {{UNION|INTERSECT|EXCEPT}} @5 ALL SELECT 2
+--
+ALTERNATION GROUP: UNION
+--
+QueryStatement [0-30] [SELECT 3 UNION @5 ALL SELECT 2]
+  Query [0-30] [SELECT 3 UNION @5 ALL SELECT 2]
+    SetOperation(UNION ALL) [0-30] [SELECT 3 UNION @5 ALL SELECT 2]
+      SetOperationMetadataList [9-21] [UNION @5 ALL]
+        SetOperationMetadata [9-21] [UNION @5 ALL]
+          SetOperationType [9-14] [UNION]
+          SetOperationAllOrDistinct [18-21] [ALL]
+          Hint [15-17] [@5]
+            IntLiteral(5) [16-17] [5]
+      Select [0-8] [SELECT 3]
+        SelectList [7-8] [3]
+          SelectColumn [7-8] [3]
+            IntLiteral(3) [7-8] [3]
+      Select [22-30] [SELECT 2]
+        SelectList [29-30] [2]
+          SelectColumn [29-30] [2]
+            IntLiteral(2) [29-30] [2]
+--
+SELECT
+  3
+UNION @5 ALL
+SELECT
+  2
+--
+ALTERNATION GROUP: INTERSECT
+--
+QueryStatement [0-34] [SELECT 3 INTERSEC...L SELECT 2]
+  Query [0-34] [SELECT 3 INTERSEC...L SELECT 2]
+    SetOperation(INTERSECT ALL) [0-34] [SELECT 3 INTERSEC...L SELECT 2]
+      SetOperationMetadataList [9-25] [INTERSECT @5 ALL]
+        SetOperationMetadata [9-25] [INTERSECT @5 ALL]
+          SetOperationType [9-18] [INTERSECT]
+          SetOperationAllOrDistinct [22-25] [ALL]
+          Hint [19-21] [@5]
+            IntLiteral(5) [20-21] [5]
+      Select [0-8] [SELECT 3]
+        SelectList [7-8] [3]
+          SelectColumn [7-8] [3]
+            IntLiteral(3) [7-8] [3]
+      Select [26-34] [SELECT 2]
+        SelectList [33-34] [2]
+          SelectColumn [33-34] [2]
+            IntLiteral(2) [33-34] [2]
+--
+SELECT
+  3
+INTERSECT @5 ALL
+SELECT
+  2
+--
+ALTERNATION GROUP: EXCEPT
+--
+QueryStatement [0-31] [SELECT 3 EXCEPT...ALL SELECT 2]
+  Query [0-31] [SELECT 3 EXCEPT...ALL SELECT 2]
+    SetOperation(EXCEPT ALL) [0-31] [SELECT 3 EXCEPT...ALL SELECT 2]
+      SetOperationMetadataList [9-22] [EXCEPT @5 ALL]
+        SetOperationMetadata [9-22] [EXCEPT @5 ALL]
+          SetOperationType [9-15] [EXCEPT]
+          SetOperationAllOrDistinct [19-22] [ALL]
+          Hint [16-18] [@5]
+            IntLiteral(5) [17-18] [5]
+      Select [0-8] [SELECT 3]
+        SelectList [7-8] [3]
+          SelectColumn [7-8] [3]
+            IntLiteral(3) [7-8] [3]
+      Select [23-31] [SELECT 2]
+        SelectList [30-31] [2]
+          SelectColumn [30-31] [2]
+            IntLiteral(2) [30-31] [2]
+--
+SELECT
+  3
+EXCEPT @5 ALL
+SELECT
+  2
+==
+
+SELECT {{UNION|INTERSECT|EXCEPT}} @param;
+--
+ALTERNATION GROUP: UNION
+--
+ERROR: Syntax error: Unexpected keyword UNION [at 1:8]
+SELECT UNION @param;
+       ^
+--
+ALTERNATION GROUP: INTERSECT
+--
+ERROR: Syntax error: Unexpected keyword INTERSECT [at 1:8]
+SELECT INTERSECT @param;
+       ^
+--
+ALTERNATION GROUP: EXCEPT
+--
+ERROR: EXCEPT must be followed by ALL, DISTINCT, or "(" [at 1:8]
+SELECT EXCEPT @param;
+       ^
+
+==
+
+# Set operation with graph query doesn't work
+
+SELECT 1 as one
+UNION ALL
+GRAPH g RETURN 1 as one
+--
+ERROR: Syntax error: Expected "(" or keyword SELECT or keyword TABLE but got keyword GRAPH [at 3:1]
+GRAPH g RETURN 1 as one
+^
+

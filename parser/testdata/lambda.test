@@ -1,0 +1,360 @@
+# Non path expression as parameter
+select Func([1,2,3], e>0 -> e > 1);
+--
+ERROR: Syntax error: Expecting lambda argument list [at 1:22]
+select Func([1,2,3], e>0 -> e > 1);
+                     ^
+==
+
+# Non path expression as parameter with parenthesis
+select Func([1,2,3], (e>0) -> e > 1);
+--
+ERROR: Syntax error: Expecting lambda argument list [at 1:22]
+select Func([1,2,3], (e>0) -> e > 1);
+                     ^
+==
+
+# Non path expression inside multiple parameters
+# This would be checked and reported by analyzer.
+select Func([1,2,3], (e, i>0) -> e > 1);
+--
+QueryStatement [0-39] [select Func...-> e > 1)]
+  Query [0-39] [select Func...-> e > 1)]
+    Select [0-39] [select Func...-> e > 1)]
+      SelectList [7-39] [Func([1,2,...-> e > 1)]
+        SelectColumn [7-39] [Func([1,2,...-> e > 1)]
+          FunctionCall [7-39] [Func([1,2,...-> e > 1)]
+            PathExpression [7-11] [Func]
+              Identifier(Func) [7-11] [Func]
+            ArrayConstructor [12-19] [[1,2,3]]
+              IntLiteral(1) [13-14] [1]
+              IntLiteral(2) [15-16] [2]
+              IntLiteral(3) [17-18] [3]
+            Lambda [21-38] [(e, i>0) -> e > 1]
+              StructConstructorWithParens [21-29] [(e, i>0)]
+                PathExpression [22-23] [e]
+                  Identifier(e) [22-23] [e]
+                BinaryExpression(>) [25-28] [i>0]
+                  PathExpression [25-26] [i]
+                    Identifier(i) [25-26] [i]
+                  IntLiteral(0) [27-28] [0]
+              BinaryExpression(>) [33-38] [e > 1]
+                PathExpression [33-34] [e]
+                  Identifier(e) [33-34] [e]
+                IntLiteral(1) [37-38] [1]
+--
+SELECT
+  Func(ARRAY[1, 2, 3], (e, i > 0) -> e > 1)
+==
+
+# Multiple part path expression as parameter
+# This would be checked and reported by analyzer.
+select Func([1,2,3], a.b.c -> e > 1);
+--
+QueryStatement [0-36] [select Func...-> e > 1)]
+  Query [0-36] [select Func...-> e > 1)]
+    Select [0-36] [select Func...-> e > 1)]
+      SelectList [7-36] [Func([1,2,3], a.b.c -> e > 1)]
+        SelectColumn [7-36] [Func([1,2,3], a.b.c -> e > 1)]
+          FunctionCall [7-36] [Func([1,2,3], a.b.c -> e > 1)]
+            PathExpression [7-11] [Func]
+              Identifier(Func) [7-11] [Func]
+            ArrayConstructor [12-19] [[1,2,3]]
+              IntLiteral(1) [13-14] [1]
+              IntLiteral(2) [15-16] [2]
+              IntLiteral(3) [17-18] [3]
+            Lambda [21-35] [a.b.c -> e > 1]
+              PathExpression [21-26] [a.b.c]
+                Identifier(a) [21-22] [a]
+                Identifier(b) [23-24] [b]
+                Identifier(c) [25-26] [c]
+              BinaryExpression(>) [30-35] [e > 1]
+                PathExpression [30-31] [e]
+                  Identifier(e) [30-31] [e]
+                IntLiteral(1) [34-35] [1]
+--
+SELECT
+  Func(ARRAY[1, 2, 3], (a.b.c) -> e > 1)
+==
+
+# Explicit struct expression
+SELECT FILTER(ARRAY[1, 2, 3], STRUCT(e) -> e > 1);
+--
+ERROR: Syntax error: Expecting lambda argument list [at 1:31]
+SELECT FILTER(ARRAY[1, 2, 3], STRUCT(e) -> e > 1);
+                              ^
+==
+
+# No param lambda
+select Func([1,2,3], () -> e > 1);
+--
+QueryStatement [0-33] [select Func...-> e > 1)]
+  Query [0-33] [select Func...-> e > 1)]
+    Select [0-33] [select Func...-> e > 1)]
+      SelectList [7-33] [Func([1,2,3], () -> e > 1)]
+        SelectColumn [7-33] [Func([1,2,3], () -> e > 1)]
+          FunctionCall [7-33] [Func([1,2,3], () -> e > 1)]
+            PathExpression [7-11] [Func]
+              Identifier(Func) [7-11] [Func]
+            ArrayConstructor [12-19] [[1,2,3]]
+              IntLiteral(1) [13-14] [1]
+              IntLiteral(2) [15-16] [2]
+              IntLiteral(3) [17-18] [3]
+            Lambda [21-32] [() -> e > 1]
+              StructConstructorWithParens [21-23] [()]
+              BinaryExpression(>) [27-32] [e > 1]
+                PathExpression [27-28] [e]
+                  Identifier(e) [27-28] [e]
+                IntLiteral(1) [31-32] [1]
+--
+SELECT
+  Func(ARRAY[1, 2, 3], () -> e > 1)
+==
+
+# Single param lambda without parenthesis
+select FILTER([1,2,3], e -> e > 1);
+--
+QueryStatement [0-34] [select FILTER...-> e > 1)]
+  Query [0-34] [select FILTER...-> e > 1)]
+    Select [0-34] [select FILTER...-> e > 1)]
+      SelectList [7-34] [FILTER([1,2,3], e -> e > 1)]
+        SelectColumn [7-34] [FILTER([1,2,3], e -> e > 1)]
+          FunctionCall [7-34] [FILTER([1,2,3], e -> e > 1)]
+            PathExpression [7-13] [FILTER]
+              Identifier(FILTER) [7-13] [FILTER]
+            ArrayConstructor [14-21] [[1,2,3]]
+              IntLiteral(1) [15-16] [1]
+              IntLiteral(2) [17-18] [2]
+              IntLiteral(3) [19-20] [3]
+            Lambda [23-33] [e -> e > 1]
+              PathExpression [23-24] [e]
+                Identifier(e) [23-24] [e]
+              BinaryExpression(>) [28-33] [e > 1]
+                PathExpression [28-29] [e]
+                  Identifier(e) [28-29] [e]
+                IntLiteral(1) [32-33] [1]
+--
+SELECT
+  FILTER(ARRAY[1, 2, 3], (e) -> e > 1)
+==
+
+# Single param lambda with parenthesis
+select FILTER([1,2,3], (e) -> e > 1);
+--
+QueryStatement [0-36] [select FILTER...-> e > 1)]
+  Query [0-36] [select FILTER...-> e > 1)]
+    Select [0-36] [select FILTER...-> e > 1)]
+      SelectList [7-36] [FILTER([1,2,3], (e) -> e > 1)]
+        SelectColumn [7-36] [FILTER([1,2,3], (e) -> e > 1)]
+          FunctionCall [7-36] [FILTER([1,2,3], (e) -> e > 1)]
+            PathExpression [7-13] [FILTER]
+              Identifier(FILTER) [7-13] [FILTER]
+            ArrayConstructor [14-21] [[1,2,3]]
+              IntLiteral(1) [15-16] [1]
+              IntLiteral(2) [17-18] [2]
+              IntLiteral(3) [19-20] [3]
+            Lambda [23-35] [(e) -> e > 1]
+              PathExpression [24-25] [e]
+                Identifier(e) [24-25] [e]
+              BinaryExpression(>) [30-35] [e > 1]
+                PathExpression [30-31] [e]
+                  Identifier(e) [30-31] [e]
+                IntLiteral(1) [34-35] [1]
+--
+SELECT
+  FILTER(ARRAY[1, 2, 3], (e) -> e > 1)
+==
+
+# Double param lambda with simple body
+select FILTER([1,2,3], (e, i) -> e > i);
+--
+QueryStatement [0-39] [select FILTER...-> e > i)]
+  Query [0-39] [select FILTER...-> e > i)]
+    Select [0-39] [select FILTER...-> e > i)]
+      SelectList [7-39] [FILTER([1,...-> e > i)]
+        SelectColumn [7-39] [FILTER([1,...-> e > i)]
+          FunctionCall [7-39] [FILTER([1,...-> e > i)]
+            PathExpression [7-13] [FILTER]
+              Identifier(FILTER) [7-13] [FILTER]
+            ArrayConstructor [14-21] [[1,2,3]]
+              IntLiteral(1) [15-16] [1]
+              IntLiteral(2) [17-18] [2]
+              IntLiteral(3) [19-20] [3]
+            Lambda [23-38] [(e, i) -> e > i]
+              StructConstructorWithParens [23-29] [(e, i)]
+                PathExpression [24-25] [e]
+                  Identifier(e) [24-25] [e]
+                PathExpression [27-28] [i]
+                  Identifier(i) [27-28] [i]
+              BinaryExpression(>) [33-38] [e > i]
+                PathExpression [33-34] [e]
+                  Identifier(e) [33-34] [e]
+                PathExpression [37-38] [i]
+                  Identifier(i) [37-38] [i]
+--
+SELECT
+  FILTER(ARRAY[1, 2, 3], (e, i) -> e > i)
+==
+
+# Double param lambda with longer body
+select FILTER([1,2,3], (e, i) -> e > 1 and i != 3);
+--
+QueryStatement [0-50] [select FILTER...and i != 3)]
+  Query [0-50] [select FILTER...and i != 3)]
+    Select [0-50] [select FILTER...and i != 3)]
+      SelectList [7-50] [FILTER([1,...and i != 3)]
+        SelectColumn [7-50] [FILTER([1,...and i != 3)]
+          FunctionCall [7-50] [FILTER([1,...and i != 3)]
+            PathExpression [7-13] [FILTER]
+              Identifier(FILTER) [7-13] [FILTER]
+            ArrayConstructor [14-21] [[1,2,3]]
+              IntLiteral(1) [15-16] [1]
+              IntLiteral(2) [17-18] [2]
+              IntLiteral(3) [19-20] [3]
+            Lambda [23-49] [(e, i) -> e > 1 and i != 3]
+              StructConstructorWithParens [23-29] [(e, i)]
+                PathExpression [24-25] [e]
+                  Identifier(e) [24-25] [e]
+                PathExpression [27-28] [i]
+                  Identifier(i) [27-28] [i]
+              AndExpr [33-49] [e > 1 and i != 3]
+                BinaryExpression(>) [33-38] [e > 1]
+                  PathExpression [33-34] [e]
+                    Identifier(e) [33-34] [e]
+                  IntLiteral(1) [37-38] [1]
+                BinaryExpression(!=) [43-49] [i != 3]
+                  PathExpression [43-44] [i]
+                    Identifier(i) [43-44] [i]
+                  IntLiteral(3) [48-49] [3]
+--
+SELECT
+  FILTER(ARRAY[1, 2, 3], (e, i) -> e > 1 AND i != 3)
+==
+
+# Lambda with query
+select FILTER([1,2,3], e -> exists(SELECT * from T));
+--
+QueryStatement [0-52] [select FILTER...* from T))]
+  Query [0-52] [select FILTER...* from T))]
+    Select [0-52] [select FILTER...* from T))]
+      SelectList [7-52] [FILTER([1,...* from T))]
+        SelectColumn [7-52] [FILTER([1,...* from T))]
+          FunctionCall [7-52] [FILTER([1,...* from T))]
+            PathExpression [7-13] [FILTER]
+              Identifier(FILTER) [7-13] [FILTER]
+            ArrayConstructor [14-21] [[1,2,3]]
+              IntLiteral(1) [15-16] [1]
+              IntLiteral(2) [17-18] [2]
+              IntLiteral(3) [19-20] [3]
+            Lambda [23-51] [e -> exists(SELECT * from T)]
+              PathExpression [23-24] [e]
+                Identifier(e) [23-24] [e]
+              ExpressionSubquery(modifier=EXISTS) [28-51] [exists(SELECT * from T)]
+                Query [35-50] [SELECT * from T]
+                  Select [35-50] [SELECT * from T]
+                    SelectList [42-43] [*]
+                      SelectColumn [42-43] [*]
+                        Star(*) [42-43] [*]
+                    FromClause [44-50] [from T]
+                      TablePathExpression [49-50] [T]
+                        PathExpression [49-50] [T]
+                          Identifier(T) [49-50] [T]
+--
+SELECT
+  FILTER(ARRAY[1, 2, 3], (e) -> EXISTS(
+      SELECT
+        *
+      FROM
+        T
+    ))
+==
+
+# Two level nested lambda
+select FILTER([1,2,3], e -> ARRAY_LENGTH(FILTER([1,2,3], e-> e>0)));
+--
+QueryStatement [0-67] [select FILTER...e-> e>0)))]
+  Query [0-67] [select FILTER...e-> e>0)))]
+    Select [0-67] [select FILTER...e-> e>0)))]
+      SelectList [7-67] [FILTER([1,...e-> e>0)))]
+        SelectColumn [7-67] [FILTER([1,...e-> e>0)))]
+          FunctionCall [7-67] [FILTER([1,...e-> e>0)))]
+            PathExpression [7-13] [FILTER]
+              Identifier(FILTER) [7-13] [FILTER]
+            ArrayConstructor [14-21] [[1,2,3]]
+              IntLiteral(1) [15-16] [1]
+              IntLiteral(2) [17-18] [2]
+              IntLiteral(3) [19-20] [3]
+            Lambda [23-66] [e -> ARRAY_LENGTH...e-> e>0))]
+              PathExpression [23-24] [e]
+                Identifier(e) [23-24] [e]
+              FunctionCall [28-66] [ARRAY_LENGTH...e-> e>0))]
+                PathExpression [28-40] [ARRAY_LENGTH]
+                  Identifier(ARRAY_LENGTH) [28-40] [ARRAY_LENGTH]
+                FunctionCall [41-65] [FILTER([1,2,3], e-> e>0)]
+                  PathExpression [41-47] [FILTER]
+                    Identifier(FILTER) [41-47] [FILTER]
+                  ArrayConstructor [48-55] [[1,2,3]]
+                    IntLiteral(1) [49-50] [1]
+                    IntLiteral(2) [51-52] [2]
+                    IntLiteral(3) [53-54] [3]
+                  Lambda [57-64] [e-> e>0]
+                    PathExpression [57-58] [e]
+                      Identifier(e) [57-58] [e]
+                    BinaryExpression(>) [61-64] [e>0]
+                      PathExpression [61-62] [e]
+                        Identifier(e) [61-62] [e]
+                      IntLiteral(0) [63-64] [0]
+--
+SELECT
+  FILTER(ARRAY[1, 2, 3], (e) -> ARRAY_LENGTH(FILTER(ARRAY[1, 2, 3], (e) -> e > 0)))
+==
+
+# three level nested lambda
+select ARRAY_TRANSFORM(
+  [1,2,3],
+  e -> ARRAY_TRANSFORM(
+    [1, e], e->ARRAY_TRANSFORM([2,e], e->e+1)));
+--
+QueryStatement [0-106] [select ARRAY_TRAN...e->e+1)))]
+  Query [0-106] [select ARRAY_TRAN...e->e+1)))]
+    Select [0-106] [select ARRAY_TRAN...e->e+1)))]
+      SelectList [7-106] [ARRAY_TRANSFORM...e->e+1)))]
+        SelectColumn [7-106] [ARRAY_TRANSFORM...e->e+1)))]
+          FunctionCall [7-106] [ARRAY_TRANSFORM...e->e+1)))]
+            PathExpression [7-22] [ARRAY_TRANSFORM]
+              Identifier(ARRAY_TRANSFORM) [7-22] [ARRAY_TRANSFORM]
+            ArrayConstructor [26-33] [[1,2,3]]
+              IntLiteral(1) [27-28] [1]
+              IntLiteral(2) [29-30] [2]
+              IntLiteral(3) [31-32] [3]
+            Lambda [37-105] [e -> ARRAY_TRANSF..., e->e+1))]
+              PathExpression [37-38] [e]
+                Identifier(e) [37-38] [e]
+              FunctionCall [42-105] [ARRAY_TRANSFORM..., e->e+1))]
+                PathExpression [42-57] [ARRAY_TRANSFORM]
+                  Identifier(ARRAY_TRANSFORM) [42-57] [ARRAY_TRANSFORM]
+                ArrayConstructor [63-69] [[1, e]]
+                  IntLiteral(1) [64-65] [1]
+                  PathExpression [67-68] [e]
+                    Identifier(e) [67-68] [e]
+                Lambda [71-104] [e->ARRAY_TRANSFOR...], e->e+1)]
+                  PathExpression [71-72] [e]
+                    Identifier(e) [71-72] [e]
+                  FunctionCall [74-104] [ARRAY_TRANSFORM([2,e], e->e+1)]
+                    PathExpression [74-89] [ARRAY_TRANSFORM]
+                      Identifier(ARRAY_TRANSFORM) [74-89] [ARRAY_TRANSFORM]
+                    ArrayConstructor [90-95] [[2,e]]
+                      IntLiteral(2) [91-92] [2]
+                      PathExpression [93-94] [e]
+                        Identifier(e) [93-94] [e]
+                    Lambda [97-103] [e->e+1]
+                      PathExpression [97-98] [e]
+                        Identifier(e) [97-98] [e]
+                      BinaryExpression(+) [100-103] [e+1]
+                        PathExpression [100-101] [e]
+                          Identifier(e) [100-101] [e]
+                        IntLiteral(1) [102-103] [1]
+--
+SELECT
+  ARRAY_TRANSFORM(ARRAY[1, 2, 3], (e) -> ARRAY_TRANSFORM(ARRAY[1, e], (e) -> ARRAY_TRANSFORM(ARRAY[2, e],
+        (e) -> e + 1)))

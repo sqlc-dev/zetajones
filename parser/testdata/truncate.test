@@ -1,0 +1,119 @@
+# TRUNCATE TABLE
+TRUNCATE TABLE foo;
+--
+TruncateStatement [0-18] [TRUNCATE TABLE foo]
+  PathExpression [15-18] [foo]
+    Identifier(foo) [15-18] [foo]
+--
+TRUNCATE TABLE foo
+==
+
+# Specify partition with WHERE expression
+TRUNCATE TABLE foo WHERE bar > 3;
+--
+TruncateStatement [0-32] [TRUNCATE TABLE...WHERE bar > 3]
+  PathExpression [15-18] [foo]
+    Identifier(foo) [15-18] [foo]
+  BinaryExpression(>) [25-32] [bar > 3]
+    PathExpression [25-28] [bar]
+      Identifier(bar) [25-28] [bar]
+    IntLiteral(3) [31-32] [3]
+--
+TRUNCATE TABLE foo
+WHERE
+  bar > 3
+==
+
+# Verify that TRUNCATE is a non-reserve word.
+SELECT truncate FROM foo;
+--
+QueryStatement [0-24] [SELECT truncate FROM foo]
+  Query [0-24] [SELECT truncate FROM foo]
+    Select [0-24] [SELECT truncate FROM foo]
+      SelectList [7-15] [truncate]
+        SelectColumn [7-15] [truncate]
+          PathExpression [7-15] [truncate]
+            Identifier(truncate) [7-15] [truncate]
+      FromClause [16-24] [FROM foo]
+        TablePathExpression [21-24] [foo]
+          PathExpression [21-24] [foo]
+            Identifier(foo) [21-24] [foo]
+--
+SELECT
+  truncate
+FROM
+  foo
+==
+
+SELECT * FROM truncate;
+--
+QueryStatement [0-22] [SELECT * FROM truncate]
+  Query [0-22] [SELECT * FROM truncate]
+    Select [0-22] [SELECT * FROM truncate]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-22] [FROM truncate]
+        TablePathExpression [14-22] [truncate]
+          PathExpression [14-22] [truncate]
+            Identifier(truncate) [14-22] [truncate]
+--
+SELECT
+  *
+FROM
+  truncate
+==
+
+# 'TRUNCATE' (no arguments) to show error message.
+TRUNCATE;
+--
+ERROR: Syntax error: Expected keyword TABLE but got ";" [at 1:9]
+TRUNCATE;
+        ^
+==
+
+# 'IF EXISTS' modified is not supported for TRUNCATE TABLE; it is DML
+TRUNCATE TABLE TestTable IF EXISTS;
+--
+ERROR: Syntax error: Expected end of input but got keyword IF [at 1:26]
+TRUNCATE TABLE TestTable IF EXISTS;
+                         ^
+==
+
+# Generalized path not supported.
+TRUNCATE TABLE TestTable.(a.b) WHERE True;
+--
+ERROR: Syntax error: Unexpected "(" [at 1:26]
+TRUNCATE TABLE TestTable.(a.b) WHERE True;
+                         ^
+==
+
+# TRUNCATE TABLE not supported in nested DML
+MERGE TestTable
+Using SimpleTypes
+ON key = int32
+WHEN MATCHED THEN
+  TRUNCATE TABLE
+--
+ERROR: Syntax error: Expected keyword DELETE or keyword INSERT or keyword UPDATE but got keyword TRUNCATE [at 5:3]
+  TRUNCATE TABLE
+  ^
+==
+
+[language_features=NONE,{{|+ALLOW_DASHES_IN_TABLE_NAME}}]
+TRUNCATE TABLE foo-567-bar.baz;
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Table name contains '-' character. The dashed identifier part of the table name needs to be quoted: `foo-567-bar` [at 1:16]
+TRUNCATE TABLE foo-567-bar.baz;
+               ^
+--
+ALTERNATION GROUP: +ALLOW_DASHES_IN_TABLE_NAME
+--
+TruncateStatement [0-30] [TRUNCATE TABLE foo-567-bar.baz]
+  PathExpression [15-30] [foo-567-bar.baz]
+    Identifier(`foo-567-bar`) [15-26] [foo-567-bar]
+    Identifier(baz) [27-30] [baz]
+--
+TRUNCATE TABLE `foo-567-bar`.baz

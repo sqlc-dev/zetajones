@@ -1,0 +1,1403 @@
+# This file tests operator precedence, including some tricky cases:
+# - operators such as LIKE and = are nonassociative and at the same precedence
+#   level
+# There are also precedence tests in test files for individual operators, such
+# as between.test.
+# TODO: Add more comprehensive tests. We should showcase the
+# precedence levels by testing the pairwise precedence of each consecutive pair
+# of levels in the precedence hierarchy, as well as the associativity of each
+# of the operators.
+select a AND b AND c OR d
+--
+QueryStatement [0-25] [select a AND b AND c OR d]
+  Query [0-25] [select a AND b AND c OR d]
+    Select [0-25] [select a AND b AND c OR d]
+      SelectList [7-25] [a AND b AND c OR d]
+        SelectColumn [7-25] [a AND b AND c OR d]
+          OrExpr [7-25] [a AND b AND c OR d]
+            AndExpr [7-20] [a AND b AND c]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [13-14] [b]
+                Identifier(b) [13-14] [b]
+              PathExpression [19-20] [c]
+                Identifier(c) [19-20] [c]
+            PathExpression [24-25] [d]
+              Identifier(d) [24-25] [d]
+--
+SELECT
+  a AND b AND c OR d
+==
+
+select a AND b AND (c OR d)
+--
+QueryStatement [0-27] [select a AND b AND (c OR d)]
+  Query [0-27] [select a AND b AND (c OR d)]
+    Select [0-27] [select a AND b AND (c OR d)]
+      SelectList [7-27] [a AND b AND (c OR d)]
+        SelectColumn [7-27] [a AND b AND (c OR d)]
+          AndExpr [7-27] [a AND b AND (c OR d)]
+            PathExpression [7-8] [a]
+              Identifier(a) [7-8] [a]
+            PathExpression [13-14] [b]
+              Identifier(b) [13-14] [b]
+            OrExpr [20-26] [c OR d]
+              PathExpression [20-21] [c]
+                Identifier(c) [20-21] [c]
+              PathExpression [25-26] [d]
+                Identifier(d) [25-26] [d]
+--
+SELECT
+  a AND b AND (c OR d)
+==
+
+select x + y,  x + y * z
+--
+QueryStatement [0-24] [select x + y,  x + y * z]
+  Query [0-24] [select x + y,  x + y * z]
+    Select [0-24] [select x + y,  x + y * z]
+      SelectList [7-24] [x + y,  x + y * z]
+        SelectColumn [7-12] [x + y]
+          BinaryExpression(+) [7-12] [x + y]
+            PathExpression [7-8] [x]
+              Identifier(x) [7-8] [x]
+            PathExpression [11-12] [y]
+              Identifier(y) [11-12] [y]
+        SelectColumn [15-24] [x + y * z]
+          BinaryExpression(+) [15-24] [x + y * z]
+            PathExpression [15-16] [x]
+              Identifier(x) [15-16] [x]
+            BinaryExpression(*) [19-24] [y * z]
+              PathExpression [19-20] [y]
+                Identifier(y) [19-20] [y]
+              PathExpression [23-24] [z]
+                Identifier(z) [23-24] [z]
+--
+SELECT
+  x + y,
+  x + y * z
+==
+
+select x + y / z, (x + y) / z
+--
+QueryStatement [0-29] [select x + y / z, (x + y) / z]
+  Query [0-29] [select x + y / z, (x + y) / z]
+    Select [0-29] [select x + y / z, (x + y) / z]
+      SelectList [7-29] [x + y / z, (x + y) / z]
+        SelectColumn [7-16] [x + y / z]
+          BinaryExpression(+) [7-16] [x + y / z]
+            PathExpression [7-8] [x]
+              Identifier(x) [7-8] [x]
+            BinaryExpression(/) [11-16] [y / z]
+              PathExpression [11-12] [y]
+                Identifier(y) [11-12] [y]
+              PathExpression [15-16] [z]
+                Identifier(z) [15-16] [z]
+        SelectColumn [18-29] [(x + y) / z]
+          BinaryExpression(/) [18-29] [(x + y) / z]
+            BinaryExpression(+) [19-24] [x + y]
+              PathExpression [19-20] [x]
+                Identifier(x) [19-20] [x]
+              PathExpression [23-24] [y]
+                Identifier(y) [23-24] [y]
+            PathExpression [28-29] [z]
+              Identifier(z) [28-29] [z]
+--
+SELECT
+  x + y / z,
+  (x + y) / z
+==
+
+select x / y + y * x / z
+--
+QueryStatement [0-24] [select x / y + y * x / z]
+  Query [0-24] [select x / y + y * x / z]
+    Select [0-24] [select x / y + y * x / z]
+      SelectList [7-24] [x / y + y * x / z]
+        SelectColumn [7-24] [x / y + y * x / z]
+          BinaryExpression(+) [7-24] [x / y + y * x / z]
+            BinaryExpression(/) [7-12] [x / y]
+              PathExpression [7-8] [x]
+                Identifier(x) [7-8] [x]
+              PathExpression [11-12] [y]
+                Identifier(y) [11-12] [y]
+            BinaryExpression(/) [15-24] [y * x / z]
+              BinaryExpression(*) [15-20] [y * x]
+                PathExpression [15-16] [y]
+                  Identifier(y) [15-16] [y]
+                PathExpression [19-20] [x]
+                  Identifier(x) [19-20] [x]
+              PathExpression [23-24] [z]
+                Identifier(z) [23-24] [z]
+--
+SELECT
+  x / y + y * x / z
+==
+
+select x / y * z / x;
+--
+QueryStatement [0-20] [select x / y * z / x]
+  Query [0-20] [select x / y * z / x]
+    Select [0-20] [select x / y * z / x]
+      SelectList [7-20] [x / y * z / x]
+        SelectColumn [7-20] [x / y * z / x]
+          BinaryExpression(/) [7-20] [x / y * z / x]
+            BinaryExpression(*) [7-16] [x / y * z]
+              BinaryExpression(/) [7-12] [x / y]
+                PathExpression [7-8] [x]
+                  Identifier(x) [7-8] [x]
+                PathExpression [11-12] [y]
+                  Identifier(y) [11-12] [y]
+              PathExpression [15-16] [z]
+                Identifier(z) [15-16] [z]
+            PathExpression [19-20] [x]
+              Identifier(x) [19-20] [x]
+--
+SELECT
+  x / y * z / x
+==
+
+select x / y / z
+--
+QueryStatement [0-16] [select x / y / z]
+  Query [0-16] [select x / y / z]
+    Select [0-16] [select x / y / z]
+      SelectList [7-16] [x / y / z]
+        SelectColumn [7-16] [x / y / z]
+          BinaryExpression(/) [7-16] [x / y / z]
+            BinaryExpression(/) [7-12] [x / y]
+              PathExpression [7-8] [x]
+                Identifier(x) [7-8] [x]
+              PathExpression [11-12] [y]
+                Identifier(y) [11-12] [y]
+            PathExpression [15-16] [z]
+              Identifier(z) [15-16] [z]
+--
+SELECT
+  x / y / z
+==
+
+select (x + y) * z, x + y * z
+--
+QueryStatement [0-29] [select (x + y) * z, x + y * z]
+  Query [0-29] [select (x + y) * z, x + y * z]
+    Select [0-29] [select (x + y) * z, x + y * z]
+      SelectList [7-29] [(x + y) * z, x + y * z]
+        SelectColumn [7-18] [(x + y) * z]
+          BinaryExpression(*) [7-18] [(x + y) * z]
+            BinaryExpression(+) [8-13] [x + y]
+              PathExpression [8-9] [x]
+                Identifier(x) [8-9] [x]
+              PathExpression [12-13] [y]
+                Identifier(y) [12-13] [y]
+            PathExpression [17-18] [z]
+              Identifier(z) [17-18] [z]
+        SelectColumn [20-29] [x + y * z]
+          BinaryExpression(+) [20-29] [x + y * z]
+            PathExpression [20-21] [x]
+              Identifier(x) [20-21] [x]
+            BinaryExpression(*) [24-29] [y * z]
+              PathExpression [24-25] [y]
+                Identifier(y) [24-25] [y]
+              PathExpression [28-29] [z]
+                Identifier(z) [28-29] [z]
+--
+SELECT
+  (x + y) * z,
+  x + y * z
+==
+
+select (x + y) > z OR a < b
+--
+QueryStatement [0-27] [select (x + y) > z OR a < b]
+  Query [0-27] [select (x + y) > z OR a < b]
+    Select [0-27] [select (x + y) > z OR a < b]
+      SelectList [7-27] [(x + y) > z OR a < b]
+        SelectColumn [7-27] [(x + y) > z OR a < b]
+          OrExpr [7-27] [(x + y) > z OR a < b]
+            BinaryExpression(>) [7-18] [(x + y) > z]
+              BinaryExpression(+) [8-13] [x + y]
+                PathExpression [8-9] [x]
+                  Identifier(x) [8-9] [x]
+                PathExpression [12-13] [y]
+                  Identifier(y) [12-13] [y]
+              PathExpression [17-18] [z]
+                Identifier(z) [17-18] [z]
+            BinaryExpression(<) [22-27] [a < b]
+              PathExpression [22-23] [a]
+                Identifier(a) [22-23] [a]
+              PathExpression [26-27] [b]
+                Identifier(b) [26-27] [b]
+--
+SELECT
+  (x + y) > z OR a < b
+==
+
+select NOT a OR f(x)
+--
+QueryStatement [0-20] [select NOT a OR f(x)]
+  Query [0-20] [select NOT a OR f(x)]
+    Select [0-20] [select NOT a OR f(x)]
+      SelectList [7-20] [NOT a OR f(x)]
+        SelectColumn [7-20] [NOT a OR f(x)]
+          OrExpr [7-20] [NOT a OR f(x)]
+            UnaryExpression(NOT) [7-12] [NOT a]
+              PathExpression [11-12] [a]
+                Identifier(a) [11-12] [a]
+            FunctionCall [16-20] [f(x)]
+              PathExpression [16-17] [f]
+                Identifier(f) [16-17] [f]
+              PathExpression [18-19] [x]
+                Identifier(x) [18-19] [x]
+--
+SELECT
+  NOT a OR f(x)
+==
+
+select x+y+z, a+b-c+d
+--
+QueryStatement [0-21] [select x+y+z, a+b-c+d]
+  Query [0-21] [select x+y+z, a+b-c+d]
+    Select [0-21] [select x+y+z, a+b-c+d]
+      SelectList [7-21] [x+y+z, a+b-c+d]
+        SelectColumn [7-12] [x+y+z]
+          BinaryExpression(+) [7-12] [x+y+z]
+            BinaryExpression(+) [7-10] [x+y]
+              PathExpression [7-8] [x]
+                Identifier(x) [7-8] [x]
+              PathExpression [9-10] [y]
+                Identifier(y) [9-10] [y]
+            PathExpression [11-12] [z]
+              Identifier(z) [11-12] [z]
+        SelectColumn [14-21] [a+b-c+d]
+          BinaryExpression(+) [14-21] [a+b-c+d]
+            BinaryExpression(-) [14-19] [a+b-c]
+              BinaryExpression(+) [14-17] [a+b]
+                PathExpression [14-15] [a]
+                  Identifier(a) [14-15] [a]
+                PathExpression [16-17] [b]
+                  Identifier(b) [16-17] [b]
+              PathExpression [18-19] [c]
+                Identifier(c) [18-19] [c]
+            PathExpression [20-21] [d]
+              Identifier(d) [20-21] [d]
+--
+SELECT
+  x + y + z,
+  a + b - c + d
+==
+
+select - -+-++3;
+--
+QueryStatement [0-15] [select - -+-++3]
+  Query [0-15] [select - -+-++3]
+    Select [0-15] [select - -+-++3]
+      SelectList [7-15] [- -+-++3]
+        SelectColumn [7-15] [- -+-++3]
+          UnaryExpression(-) [7-15] [- -+-++3]
+            UnaryExpression(-) [9-15] [-+-++3]
+              UnaryExpression(+) [10-15] [+-++3]
+                UnaryExpression(-) [11-15] [-++3]
+                  UnaryExpression(+) [12-15] [++3]
+                    UnaryExpression(+) [13-15] [+3]
+                      IntLiteral(3) [14-15] [3]
+--
+SELECT
+  - -+-++3
+==
+
+select not(not a not like b);
+--
+QueryStatement [0-28] [select not(not a not like b)]
+  Query [0-28] [select not(not a not like b)]
+    Select [0-28] [select not(not a not like b)]
+      SelectList [7-28] [not(not a not like b)]
+        SelectColumn [7-28] [not(not a not like b)]
+          UnaryExpression(NOT) [7-28] [not(not a not like b)]
+            UnaryExpression(NOT) [11-27] [not a not like b]
+              BinaryExpression(NOT LIKE) [15-27] [a not like b]
+                PathExpression [15-16] [a]
+                  Identifier(a) [15-16] [a]
+                PathExpression [26-27] [b]
+                  Identifier(b) [26-27] [b]
+--
+SELECT
+  NOT(NOT a NOT LIKE b)
+==
+
+# Bison is OK with this at the grammar level because it's not ambiguous in its
+# operator precedence parsing setup. The JavaCC parser uses hierarchical
+# productions to implement operator precedence, and it is ambiguous there. The
+# Bison parser reproduces the JavaCC error behavior with a special case error.
+select a {{like|=|<|>|<>|!=|>=|<=|+|-|*|/|^|&}} not b;
+--
+ALTERNATION GROUP: like
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:15]
+select a like not b;
+              ^
+--
+ALTERNATION GROUP: =
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a = not b;
+           ^
+--
+ALTERNATION GROUP: <
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a < not b;
+           ^
+--
+ALTERNATION GROUP: >
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a > not b;
+           ^
+--
+ALTERNATION GROUP: <>
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:13]
+select a <> not b;
+            ^
+--
+ALTERNATION GROUP: !=
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:13]
+select a != not b;
+            ^
+--
+ALTERNATION GROUP: >=
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:13]
+select a >= not b;
+            ^
+--
+ALTERNATION GROUP: <=
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:13]
+select a <= not b;
+            ^
+--
+ALTERNATION GROUP: +
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a + not b;
+           ^
+--
+ALTERNATION GROUP: -
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a - not b;
+           ^
+--
+ALTERNATION GROUP: *
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a * not b;
+           ^
+--
+ALTERNATION GROUP: /
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a / not b;
+           ^
+--
+ALTERNATION GROUP: ^
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a ^ not b;
+           ^
+--
+ALTERNATION GROUP: &
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a & not b;
+           ^
+==
+
+# Same test for |, which cannot appear in the alternation because it is also
+# the alternation separator.
+select a | not b;
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:12]
+select a | not b;
+           ^
+==
+
+select a not not like b;
+--
+ERROR: Syntax error: Expected end of input but got keyword NOT [at 1:10]
+select a not not like b;
+         ^
+==
+
+select NOT a like b;
+--
+QueryStatement [0-19] [select NOT a like b]
+  Query [0-19] [select NOT a like b]
+    Select [0-19] [select NOT a like b]
+      SelectList [7-19] [NOT a like b]
+        SelectColumn [7-19] [NOT a like b]
+          UnaryExpression(NOT) [7-19] [NOT a like b]
+            BinaryExpression(LIKE) [11-19] [a like b]
+              PathExpression [11-12] [a]
+                Identifier(a) [11-12] [a]
+              PathExpression [18-19] [b]
+                Identifier(b) [18-19] [b]
+--
+SELECT
+  NOT a LIKE b
+==
+
+# NOT has lower precedence than =.
+select a AND b = NOT b AND c;
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:18]
+select a AND b = NOT b AND c;
+                 ^
+==
+
+# = and LIKE are at the same precedence level and are nonassociative, so the
+# Bison parser requires parentheses.
+select a LIKE b = (NOT a LIKE b);
+--
+ERROR: Syntax error: Unexpected "=" [at 1:17]
+select a LIKE b = (NOT a LIKE b);
+                ^
+==
+
+select a like b and c like d;
+--
+QueryStatement [0-28] [select a like b and c like d]
+  Query [0-28] [select a like b and c like d]
+    Select [0-28] [select a like b and c like d]
+      SelectList [7-28] [a like b and c like d]
+        SelectColumn [7-28] [a like b and c like d]
+          AndExpr [7-28] [a like b and c like d]
+            BinaryExpression(LIKE) [7-15] [a like b]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [14-15] [b]
+                Identifier(b) [14-15] [b]
+            BinaryExpression(LIKE) [20-28] [c like d]
+              PathExpression [20-21] [c]
+                Identifier(c) [20-21] [c]
+              PathExpression [27-28] [d]
+                Identifier(d) [27-28] [d]
+--
+SELECT
+  a LIKE b AND c LIKE d
+==
+
+select a like b or c like d;
+--
+QueryStatement [0-27] [select a like b or c like d]
+  Query [0-27] [select a like b or c like d]
+    Select [0-27] [select a like b or c like d]
+      SelectList [7-27] [a like b or c like d]
+        SelectColumn [7-27] [a like b or c like d]
+          OrExpr [7-27] [a like b or c like d]
+            BinaryExpression(LIKE) [7-15] [a like b]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [14-15] [b]
+                Identifier(b) [14-15] [b]
+            BinaryExpression(LIKE) [19-27] [c like d]
+              PathExpression [19-20] [c]
+                Identifier(c) [19-20] [c]
+              PathExpression [26-27] [d]
+                Identifier(d) [26-27] [d]
+--
+SELECT
+  a LIKE b OR c LIKE d
+==
+
+select a like b and c;
+--
+QueryStatement [0-21] [select a like b and c]
+  Query [0-21] [select a like b and c]
+    Select [0-21] [select a like b and c]
+      SelectList [7-21] [a like b and c]
+        SelectColumn [7-21] [a like b and c]
+          AndExpr [7-21] [a like b and c]
+            BinaryExpression(LIKE) [7-15] [a like b]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [14-15] [b]
+                Identifier(b) [14-15] [b]
+            PathExpression [20-21] [c]
+              Identifier(c) [20-21] [c]
+--
+SELECT
+  a LIKE b AND c
+==
+
+select a like b or c;
+--
+QueryStatement [0-20] [select a like b or c]
+  Query [0-20] [select a like b or c]
+    Select [0-20] [select a like b or c]
+      SelectList [7-20] [a like b or c]
+        SelectColumn [7-20] [a like b or c]
+          OrExpr [7-20] [a like b or c]
+            BinaryExpression(LIKE) [7-15] [a like b]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [14-15] [b]
+                Identifier(b) [14-15] [b]
+            PathExpression [19-20] [c]
+              Identifier(c) [19-20] [c]
+
+--
+SELECT
+  a LIKE b OR c
+
+==
+
+select 1 IS NOT NOT NULL
+--
+ERROR: Syntax error: Expected keyword FALSE or keyword NULL or keyword TRUE or keyword UNKNOWN but got keyword NOT [at 1:17]
+select 1 IS NOT NOT NULL
+                ^
+==
+
+# = and IS have the same nonassociative precedence level.
+select 'a' = 'b' IS NOT NULL
+--
+ERROR: Syntax error: Unexpected keyword IS [at 1:18]
+select 'a' = 'b' IS NOT NULL
+                 ^
+==
+
+select a1 > b1 IS a2 = b2
+--
+ERROR: Syntax error: Unexpected keyword IS [at 1:16]
+select a1 > b1 IS a2 = b2
+               ^
+
+==
+
+# = and LIKE are at the same nonassociative operator precedence level so they
+# require parentheses.
+select a LIKE b = NOT b LIKE c;
+--
+ERROR: Syntax error: Unexpected "=" [at 1:17]
+select a LIKE b = NOT b LIKE c;
+                ^
+==
+
+SELECT TRUE BETWEEN TRUE AND NOT FALSE
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 1:30]
+SELECT TRUE BETWEEN TRUE AND NOT FALSE
+                             ^
+==
+
+# Test nonassociativity of comparison operators. The Bison parser does not treat
+# all of these cases as unambiguous and therefore accepts some of them in the
+# grammar. These cases are caught using special case error handling in the
+# rules.
+# "=" "<>" ">" "<" ">=" "<=" "!=" "LIKE" "IN" "BETWEEN" "IS" "NOT for BETWEEN/IN/LIKE"
+SELECT
+    1
+    {{= 2|<> 2|!= 2|> 2|< 2|>= 2|LIKE 2|NOT LIKE 2|IN (1,2)|NOT IN (1,2)|IN (SELECT 1)|NOT IN (SELECT 1)|BETWEEN 2 AND 3|NOT BETWEEN 2 AND 3|IS TRUE|IS NOT TRUE|IS NULL|IS NOT NULL}}
+    {{= 2|<> 2|!= 2|> 2|< 2|>= 2|LIKE 2|NOT LIKE 2|IN (1,2)|NOT IN (1,2)|IN (SELECT 1)|NOT IN (SELECT 1)|BETWEEN 2 AND 3|NOT BETWEEN 2 AND 3|IS TRUE|IS NOT TRUE|IS NULL|IS NOT NULL}}
+--
+ALTERNATION GROUPS:
+    = 2,= 2
+    <> 2,= 2
+    != 2,= 2
+    > 2,= 2
+    < 2,= 2
+    >= 2,= 2
+    LIKE 2,= 2
+    NOT LIKE 2,= 2
+    BETWEEN 2 AND 3,= 2
+    NOT BETWEEN 2 AND 3,= 2
+--
+ERROR: Syntax error: Unexpected "=" [at 4:5]
+    = 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,<> 2
+    <> 2,<> 2
+    != 2,<> 2
+    > 2,<> 2
+    < 2,<> 2
+    >= 2,<> 2
+    LIKE 2,<> 2
+    NOT LIKE 2,<> 2
+    BETWEEN 2 AND 3,<> 2
+    NOT BETWEEN 2 AND 3,<> 2
+--
+ERROR: Syntax error: Unexpected "<>" [at 4:5]
+    <> 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,!= 2
+    <> 2,!= 2
+    != 2,!= 2
+    > 2,!= 2
+    < 2,!= 2
+    >= 2,!= 2
+    LIKE 2,!= 2
+    NOT LIKE 2,!= 2
+    BETWEEN 2 AND 3,!= 2
+    NOT BETWEEN 2 AND 3,!= 2
+--
+ERROR: Syntax error: Unexpected "!=" [at 4:5]
+    != 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,> 2
+    <> 2,> 2
+    != 2,> 2
+    > 2,> 2
+    < 2,> 2
+    >= 2,> 2
+    LIKE 2,> 2
+    NOT LIKE 2,> 2
+    BETWEEN 2 AND 3,> 2
+    NOT BETWEEN 2 AND 3,> 2
+--
+ERROR: Syntax error: Unexpected ">" [at 4:5]
+    > 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,< 2
+    <> 2,< 2
+    != 2,< 2
+    > 2,< 2
+    < 2,< 2
+    >= 2,< 2
+    LIKE 2,< 2
+    NOT LIKE 2,< 2
+    BETWEEN 2 AND 3,< 2
+    NOT BETWEEN 2 AND 3,< 2
+--
+ERROR: Syntax error: Unexpected "<" [at 4:5]
+    < 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,>= 2
+    <> 2,>= 2
+    != 2,>= 2
+    > 2,>= 2
+    < 2,>= 2
+    >= 2,>= 2
+    LIKE 2,>= 2
+    NOT LIKE 2,>= 2
+    BETWEEN 2 AND 3,>= 2
+    NOT BETWEEN 2 AND 3,>= 2
+--
+ERROR: Syntax error: Unexpected ">=" [at 4:5]
+    >= 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,LIKE 2
+    <> 2,LIKE 2
+    != 2,LIKE 2
+    > 2,LIKE 2
+    < 2,LIKE 2
+    >= 2,LIKE 2
+    LIKE 2,LIKE 2
+    NOT LIKE 2,LIKE 2
+    BETWEEN 2 AND 3,LIKE 2
+    NOT BETWEEN 2 AND 3,LIKE 2
+--
+ERROR: Syntax error: Unexpected keyword LIKE [at 4:5]
+    LIKE 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,NOT LIKE 2
+    <> 2,NOT LIKE 2
+    != 2,NOT LIKE 2
+    > 2,NOT LIKE 2
+    < 2,NOT LIKE 2
+    >= 2,NOT LIKE 2
+    LIKE 2,NOT LIKE 2
+    NOT LIKE 2,NOT LIKE 2
+    BETWEEN 2 AND 3,NOT LIKE 2
+    NOT BETWEEN 2 AND 3,NOT LIKE 2
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 4:5]
+    NOT LIKE 2
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,IN (1,2)
+    <> 2,IN (1,2)
+    != 2,IN (1,2)
+    > 2,IN (1,2)
+    < 2,IN (1,2)
+    >= 2,IN (1,2)
+    LIKE 2,IN (1,2)
+    NOT LIKE 2,IN (1,2)
+    BETWEEN 2 AND 3,IN (1,2)
+    NOT BETWEEN 2 AND 3,IN (1,2)
+--
+ERROR: Syntax error: Unexpected keyword IN [at 4:5]
+    IN (1,2)
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,NOT IN (1,2)
+    <> 2,NOT IN (1,2)
+    != 2,NOT IN (1,2)
+    > 2,NOT IN (1,2)
+    < 2,NOT IN (1,2)
+    >= 2,NOT IN (1,2)
+    LIKE 2,NOT IN (1,2)
+    NOT LIKE 2,NOT IN (1,2)
+    BETWEEN 2 AND 3,NOT IN (1,2)
+    NOT BETWEEN 2 AND 3,NOT IN (1,2)
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 4:5]
+    NOT IN (1,2)
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,IN (SELECT 1)
+    <> 2,IN (SELECT 1)
+    != 2,IN (SELECT 1)
+    > 2,IN (SELECT 1)
+    < 2,IN (SELECT 1)
+    >= 2,IN (SELECT 1)
+    LIKE 2,IN (SELECT 1)
+    NOT LIKE 2,IN (SELECT 1)
+    BETWEEN 2 AND 3,IN (SELECT 1)
+    NOT BETWEEN 2 AND 3,IN (SELECT 1)
+--
+ERROR: Syntax error: Unexpected keyword IN [at 4:5]
+    IN (SELECT 1)
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,NOT IN (SELECT 1)
+    <> 2,NOT IN (SELECT 1)
+    != 2,NOT IN (SELECT 1)
+    > 2,NOT IN (SELECT 1)
+    < 2,NOT IN (SELECT 1)
+    >= 2,NOT IN (SELECT 1)
+    LIKE 2,NOT IN (SELECT 1)
+    NOT LIKE 2,NOT IN (SELECT 1)
+    BETWEEN 2 AND 3,NOT IN (SELECT 1)
+    NOT BETWEEN 2 AND 3,NOT IN (SELECT 1)
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 4:5]
+    NOT IN (SELECT 1)
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,BETWEEN 2 AND 3
+    <> 2,BETWEEN 2 AND 3
+    != 2,BETWEEN 2 AND 3
+    > 2,BETWEEN 2 AND 3
+    < 2,BETWEEN 2 AND 3
+    >= 2,BETWEEN 2 AND 3
+    LIKE 2,BETWEEN 2 AND 3
+    NOT LIKE 2,BETWEEN 2 AND 3
+    BETWEEN 2 AND 3,BETWEEN 2 AND 3
+    NOT BETWEEN 2 AND 3,BETWEEN 2 AND 3
+--
+ERROR: Syntax error: Unexpected keyword BETWEEN [at 4:5]
+    BETWEEN 2 AND 3
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,NOT BETWEEN 2 AND 3
+    <> 2,NOT BETWEEN 2 AND 3
+    != 2,NOT BETWEEN 2 AND 3
+    > 2,NOT BETWEEN 2 AND 3
+    < 2,NOT BETWEEN 2 AND 3
+    >= 2,NOT BETWEEN 2 AND 3
+    LIKE 2,NOT BETWEEN 2 AND 3
+    NOT LIKE 2,NOT BETWEEN 2 AND 3
+    BETWEEN 2 AND 3,NOT BETWEEN 2 AND 3
+    NOT BETWEEN 2 AND 3,NOT BETWEEN 2 AND 3
+--
+ERROR: Syntax error: Unexpected keyword NOT [at 4:5]
+    NOT BETWEEN 2 AND 3
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,IS TRUE
+    <> 2,IS TRUE
+    != 2,IS TRUE
+    > 2,IS TRUE
+    < 2,IS TRUE
+    >= 2,IS TRUE
+    LIKE 2,IS TRUE
+    NOT LIKE 2,IS TRUE
+    BETWEEN 2 AND 3,IS TRUE
+    NOT BETWEEN 2 AND 3,IS TRUE
+--
+ERROR: Syntax error: Unexpected keyword IS [at 4:5]
+    IS TRUE
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,IS NOT TRUE
+    <> 2,IS NOT TRUE
+    != 2,IS NOT TRUE
+    > 2,IS NOT TRUE
+    < 2,IS NOT TRUE
+    >= 2,IS NOT TRUE
+    LIKE 2,IS NOT TRUE
+    NOT LIKE 2,IS NOT TRUE
+    BETWEEN 2 AND 3,IS NOT TRUE
+    NOT BETWEEN 2 AND 3,IS NOT TRUE
+--
+ERROR: Syntax error: Unexpected keyword IS [at 4:5]
+    IS NOT TRUE
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,IS NULL
+    <> 2,IS NULL
+    != 2,IS NULL
+    > 2,IS NULL
+    < 2,IS NULL
+    >= 2,IS NULL
+    LIKE 2,IS NULL
+    NOT LIKE 2,IS NULL
+    BETWEEN 2 AND 3,IS NULL
+    NOT BETWEEN 2 AND 3,IS NULL
+--
+ERROR: Syntax error: Unexpected keyword IS [at 4:5]
+    IS NULL
+    ^
+--
+ALTERNATION GROUPS:
+    = 2,IS NOT NULL
+    <> 2,IS NOT NULL
+    != 2,IS NOT NULL
+    > 2,IS NOT NULL
+    < 2,IS NOT NULL
+    >= 2,IS NOT NULL
+    LIKE 2,IS NOT NULL
+    NOT LIKE 2,IS NOT NULL
+    BETWEEN 2 AND 3,IS NOT NULL
+    NOT BETWEEN 2 AND 3,IS NOT NULL
+--
+ERROR: Syntax error: Unexpected keyword IS [at 4:5]
+    IS NOT NULL
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),= 2
+    NOT IN (1,2),= 2
+    IN (SELECT 1),= 2
+    NOT IN (SELECT 1),= 2
+    IS TRUE,= 2
+    IS NOT TRUE,= 2
+    IS NULL,= 2
+    IS NOT NULL,= 2
+--
+ERROR: Syntax error: Expression to the left of comparison must be parenthesized [at 4:5]
+    = 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),<> 2
+    NOT IN (1,2),<> 2
+    IN (SELECT 1),<> 2
+    NOT IN (SELECT 1),<> 2
+    IS TRUE,<> 2
+    IS NOT TRUE,<> 2
+    IS NULL,<> 2
+    IS NOT NULL,<> 2
+--
+ERROR: Syntax error: Expression to the left of comparison must be parenthesized [at 4:5]
+    <> 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),!= 2
+    NOT IN (1,2),!= 2
+    IN (SELECT 1),!= 2
+    NOT IN (SELECT 1),!= 2
+    IS TRUE,!= 2
+    IS NOT TRUE,!= 2
+    IS NULL,!= 2
+    IS NOT NULL,!= 2
+--
+ERROR: Syntax error: Expression to the left of comparison must be parenthesized [at 4:5]
+    != 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),> 2
+    NOT IN (1,2),> 2
+    IN (SELECT 1),> 2
+    NOT IN (SELECT 1),> 2
+    IS TRUE,> 2
+    IS NOT TRUE,> 2
+    IS NULL,> 2
+    IS NOT NULL,> 2
+--
+ERROR: Syntax error: Expression to the left of comparison must be parenthesized [at 4:5]
+    > 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),< 2
+    NOT IN (1,2),< 2
+    IN (SELECT 1),< 2
+    NOT IN (SELECT 1),< 2
+    IS TRUE,< 2
+    IS NOT TRUE,< 2
+    IS NULL,< 2
+    IS NOT NULL,< 2
+--
+ERROR: Syntax error: Expression to the left of comparison must be parenthesized [at 4:5]
+    < 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),>= 2
+    NOT IN (1,2),>= 2
+    IN (SELECT 1),>= 2
+    NOT IN (SELECT 1),>= 2
+    IS TRUE,>= 2
+    IS NOT TRUE,>= 2
+    IS NULL,>= 2
+    IS NOT NULL,>= 2
+--
+ERROR: Syntax error: Expression to the left of comparison must be parenthesized [at 4:5]
+    >= 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),LIKE 2
+    NOT IN (1,2),LIKE 2
+    IN (SELECT 1),LIKE 2
+    NOT IN (SELECT 1),LIKE 2
+    IS TRUE,LIKE 2
+    IS NOT TRUE,LIKE 2
+    IS NULL,LIKE 2
+    IS NOT NULL,LIKE 2
+--
+ERROR: Syntax error: Expression to the left of LIKE must be parenthesized [at 4:5]
+    LIKE 2
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),NOT LIKE 2
+    NOT IN (1,2),NOT LIKE 2
+    IN (SELECT 1),NOT LIKE 2
+    NOT IN (SELECT 1),NOT LIKE 2
+    IS TRUE,NOT LIKE 2
+    IS NOT TRUE,NOT LIKE 2
+    IS NULL,NOT LIKE 2
+    IS NOT NULL,NOT LIKE 2
+--
+ERROR: Syntax error: Expression to the left of LIKE must be parenthesized [at 4:9]
+    NOT LIKE 2
+        ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),IN (1,2)
+    NOT IN (1,2),IN (1,2)
+    IN (SELECT 1),IN (1,2)
+    NOT IN (SELECT 1),IN (1,2)
+    IS TRUE,IN (1,2)
+    IS NOT TRUE,IN (1,2)
+    IS NULL,IN (1,2)
+    IS NOT NULL,IN (1,2)
+--
+ERROR: Syntax error: Expression to the left of IN must be parenthesized [at 4:5]
+    IN (1,2)
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),NOT IN (1,2)
+    NOT IN (1,2),NOT IN (1,2)
+    IN (SELECT 1),NOT IN (1,2)
+    NOT IN (SELECT 1),NOT IN (1,2)
+    IS TRUE,NOT IN (1,2)
+    IS NOT TRUE,NOT IN (1,2)
+    IS NULL,NOT IN (1,2)
+    IS NOT NULL,NOT IN (1,2)
+--
+ERROR: Syntax error: Expression to the left of IN must be parenthesized [at 4:9]
+    NOT IN (1,2)
+        ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),IN (SELECT 1)
+    NOT IN (1,2),IN (SELECT 1)
+    IN (SELECT 1),IN (SELECT 1)
+    NOT IN (SELECT 1),IN (SELECT 1)
+    IS TRUE,IN (SELECT 1)
+    IS NOT TRUE,IN (SELECT 1)
+    IS NULL,IN (SELECT 1)
+    IS NOT NULL,IN (SELECT 1)
+--
+ERROR: Syntax error: Expression to the left of IN must be parenthesized [at 4:5]
+    IN (SELECT 1)
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),NOT IN (SELECT 1)
+    NOT IN (1,2),NOT IN (SELECT 1)
+    IN (SELECT 1),NOT IN (SELECT 1)
+    NOT IN (SELECT 1),NOT IN (SELECT 1)
+    IS TRUE,NOT IN (SELECT 1)
+    IS NOT TRUE,NOT IN (SELECT 1)
+    IS NULL,NOT IN (SELECT 1)
+    IS NOT NULL,NOT IN (SELECT 1)
+--
+ERROR: Syntax error: Expression to the left of IN must be parenthesized [at 4:9]
+    NOT IN (SELECT 1)
+        ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),BETWEEN 2 AND 3
+    NOT IN (1,2),BETWEEN 2 AND 3
+    IN (SELECT 1),BETWEEN 2 AND 3
+    NOT IN (SELECT 1),BETWEEN 2 AND 3
+    IS TRUE,BETWEEN 2 AND 3
+    IS NOT TRUE,BETWEEN 2 AND 3
+    IS NULL,BETWEEN 2 AND 3
+    IS NOT NULL,BETWEEN 2 AND 3
+--
+ERROR: Syntax error: Expression to the left of BETWEEN must be parenthesized [at 4:5]
+    BETWEEN 2 AND 3
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),NOT BETWEEN 2 AND 3
+    NOT IN (1,2),NOT BETWEEN 2 AND 3
+    IN (SELECT 1),NOT BETWEEN 2 AND 3
+    NOT IN (SELECT 1),NOT BETWEEN 2 AND 3
+    IS TRUE,NOT BETWEEN 2 AND 3
+    IS NOT TRUE,NOT BETWEEN 2 AND 3
+    IS NULL,NOT BETWEEN 2 AND 3
+    IS NOT NULL,NOT BETWEEN 2 AND 3
+--
+ERROR: Syntax error: Expression to the left of BETWEEN must be parenthesized [at 4:9]
+    NOT BETWEEN 2 AND 3
+        ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),IS TRUE
+    NOT IN (1,2),IS TRUE
+    IN (SELECT 1),IS TRUE
+    NOT IN (SELECT 1),IS TRUE
+    IS TRUE,IS TRUE
+    IS NOT TRUE,IS TRUE
+    IS NULL,IS TRUE
+    IS NOT NULL,IS TRUE
+--
+ERROR: Syntax error: Expression to the left of IS must be parenthesized [at 4:5]
+    IS TRUE
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),IS NOT TRUE
+    NOT IN (1,2),IS NOT TRUE
+    IN (SELECT 1),IS NOT TRUE
+    NOT IN (SELECT 1),IS NOT TRUE
+    IS TRUE,IS NOT TRUE
+    IS NOT TRUE,IS NOT TRUE
+    IS NULL,IS NOT TRUE
+    IS NOT NULL,IS NOT TRUE
+--
+ERROR: Syntax error: Expression to the left of IS must be parenthesized [at 4:5]
+    IS NOT TRUE
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),IS NULL
+    NOT IN (1,2),IS NULL
+    IN (SELECT 1),IS NULL
+    NOT IN (SELECT 1),IS NULL
+    IS TRUE,IS NULL
+    IS NOT TRUE,IS NULL
+    IS NULL,IS NULL
+    IS NOT NULL,IS NULL
+--
+ERROR: Syntax error: Expression to the left of IS must be parenthesized [at 4:5]
+    IS NULL
+    ^
+--
+ALTERNATION GROUPS:
+    IN (1,2),IS NOT NULL
+    NOT IN (1,2),IS NOT NULL
+    IN (SELECT 1),IS NOT NULL
+    NOT IN (SELECT 1),IS NOT NULL
+    IS TRUE,IS NOT NULL
+    IS NOT TRUE,IS NOT NULL
+    IS NULL,IS NOT NULL
+    IS NOT NULL,IS NOT NULL
+--
+ERROR: Syntax error: Expression to the left of IS must be parenthesized [at 4:5]
+    IS NOT NULL
+    ^
+==
+
+# Applying an operator at the deepest level of precedence (".") to a
+# precedence-less expression construct is allowed by the parser (even if it
+# doesn't make sense semantically).
+# TODO: Disallow the confusing ones.
+SELECT {{CASE WHEN 1 THEN 3 END|CAST(1 AS bar)|"bar"|b"bar"|(1, 2)|STRUCT(1,2)|NEW myproto(1 AS bar)|CAST(x AS myproto)|EXTRACT(foo FROM bar)|foo(bar)|foo(bar) OVER baz|DATE "2016-01-01"|TIMESTAMP "2016-01-01 00:00:01"|(SELECT bar)}}.foo
+--
+ALTERNATION GROUP: CASE WHEN 1 THEN 3 END
+--
+QueryStatement [0-33] [SELECT CASE...3 END.foo]
+  Query [0-33] [SELECT CASE...3 END.foo]
+    Select [0-33] [SELECT CASE...3 END.foo]
+      SelectList [7-33] [CASE WHEN 1 THEN 3 END.foo]
+        SelectColumn [7-33] [CASE WHEN 1 THEN 3 END.foo]
+          DotIdentifier [7-33] [CASE WHEN 1 THEN 3 END.foo]
+            CaseNoValueExpression [7-29] [CASE WHEN 1 THEN 3 END]
+              IntLiteral(1) [17-18] [1]
+              IntLiteral(3) [24-25] [3]
+            Identifier(foo) [30-33] [foo]
+--
+SELECT
+  CASE
+    WHEN 1 THEN 3
+  END.foo
+--
+ALTERNATION GROUP: CAST(1 AS bar)
+--
+QueryStatement [0-25] [SELECT CAST(1 AS bar).foo]
+  Query [0-25] [SELECT CAST(1 AS bar).foo]
+    Select [0-25] [SELECT CAST(1 AS bar).foo]
+      SelectList [7-25] [CAST(1 AS bar).foo]
+        SelectColumn [7-25] [CAST(1 AS bar).foo]
+          DotIdentifier [7-25] [CAST(1 AS bar).foo]
+            CastExpression [7-21] [CAST(1 AS bar)]
+              IntLiteral(1) [12-13] [1]
+              SimpleType [17-20] [bar]
+                PathExpression [17-20] [bar]
+                  Identifier(bar) [17-20] [bar]
+            Identifier(foo) [22-25] [foo]
+--
+SELECT
+  CAST(1 AS bar).foo
+--
+ALTERNATION GROUP: "bar"
+--
+QueryStatement [0-16] [SELECT "bar".foo]
+  Query [0-16] [SELECT "bar".foo]
+    Select [0-16] [SELECT "bar".foo]
+      SelectList [7-16] ["bar".foo]
+        SelectColumn [7-16] ["bar".foo]
+          DotIdentifier [7-16] ["bar".foo]
+            StringLiteral [7-12] ["bar"]
+              StringLiteralComponent("bar") [7-12] ["bar"]
+            Identifier(foo) [13-16] [foo]
+--
+SELECT
+  "bar".foo
+--
+ALTERNATION GROUP: b"bar"
+--
+QueryStatement [0-17] [SELECT b"bar".foo]
+  Query [0-17] [SELECT b"bar".foo]
+    Select [0-17] [SELECT b"bar".foo]
+      SelectList [7-17] [b"bar".foo]
+        SelectColumn [7-17] [b"bar".foo]
+          DotIdentifier [7-17] [b"bar".foo]
+            BytesLiteral [7-13] [b"bar"]
+              BytesLiteralComponent(b"bar") [7-13] [b"bar"]
+            Identifier(foo) [14-17] [foo]
+--
+SELECT
+  b"bar".foo
+--
+ALTERNATION GROUP: (1, 2)
+--
+QueryStatement [0-17] [SELECT (1, 2).foo]
+  Query [0-17] [SELECT (1, 2).foo]
+    Select [0-17] [SELECT (1, 2).foo]
+      SelectList [7-17] [(1, 2).foo]
+        SelectColumn [7-17] [(1, 2).foo]
+          DotIdentifier [7-17] [(1, 2).foo]
+            StructConstructorWithParens [7-13] [(1, 2)]
+              IntLiteral(1) [8-9] [1]
+              IntLiteral(2) [11-12] [2]
+            Identifier(foo) [14-17] [foo]
+--
+SELECT
+  (1, 2).foo
+--
+ALTERNATION GROUP: STRUCT(1,2)
+--
+QueryStatement [0-22] [SELECT STRUCT(1,2).foo]
+  Query [0-22] [SELECT STRUCT(1,2).foo]
+    Select [0-22] [SELECT STRUCT(1,2).foo]
+      SelectList [7-22] [STRUCT(1,2).foo]
+        SelectColumn [7-22] [STRUCT(1,2).foo]
+          DotIdentifier [7-22] [STRUCT(1,2).foo]
+            StructConstructorWithKeyword [7-18] [STRUCT(1,2)]
+              StructConstructorArg [14-15] [1]
+                IntLiteral(1) [14-15] [1]
+              StructConstructorArg [16-17] [2]
+                IntLiteral(2) [16-17] [2]
+            Identifier(foo) [19-22] [foo]
+--
+SELECT
+  STRUCT(1, 2).foo
+--
+ALTERNATION GROUP: NEW myproto(1 AS bar)
+--
+QueryStatement [0-32] [SELECT NEW...AS bar).foo]
+  Query [0-32] [SELECT NEW...AS bar).foo]
+    Select [0-32] [SELECT NEW...AS bar).foo]
+      SelectList [7-32] [NEW myproto(1 AS bar).foo]
+        SelectColumn [7-32] [NEW myproto(1 AS bar).foo]
+          DotIdentifier [7-32] [NEW myproto(1 AS bar).foo]
+            NewConstructor [7-28] [NEW myproto(1 AS bar)]
+              SimpleType [11-18] [myproto]
+                PathExpression [11-18] [myproto]
+                  Identifier(myproto) [11-18] [myproto]
+              NewConstructorArg [19-27] [1 AS bar]
+                IntLiteral(1) [19-20] [1]
+                Identifier(bar) [24-27] [bar]
+            Identifier(foo) [29-32] [foo]
+--
+SELECT
+  NEW myproto(1 AS bar).foo
+--
+ALTERNATION GROUP: CAST(x AS myproto)
+--
+QueryStatement [0-29] [SELECT CAST(x AS myproto).foo]
+  Query [0-29] [SELECT CAST(x AS myproto).foo]
+    Select [0-29] [SELECT CAST(x AS myproto).foo]
+      SelectList [7-29] [CAST(x AS myproto).foo]
+        SelectColumn [7-29] [CAST(x AS myproto).foo]
+          DotIdentifier [7-29] [CAST(x AS myproto).foo]
+            CastExpression [7-25] [CAST(x AS myproto)]
+              PathExpression [12-13] [x]
+                Identifier(x) [12-13] [x]
+              SimpleType [17-24] [myproto]
+                PathExpression [17-24] [myproto]
+                  Identifier(myproto) [17-24] [myproto]
+            Identifier(foo) [26-29] [foo]
+--
+SELECT
+  CAST(x AS myproto).foo
+--
+ALTERNATION GROUP: EXTRACT(foo FROM bar)
+--
+QueryStatement [0-32] [SELECT EXTRACT...FROM bar).foo]
+  Query [0-32] [SELECT EXTRACT...FROM bar).foo]
+    Select [0-32] [SELECT EXTRACT...FROM bar).foo]
+      SelectList [7-32] [EXTRACT(foo FROM bar).foo]
+        SelectColumn [7-32] [EXTRACT(foo FROM bar).foo]
+          DotIdentifier [7-32] [EXTRACT(foo FROM bar).foo]
+            ExtractExpression [7-28] [EXTRACT(foo FROM bar)]
+              PathExpression [15-18] [foo]
+                Identifier(foo) [15-18] [foo]
+              PathExpression [24-27] [bar]
+                Identifier(bar) [24-27] [bar]
+            Identifier(foo) [29-32] [foo]
+--
+SELECT
+  EXTRACT(foo FROM bar).foo
+--
+ALTERNATION GROUP: foo(bar)
+--
+QueryStatement [0-19] [SELECT foo(bar).foo]
+  Query [0-19] [SELECT foo(bar).foo]
+    Select [0-19] [SELECT foo(bar).foo]
+      SelectList [7-19] [foo(bar).foo]
+        SelectColumn [7-19] [foo(bar).foo]
+          DotIdentifier [7-19] [foo(bar).foo]
+            FunctionCall [7-15] [foo(bar)]
+              PathExpression [7-10] [foo]
+                Identifier(foo) [7-10] [foo]
+              PathExpression [11-14] [bar]
+                Identifier(bar) [11-14] [bar]
+            Identifier(foo) [16-19] [foo]
+--
+SELECT
+  foo(bar).foo
+--
+ALTERNATION GROUP: foo(bar) OVER baz
+--
+QueryStatement [0-28] [SELECT foo(bar) OVER baz.foo]
+  Query [0-28] [SELECT foo(bar) OVER baz.foo]
+    Select [0-28] [SELECT foo(bar) OVER baz.foo]
+      SelectList [7-28] [foo(bar) OVER baz.foo]
+        SelectColumn [7-28] [foo(bar) OVER baz.foo]
+          DotIdentifier [7-28] [foo(bar) OVER baz.foo]
+            AnalyticFunctionCall [7-24] [foo(bar) OVER baz]
+              FunctionCall [7-15] [foo(bar)]
+                PathExpression [7-10] [foo]
+                  Identifier(foo) [7-10] [foo]
+                PathExpression [11-14] [bar]
+                  Identifier(bar) [11-14] [bar]
+              WindowSpecification [21-24] [baz]
+                Identifier(baz) [21-24] [baz]
+            Identifier(foo) [25-28] [foo]
+--
+SELECT
+  foo(bar) OVER (baz).foo
+--
+ALTERNATION GROUP: DATE "2016-01-01"
+--
+QueryStatement [0-28] [SELECT DATE "2016-01-01".foo]
+  Query [0-28] [SELECT DATE "2016-01-01".foo]
+    Select [0-28] [SELECT DATE "2016-01-01".foo]
+      SelectList [7-28] [DATE "2016-01-01".foo]
+        SelectColumn [7-28] [DATE "2016-01-01".foo]
+          DotIdentifier [7-28] [DATE "2016-01-01".foo]
+            DateOrTimeLiteral(TYPE_DATE) [7-24] [DATE "2016-01-01"]
+              StringLiteral [12-24] ["2016-01-01"]
+                StringLiteralComponent("2016-01-01") [12-24] ["2016-01-01"]
+            Identifier(foo) [25-28] [foo]
+--
+SELECT
+  DATE "2016-01-01".foo
+--
+ALTERNATION GROUP: TIMESTAMP "2016-01-01 00:00:01"
+--
+QueryStatement [0-42] [SELECT TIMESTAMP...00:01".foo]
+  Query [0-42] [SELECT TIMESTAMP...00:01".foo]
+    Select [0-42] [SELECT TIMESTAMP...00:01".foo]
+      SelectList [7-42] [TIMESTAMP...00:01".foo]
+        SelectColumn [7-42] [TIMESTAMP...00:01".foo]
+          DotIdentifier [7-42] [TIMESTAMP...00:01".foo]
+            DateOrTimeLiteral(TYPE_TIMESTAMP) [7-38] [TIMESTAMP...00:00:01"]
+              StringLiteral [17-38] ["2016-01-01 00:00:01"]
+                StringLiteralComponent("2016-01-01 00:00:01") [17-38] ["2016-01-01 00:00:01"]
+            Identifier(foo) [39-42] [foo]
+--
+SELECT
+  TIMESTAMP "2016-01-01 00:00:01".foo
+--
+ALTERNATION GROUP: (SELECT bar)
+--
+QueryStatement [0-23] [SELECT (SELECT bar).foo]
+  Query [0-23] [SELECT (SELECT bar).foo]
+    Select [0-23] [SELECT (SELECT bar).foo]
+      SelectList [7-23] [(SELECT bar).foo]
+        SelectColumn [7-23] [(SELECT bar).foo]
+          DotIdentifier [7-23] [(SELECT bar).foo]
+            ExpressionSubquery [7-19] [(SELECT bar)]
+              Query [8-18] [SELECT bar]
+                Select [8-18] [SELECT bar]
+                  SelectList [15-18] [bar]
+                    SelectColumn [15-18] [bar]
+                      PathExpression [15-18] [bar]
+                        Identifier(bar) [15-18] [bar]
+            Identifier(foo) [20-23] [foo]
+--
+SELECT
+  (
+    SELECT
+      bar
+  ).foo

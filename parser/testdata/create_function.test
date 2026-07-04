@@ -1,0 +1,2054 @@
+[default language_features=NONE,+REMOTE_FUNCTION]
+create function ;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:17]
+create function ;
+                ^
+==
+
+create function myfunc ;
+--
+ERROR: Syntax error: Expected "(" or "." but got ";" [at 1:24]
+create function myfunc ;
+                       ^
+==
+
+# Missing returned type.
+create function myfunc ( ) returns ;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:36]
+create function myfunc ( ) returns ;
+                                   ^
+==
+
+# Missing language.
+create function myfunc ( ) language ;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:37]
+create function myfunc ( ) language ;
+                                    ^
+==
+
+# Invalid but parseable node; missing function body.
+create function myfunc ( ) ;
+--
+CreateFunctionStatement [0-26] [create function myfunc ( )]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+--
+CREATE FUNCTION myfunc()
+==
+
+# Function with simple name.
+create function myfunc ( )
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-61] [create function...age testlang]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [37-43] [string]
+    PathExpression [37-43] [string]
+      Identifier(string) [37-43] [string]
+  Identifier(testlang) [53-61] [testlang]
+--
+CREATE FUNCTION myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# Function with nested name.
+create function mypackage.myfunc (  )
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-72] [create function...age testlang]
+  FunctionDeclaration [16-37] [mypackage.myfunc (  )]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [33-37] [(  )]
+  SimpleType [48-54] [string]
+    PathExpression [48-54] [string]
+      Identifier(string) [48-54] [string]
+  Identifier(testlang) [64-72] [testlang]
+--
+CREATE FUNCTION mypackage.myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# CREATE scope modifiers
+create {{temp|temporary|public|private}} function myfunc (  )
+  returns string language testlang ;
+--
+ALTERNATION GROUP: temp
+--
+CreateFunctionStatement(is_temp) [0-67] [create temp...anguage testlang]
+  FunctionDeclaration [21-32] [myfunc (  )]
+    PathExpression [21-27] [myfunc]
+      Identifier(myfunc) [21-27] [myfunc]
+    FunctionParameters [28-32] [(  )]
+  SimpleType [43-49] [string]
+    PathExpression [43-49] [string]
+      Identifier(string) [43-49] [string]
+  Identifier(testlang) [59-67] [testlang]
+--
+CREATE TEMP FUNCTION myfunc()
+RETURNS string LANGUAGE testlang
+--
+ALTERNATION GROUP: temporary
+--
+CreateFunctionStatement(is_temp) [0-72] [create temporary...ge testlang]
+  FunctionDeclaration [26-37] [myfunc (  )]
+    PathExpression [26-32] [myfunc]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [33-37] [(  )]
+  SimpleType [48-54] [string]
+    PathExpression [48-54] [string]
+      Identifier(string) [48-54] [string]
+  Identifier(testlang) [64-72] [testlang]
+--
+CREATE TEMP FUNCTION myfunc()
+RETURNS string LANGUAGE testlang
+--
+ALTERNATION GROUP: public
+--
+CreateFunctionStatement(is_public) [0-69] [create public...guage testlang]
+  FunctionDeclaration [23-34] [myfunc (  )]
+    PathExpression [23-29] [myfunc]
+      Identifier(myfunc) [23-29] [myfunc]
+    FunctionParameters [30-34] [(  )]
+  SimpleType [45-51] [string]
+    PathExpression [45-51] [string]
+      Identifier(string) [45-51] [string]
+  Identifier(testlang) [61-69] [testlang]
+--
+CREATE PUBLIC FUNCTION myfunc()
+RETURNS string LANGUAGE testlang
+--
+ALTERNATION GROUP: private
+--
+CreateFunctionStatement(is_private) [0-70] [create private...uage testlang]
+  FunctionDeclaration [24-35] [myfunc (  )]
+    PathExpression [24-30] [myfunc]
+      Identifier(myfunc) [24-30] [myfunc]
+    FunctionParameters [31-35] [(  )]
+  SimpleType [46-52] [string]
+    PathExpression [46-52] [string]
+      Identifier(string) [46-52] [string]
+  Identifier(testlang) [62-70] [testlang]
+--
+CREATE PRIVATE FUNCTION myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# Determinism modifiers
+create function myfunc (  )
+  returns string {{deterministic|not deterministic|immutable|stable|volatile}}  language testlang ;
+--
+ALTERNATION GROUP: deterministic
+--
+CreateFunctionStatement(DETERMINISTIC) [0-77] [create function...age testlang]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+  Identifier(testlang) [69-77] [testlang]
+--
+CREATE FUNCTION myfunc()
+RETURNS string DETERMINISTIC LANGUAGE testlang
+--
+ALTERNATION GROUP: not deterministic
+--
+CreateFunctionStatement(NOT DETERMINISTIC) [0-81] [create function...age testlang]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+  Identifier(testlang) [73-81] [testlang]
+--
+CREATE FUNCTION myfunc()
+RETURNS string NOT DETERMINISTIC LANGUAGE testlang
+--
+ALTERNATION GROUP: immutable
+--
+CreateFunctionStatement(IMMUTABLE) [0-73] [create function...age testlang]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+  Identifier(testlang) [65-73] [testlang]
+--
+CREATE FUNCTION myfunc()
+RETURNS string IMMUTABLE LANGUAGE testlang
+--
+ALTERNATION GROUP: stable
+--
+CreateFunctionStatement(STABLE) [0-70] [create function...age testlang]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+  Identifier(testlang) [62-70] [testlang]
+--
+CREATE FUNCTION myfunc()
+RETURNS string STABLE LANGUAGE testlang
+--
+ALTERNATION GROUP: volatile
+--
+CreateFunctionStatement(VOLATILE) [0-72] [create function...age testlang]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+  Identifier(testlang) [64-72] [testlang]
+--
+CREATE FUNCTION myfunc()
+RETURNS string VOLATILE LANGUAGE testlang
+==
+
+# Deterministic keyword used in alternative position.
+create function deterministic ( )
+  returns immutable stable language volatile ;
+--
+CreateFunctionStatement(STABLE) [0-78] [create function...age volatile]
+  FunctionDeclaration [16-33] [deterministic ( )]
+    PathExpression [16-29] [deterministic]
+      Identifier(deterministic) [16-29] [deterministic]
+    FunctionParameters [30-33] [( )]
+  SimpleType [44-53] [immutable]
+    PathExpression [44-53] [immutable]
+      Identifier(immutable) [44-53] [immutable]
+  Identifier(volatile) [70-78] [volatile]
+--
+CREATE FUNCTION deterministic()
+RETURNS immutable STABLE LANGUAGE volatile
+==
+
+# "if not exists"
+create function if not exists myfunc (  )
+  returns string language testlang ;
+--
+CreateFunctionStatement(is_if_not_exists) [0-76] [create function...age testlang]
+  FunctionDeclaration [30-41] [myfunc (  )]
+    PathExpression [30-36] [myfunc]
+      Identifier(myfunc) [30-36] [myfunc]
+    FunctionParameters [37-41] [(  )]
+  SimpleType [52-58] [string]
+    PathExpression [52-58] [string]
+      Identifier(string) [52-58] [string]
+  Identifier(testlang) [68-76] [testlang]
+--
+CREATE FUNCTION IF NOT EXISTS myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# "or replace"
+create or replace function myfunc (  )
+  returns string language testlang ;
+--
+CreateFunctionStatement(is_or_replace) [0-73] [create or...language testlang]
+  FunctionDeclaration [27-38] [myfunc (  )]
+    PathExpression [27-33] [myfunc]
+      Identifier(myfunc) [27-33] [myfunc]
+    FunctionParameters [34-38] [(  )]
+  SimpleType [49-55] [string]
+    PathExpression [49-55] [string]
+      Identifier(string) [49-55] [string]
+  Identifier(testlang) [65-73] [testlang]
+--
+CREATE OR REPLACE FUNCTION myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# "temporary" and "if not exists".
+create temporary function if not exists myfunc (  )
+  returns string language testlang ;
+--
+CreateFunctionStatement(is_temp, is_if_not_exists) [0-86] [create temporary...ge testlang]
+  FunctionDeclaration [40-51] [myfunc (  )]
+    PathExpression [40-46] [myfunc]
+      Identifier(myfunc) [40-46] [myfunc]
+    FunctionParameters [47-51] [(  )]
+  SimpleType [62-68] [string]
+    PathExpression [62-68] [string]
+      Identifier(string) [62-68] [string]
+  Identifier(testlang) [78-86] [testlang]
+--
+CREATE TEMP FUNCTION IF NOT EXISTS myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# "temp" and "if not exists".
+create temp function if not exists myfunc (  )
+  returns string language testlang ;
+--
+CreateFunctionStatement(is_temp, is_if_not_exists) [0-81] [create temp...anguage testlang]
+  FunctionDeclaration [35-46] [myfunc (  )]
+    PathExpression [35-41] [myfunc]
+      Identifier(myfunc) [35-41] [myfunc]
+    FunctionParameters [42-46] [(  )]
+  SimpleType [57-63] [string]
+    PathExpression [57-63] [string]
+      Identifier(string) [57-63] [string]
+  Identifier(testlang) [73-81] [testlang]
+--
+CREATE TEMP FUNCTION IF NOT EXISTS myfunc()
+RETURNS string LANGUAGE testlang
+==
+
+# Struct return type.
+create function mypackage.myfunc( param_a int32 )
+  returns struct<x string, y boolean> language testlang ;
+--
+CreateFunctionStatement [0-105] [create function...age testlang]
+  FunctionDeclaration [16-49] [mypackage....param_a int32 )]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [32-49] [( param_a int32 )]
+      FunctionParameter [34-47] [param_a int32]
+        Identifier(param_a) [34-41] [param_a]
+        SimpleType [42-47] [int32]
+          PathExpression [42-47] [int32]
+            Identifier(int32) [42-47] [int32]
+  StructType [60-87] [struct<x string, y boolean>]
+    StructField [67-75] [x string]
+      Identifier(x) [67-68] [x]
+      SimpleType [69-75] [string]
+        PathExpression [69-75] [string]
+          Identifier(string) [69-75] [string]
+    StructField [77-86] [y boolean]
+      Identifier(y) [77-78] [y]
+      SimpleType [79-86] [boolean]
+        PathExpression [79-86] [boolean]
+          Identifier(boolean) [79-86] [boolean]
+  Identifier(testlang) [97-105] [testlang]
+
+
+--
+CREATE FUNCTION mypackage.myfunc(param_a int32)
+RETURNS STRUCT< x string, y boolean > LANGUAGE testlang
+==
+
+# Standalone return type.
+create function mypackage.myfunc( param_a int32 )
+  returns a.b.c language testlang ;
+--
+CreateFunctionStatement [0-83] [create function...age testlang]
+  FunctionDeclaration [16-49] [mypackage....param_a int32 )]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [32-49] [( param_a int32 )]
+      FunctionParameter [34-47] [param_a int32]
+        Identifier(param_a) [34-41] [param_a]
+        SimpleType [42-47] [int32]
+          PathExpression [42-47] [int32]
+            Identifier(int32) [42-47] [int32]
+  SimpleType [60-65] [a.b.c]
+    PathExpression [60-65] [a.b.c]
+      Identifier(a) [60-61] [a]
+      Identifier(b) [62-63] [b]
+      Identifier(c) [64-65] [c]
+  Identifier(testlang) [75-83] [testlang]
+
+--
+CREATE FUNCTION mypackage.myfunc(param_a int32)
+RETURNS a.b.c LANGUAGE testlang
+==
+
+# Multi argument function.
+create function
+  mypackage.myfunc( a int32, b struct<x string, y int32>, c array<boolean> )
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-127] [create function...age testlang]
+  FunctionDeclaration [18-92] [mypackage....boolean> )]
+    PathExpression [18-34] [mypackage.myfunc]
+      Identifier(mypackage) [18-27] [mypackage]
+      Identifier(myfunc) [28-34] [myfunc]
+    FunctionParameters [34-92] [( a int32,...boolean> )]
+      FunctionParameter [36-43] [a int32]
+        Identifier(a) [36-37] [a]
+        SimpleType [38-43] [int32]
+          PathExpression [38-43] [int32]
+            Identifier(int32) [38-43] [int32]
+      FunctionParameter [45-72] [b struct<x string, y int32>]
+        Identifier(b) [45-46] [b]
+        StructType [47-72] [struct<x string, y int32>]
+          StructField [54-62] [x string]
+            Identifier(x) [54-55] [x]
+            SimpleType [56-62] [string]
+              PathExpression [56-62] [string]
+                Identifier(string) [56-62] [string]
+          StructField [64-71] [y int32]
+            Identifier(y) [64-65] [y]
+            SimpleType [66-71] [int32]
+              PathExpression [66-71] [int32]
+                Identifier(int32) [66-71] [int32]
+      FunctionParameter [74-90] [c array<boolean>]
+        Identifier(c) [74-75] [c]
+        ArrayType [76-90] [array<boolean>]
+          SimpleType [82-89] [boolean]
+            PathExpression [82-89] [boolean]
+              Identifier(boolean) [82-89] [boolean]
+  SimpleType [103-109] [string]
+    PathExpression [103-109] [string]
+      Identifier(string) [103-109] [string]
+  Identifier(testlang) [119-127] [testlang]
+
+--
+CREATE FUNCTION mypackage.myfunc(a int32, b STRUCT< x string, y int32 >, c ARRAY< boolean >)
+RETURNS string LANGUAGE testlang
+==
+
+# Multi-line quoted string for function body.
+create function fn( s string )
+returns string language testlang
+as """ return
+  "presto!" + s + '\n';
+"""
+--
+CreateFunctionStatement [0-105] [create function...'\n'; """]
+  FunctionDeclaration [16-30] [fn( s string )]
+    PathExpression [16-18] [fn]
+      Identifier(fn) [16-18] [fn]
+    FunctionParameters [18-30] [( s string )]
+      FunctionParameter [20-28] [s string]
+        Identifier(s) [20-21] [s]
+        SimpleType [22-28] [string]
+          PathExpression [22-28] [string]
+            Identifier(string) [22-28] [string]
+  SimpleType [39-45] [string]
+    PathExpression [39-45] [string]
+      Identifier(string) [39-45] [string]
+  Identifier(testlang) [55-63] [testlang]
+  StringLiteral [67-105] [""" return...'\n'; """]
+    StringLiteralComponent(""" return
+  "presto!" + s + '\n';
+""") [67-105] [""" return...'\n'; """]
+--
+CREATE FUNCTION fn(s string)
+RETURNS string LANGUAGE testlang AS """ return
+  "presto!" + s + '\n';
+"""
+==
+
+# Function attributes in preferred order, compatible with CREATE TABLE FUNCTION.
+create function fn( s string )
+returns string language testlang
+options ( a=b, bruce=lee )
+as "return 'a';";
+--
+CreateFunctionStatement [0-107] [create function...return 'a';"]
+  FunctionDeclaration [16-30] [fn( s string )]
+    PathExpression [16-18] [fn]
+      Identifier(fn) [16-18] [fn]
+    FunctionParameters [18-30] [( s string )]
+      FunctionParameter [20-28] [s string]
+        Identifier(s) [20-21] [s]
+        SimpleType [22-28] [string]
+          PathExpression [22-28] [string]
+            Identifier(string) [22-28] [string]
+  SimpleType [39-45] [string]
+    PathExpression [39-45] [string]
+      Identifier(string) [39-45] [string]
+  Identifier(testlang) [55-63] [testlang]
+  StringLiteral [94-107] ["return 'a';"]
+    StringLiteralComponent("return 'a';") [94-107] ["return 'a';"]
+  OptionsList [72-90] [( a=b, bruce=lee )]
+    OptionsEntry [74-77] [a=b]
+      Identifier(a) [74-75] [a]
+      PathExpression [76-77] [b]
+        Identifier(b) [76-77] [b]
+    OptionsEntry [79-88] [bruce=lee]
+      Identifier(bruce) [79-84] [bruce]
+      PathExpression [85-88] [lee]
+        Identifier(lee) [85-88] [lee]
+--
+CREATE FUNCTION fn(s string)
+RETURNS string LANGUAGE testlang OPTIONS
+  (a = b, bruce = lee) AS "return 'a';"
+==
+
+# Function attributes in deprecated order.
+create function fn( s string )
+returns string language testlang as "return 'a';"
+options ( a=b, bruce=lee ) ;
+--
+CreateFunctionStatement [0-107] [create function...bruce=lee )]
+  FunctionDeclaration [16-30] [fn( s string )]
+    PathExpression [16-18] [fn]
+      Identifier(fn) [16-18] [fn]
+    FunctionParameters [18-30] [( s string )]
+      FunctionParameter [20-28] [s string]
+        Identifier(s) [20-21] [s]
+        SimpleType [22-28] [string]
+          PathExpression [22-28] [string]
+            Identifier(string) [22-28] [string]
+  SimpleType [39-45] [string]
+    PathExpression [39-45] [string]
+      Identifier(string) [39-45] [string]
+  Identifier(testlang) [55-63] [testlang]
+  StringLiteral [67-80] ["return 'a';"]
+    StringLiteralComponent("return 'a';") [67-80] ["return 'a';"]
+  OptionsList [89-107] [( a=b, bruce=lee )]
+    OptionsEntry [91-94] [a=b]
+      Identifier(a) [91-92] [a]
+      PathExpression [93-94] [b]
+        Identifier(b) [93-94] [b]
+    OptionsEntry [96-105] [bruce=lee]
+      Identifier(bruce) [96-101] [bruce]
+      PathExpression [102-105] [lee]
+        Identifier(lee) [102-105] [lee]
+--
+CREATE FUNCTION fn(s string)
+RETURNS string LANGUAGE testlang OPTIONS
+  (a = b, bruce = lee) AS "return 'a';"
+==
+
+# Function with no optional attributes or body.
+create function fn( s string )
+returns string;
+--
+CreateFunctionStatement [0-45] [create function...turns string]
+  FunctionDeclaration [16-30] [fn( s string )]
+    PathExpression [16-18] [fn]
+      Identifier(fn) [16-18] [fn]
+    FunctionParameters [18-30] [( s string )]
+      FunctionParameter [20-28] [s string]
+        Identifier(s) [20-21] [s]
+        SimpleType [22-28] [string]
+          PathExpression [22-28] [string]
+            Identifier(string) [22-28] [string]
+  SimpleType [39-45] [string]
+    PathExpression [39-45] [string]
+      Identifier(string) [39-45] [string]
+--
+CREATE FUNCTION fn(s string)
+RETURNS string
+==
+
+# Invalid but parseable node : argument name not given.  Missing argument
+# names are only valid in the context of DROP FUNCTION statements.
+create function fn( string )
+returns string language testlang as "return 'a';";
+--
+CreateFunctionStatement [0-78] [create function...return 'a';"]
+  FunctionDeclaration [16-28] [fn( string )]
+    PathExpression [16-18] [fn]
+      Identifier(fn) [16-18] [fn]
+    FunctionParameters [18-28] [( string )]
+      FunctionParameter [20-26] [string]
+        SimpleType [20-26] [string]
+          PathExpression [20-26] [string]
+            Identifier(string) [20-26] [string]
+  SimpleType [37-43] [string]
+    PathExpression [37-43] [string]
+      Identifier(string) [37-43] [string]
+  Identifier(testlang) [53-61] [testlang]
+  StringLiteral [65-78] ["return 'a';"]
+    StringLiteralComponent("return 'a';") [65-78] ["return 'a';"]
+--
+CREATE FUNCTION fn(string)
+RETURNS string LANGUAGE testlang AS "return 'a';"
+==
+
+# Invalid but parseable node : some argument names not given.  Missing argument
+# names are only valid in the context of DROP FUNCTION statements.
+create function fn( string, s string, int32, i int32 )
+returns string language testlang as "return 'a'";
+--
+CreateFunctionStatement [0-103] [create function...return 'a'"]
+  FunctionDeclaration [16-54] [fn( string...i int32 )]
+    PathExpression [16-18] [fn]
+      Identifier(fn) [16-18] [fn]
+    FunctionParameters [18-54] [( string,...i int32 )]
+      FunctionParameter [20-26] [string]
+        SimpleType [20-26] [string]
+          PathExpression [20-26] [string]
+            Identifier(string) [20-26] [string]
+      FunctionParameter [28-36] [s string]
+        Identifier(s) [28-29] [s]
+        SimpleType [30-36] [string]
+          PathExpression [30-36] [string]
+            Identifier(string) [30-36] [string]
+      FunctionParameter [38-43] [int32]
+        SimpleType [38-43] [int32]
+          PathExpression [38-43] [int32]
+            Identifier(int32) [38-43] [int32]
+      FunctionParameter [45-52] [i int32]
+        Identifier(i) [45-46] [i]
+        SimpleType [47-52] [int32]
+          PathExpression [47-52] [int32]
+            Identifier(int32) [47-52] [int32]
+  SimpleType [63-69] [string]
+    PathExpression [63-69] [string]
+      Identifier(string) [63-69] [string]
+  Identifier(testlang) [79-87] [testlang]
+  StringLiteral [91-103] ["return 'a'"]
+    StringLiteralComponent("return 'a'") [91-103] ["return 'a'"]
+--
+CREATE FUNCTION fn(string, s string, int32, i int32)
+RETURNS string LANGUAGE testlang AS "return 'a'"
+==
+
+# functions cannot accept multi-element paths for argument names.
+create function fn(my.path.s string )
+returns string language testlang as "return 'a';"
+options ( a=b, bruce=lee ) ;
+--
+ERROR: Syntax error: Expected ")" but got identifier "string" [at 1:30]
+create function fn(my.path.s string )
+                             ^
+==
+
+# Scalar functions cannot return table-valued types.
+create function fn(s string)
+returns table<s string> language testlang as "return 'a';"
+options ( a=b, bruce=lee ) ;
+--
+ERROR: Syntax error: Expected end of input but got "<" [at 2:14]
+returns table<s string> language testlang as "return 'a';"
+             ^
+==
+
+# Create a function with an argument alias.  Such aliases are only
+# valid for templated arguments, but they parse ok.
+create function mypackage.myfunc(int32 as alias)
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-83] [create function...age testlang]
+  FunctionDeclaration [16-48] [mypackage....as alias)]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [32-48] [(int32 as alias)]
+      FunctionParameter [33-47] [int32 as alias]
+        SimpleType [33-38] [int32]
+          PathExpression [33-38] [int32]
+            Identifier(int32) [33-38] [int32]
+        Alias [39-47] [as alias]
+          Identifier(alias) [42-47] [alias]
+  SimpleType [59-65] [string]
+    PathExpression [59-65] [string]
+      Identifier(string) [59-65] [string]
+  Identifier(testlang) [75-83] [testlang]
+--
+CREATE FUNCTION mypackage.myfunc(int32 AS alias)
+RETURNS string LANGUAGE testlang
+==
+
+# Same test as previous, but without the AS.  Ideally this should fail.
+# However, the function parameter parses as <arg_name>=int32, arg_type=alias
+# so it does not fail parsing.  This is unfortunate, since it could result
+# in a non-intuitive error message.
+create function mypackage.myfunc(int32 alias)
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-80] [create function...age testlang]
+  FunctionDeclaration [16-45] [mypackage.myfunc(int32 alias)]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [32-45] [(int32 alias)]
+      FunctionParameter [33-44] [int32 alias]
+        Identifier(int32) [33-38] [int32]
+        SimpleType [39-44] [alias]
+          PathExpression [39-44] [alias]
+            Identifier(alias) [39-44] [alias]
+  SimpleType [56-62] [string]
+    PathExpression [56-62] [string]
+      Identifier(string) [56-62] [string]
+  Identifier(testlang) [72-80] [testlang]
+--
+CREATE FUNCTION mypackage.myfunc(int32 alias)
+RETURNS string LANGUAGE testlang
+==
+
+# Create a function with both a parameter name and argument type alias.
+create function mypackage.myfunc(x int32 as alias)
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-85] [create function...age testlang]
+  FunctionDeclaration [16-50] [mypackage....as alias)]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [32-50] [(x int32 as alias)]
+      FunctionParameter [33-49] [x int32 as alias]
+        Identifier(x) [33-34] [x]
+        SimpleType [35-40] [int32]
+          PathExpression [35-40] [int32]
+            Identifier(int32) [35-40] [int32]
+        Alias [41-49] [as alias]
+          Identifier(alias) [44-49] [alias]
+  SimpleType [61-67] [string]
+    PathExpression [61-67] [string]
+      Identifier(string) [61-67] [string]
+  Identifier(testlang) [77-85] [testlang]
+--
+CREATE FUNCTION mypackage.myfunc(x int32 AS alias)
+RETURNS string LANGUAGE testlang
+==
+
+# The AS alias applies to the type, and must come before NOT AGGREGATE.
+create function mypackage.myfunc(x int32 as alias NOT AGGREGATE)
+  returns string language testlang ;
+--
+CreateFunctionStatement [0-99] [create function...age testlang]
+  FunctionDeclaration [16-64] [mypackage....AGGREGATE)]
+    PathExpression [16-32] [mypackage.myfunc]
+      Identifier(mypackage) [16-25] [mypackage]
+      Identifier(myfunc) [26-32] [myfunc]
+    FunctionParameters [32-64] [(x int32 as...AGGREGATE)]
+      FunctionParameter(is_not_aggregate=true) [33-63] [x int32 as alias NOT AGGREGATE]
+        Identifier(x) [33-34] [x]
+        SimpleType [35-40] [int32]
+          PathExpression [35-40] [int32]
+            Identifier(int32) [35-40] [int32]
+        Alias [41-49] [as alias]
+          Identifier(alias) [44-49] [alias]
+  SimpleType [75-81] [string]
+    PathExpression [75-81] [string]
+      Identifier(string) [75-81] [string]
+  Identifier(testlang) [91-99] [testlang]
+--
+CREATE FUNCTION mypackage.myfunc(x int32 AS alias NOT AGGREGATE)
+RETURNS string LANGUAGE testlang
+==
+
+# Same test as previous, but this fails since NOT AGGREGATE is before AS alias.
+create function mypackage.myfunc(x int32 NOT AGGREGATE as alias)
+  returns string language testlang ;
+--
+ERROR: Syntax error: Expected ")" but got keyword AS [at 1:56]
+create function mypackage.myfunc(x int32 NOT AGGREGATE as alias)
+                                                       ^
+==
+
+# The type_alias can be subsequently used in the function declaration and
+# body.  This is just a parser test so we don't actually do analysis
+# in this test, but this is how it could be used.
+create function sql_func(x int32 as type_alias, y type_alias)
+  returns int32 as ((select cast(1 as type_alias) + x - y));
+--
+CreateFunctionStatement [0-121] [create function...+ x - y))]
+  FunctionDeclaration [16-61] [sql_func(x...type_alias)]
+    PathExpression [16-24] [sql_func]
+      Identifier(sql_func) [16-24] [sql_func]
+    FunctionParameters [24-61] [(x int32 as...type_alias)]
+      FunctionParameter [25-46] [x int32 as type_alias]
+        Identifier(x) [25-26] [x]
+        SimpleType [27-32] [int32]
+          PathExpression [27-32] [int32]
+            Identifier(int32) [27-32] [int32]
+        Alias [33-46] [as type_alias]
+          Identifier(type_alias) [36-46] [type_alias]
+      FunctionParameter [48-60] [y type_alias]
+        Identifier(y) [48-49] [y]
+        SimpleType [50-60] [type_alias]
+          PathExpression [50-60] [type_alias]
+            Identifier(type_alias) [50-60] [type_alias]
+  SimpleType [72-77] [int32]
+    PathExpression [72-77] [int32]
+      Identifier(int32) [72-77] [int32]
+  SqlFunctionBody [81-121] [((select cast...+ x - y))]
+    ExpressionSubquery [82-120] [(select cast...) + x - y)]
+      Query [83-119] [select cast...e_alias) + x - y]
+        Select [83-119] [select cast...e_alias) + x - y]
+          SelectList [90-119] [cast(1 as type_alias) + x - y]
+            SelectColumn [90-119] [cast(1 as type_alias) + x - y]
+              BinaryExpression(-) [90-119] [cast(1 as type_alias) + x - y]
+                BinaryExpression(+) [90-115] [cast(1 as type_alias) + x]
+                  CastExpression [90-111] [cast(1 as type_alias)]
+                    IntLiteral(1) [95-96] [1]
+                    SimpleType [100-110] [type_alias]
+                      PathExpression [100-110] [type_alias]
+                        Identifier(type_alias) [100-110] [type_alias]
+                  PathExpression [114-115] [x]
+                    Identifier(x) [114-115] [x]
+                PathExpression [118-119] [y]
+                  Identifier(y) [118-119] [y]
+--
+CREATE FUNCTION sql_func(x int32 AS type_alias, y type_alias)
+RETURNS int32 AS (
+  (
+    SELECT
+      CAST(1 AS type_alias) + x - y
+  )
+)
+==
+
+# Simple AS alias tests, where the user forgot the AS.
+create function fn(s ANY TYPE T) as (s);
+--
+ERROR: Syntax error: Expected ")" but got identifier "T" [at 1:31]
+create function fn(s ANY TYPE T) as (s);
+                              ^
+==
+
+create function fn(ANY TYPE T) as (s);
+--
+ERROR: Syntax error: Expected ")" but got identifier "T" [at 1:29]
+create function fn(ANY TYPE T) as (s);
+                            ^
+==
+
+create function fn(ANY TYPE AS) as (s);
+--
+ERROR: Syntax error: Unexpected ")" [at 1:31]
+create function fn(ANY TYPE AS) as (s);
+                              ^
+==
+
+# Templated types are not allowed in the RETURNS clause.
+create function fn() returns any type as (1);
+--
+ERROR: Syntax error: Templated types are not allowed in the RETURNS clause [at 1:30]
+create function fn() returns any type as (1);
+                             ^
+==
+
+create function fn() returns any proto as (1);
+--
+ERROR: Syntax error: Templated types are not allowed in the RETURNS clause [at 1:30]
+create function fn() returns any proto as (1);
+                             ^
+==
+
+create function fn() returns any enum as (1);
+--
+ERROR: Syntax error: Templated types are not allowed in the RETURNS clause [at 1:30]
+create function fn() returns any enum as (1);
+                             ^
+==
+
+create function fn() returns any struct as (1);
+--
+ERROR: Syntax error: Templated types are not allowed in the RETURNS clause [at 1:30]
+create function fn() returns any struct as (1);
+                             ^
+==
+
+create function fn() returns any array as (1);
+--
+ERROR: Syntax error: Templated types are not allowed in the RETURNS clause [at 1:30]
+create function fn() returns any array as (1);
+                             ^
+==
+
+create function fn() returns any table as (1);
+--
+ERROR: Syntax error: Templated types are not allowed in the RETURNS clause [at 1:30]
+create function fn() returns any table as (1);
+                             ^
+==
+
+create function fn(arg any type t) returns t as (1);
+--
+ERROR: Syntax error: Expected ")" but got identifier "t" [at 1:33]
+create function fn(arg any type t) returns t as (1);
+                                ^
+==
+
+create {{AGGREGATE|}} function fn() returns bool sql security {{INVOKER|DEFINER|CREATOR|TURNIP|}} as (1);
+--
+ALTERNATION GROUP: AGGREGATE,INVOKER
+--
+CreateFunctionStatement(is_aggregate=true)(SQL SECURITY INVOKER) [0-71] [create AGGREGATE...OKER as (1)]
+  FunctionDeclaration [26-30] [fn()]
+    PathExpression [26-28] [fn]
+      Identifier(fn) [26-28] [fn]
+    FunctionParameters [28-30] [()]
+  SimpleType [39-43] [bool]
+    PathExpression [39-43] [bool]
+      Identifier(bool) [39-43] [bool]
+  SqlFunctionBody [68-71] [(1)]
+    IntLiteral(1) [69-70] [1]
+--
+CREATE AGGREGATE FUNCTION fn()
+RETURNS bool SQL SECURITY INVOKER AS (
+  1
+)
+--
+ALTERNATION GROUP: AGGREGATE,DEFINER
+--
+CreateFunctionStatement(is_aggregate=true)(SQL SECURITY DEFINER) [0-71] [create AGGREGATE...INER as (1)]
+  FunctionDeclaration [26-30] [fn()]
+    PathExpression [26-28] [fn]
+      Identifier(fn) [26-28] [fn]
+    FunctionParameters [28-30] [()]
+  SimpleType [39-43] [bool]
+    PathExpression [39-43] [bool]
+      Identifier(bool) [39-43] [bool]
+  SqlFunctionBody [68-71] [(1)]
+    IntLiteral(1) [69-70] [1]
+--
+CREATE AGGREGATE FUNCTION fn()
+RETURNS bool SQL SECURITY DEFINER AS (
+  1
+)
+--
+ALTERNATION GROUP: AGGREGATE,CREATOR
+--
+ERROR: Syntax error: Expected keyword DEFINER or keyword INVOKER but got identifier "CREATOR" [at 1:58]
+create AGGREGATE function fn() returns bool sql security CREATOR as (1);
+                                                         ^
+--
+ALTERNATION GROUP: AGGREGATE,TURNIP
+--
+ERROR: Syntax error: Expected keyword DEFINER or keyword INVOKER but got identifier "TURNIP" [at 1:58]
+create AGGREGATE function fn() returns bool sql security TURNIP as (1);
+                                                         ^
+--
+ALTERNATION GROUP: AGGREGATE,
+--
+ERROR: Syntax error: Expected keyword DEFINER or keyword INVOKER but got keyword AS [at 1:59]
+create AGGREGATE function fn() returns bool sql security  as (1);
+                                                          ^
+--
+ALTERNATION GROUP: INVOKER
+--
+CreateFunctionStatement(SQL SECURITY INVOKER) [0-62] [create  function...OKER as (1)]
+  FunctionDeclaration [17-21] [fn()]
+    PathExpression [17-19] [fn]
+      Identifier(fn) [17-19] [fn]
+    FunctionParameters [19-21] [()]
+  SimpleType [30-34] [bool]
+    PathExpression [30-34] [bool]
+      Identifier(bool) [30-34] [bool]
+  SqlFunctionBody [59-62] [(1)]
+    IntLiteral(1) [60-61] [1]
+--
+CREATE FUNCTION fn()
+RETURNS bool SQL SECURITY INVOKER AS (
+  1
+)
+--
+ALTERNATION GROUP: DEFINER
+--
+CreateFunctionStatement(SQL SECURITY DEFINER) [0-62] [create  function...INER as (1)]
+  FunctionDeclaration [17-21] [fn()]
+    PathExpression [17-19] [fn]
+      Identifier(fn) [17-19] [fn]
+    FunctionParameters [19-21] [()]
+  SimpleType [30-34] [bool]
+    PathExpression [30-34] [bool]
+      Identifier(bool) [30-34] [bool]
+  SqlFunctionBody [59-62] [(1)]
+    IntLiteral(1) [60-61] [1]
+--
+CREATE FUNCTION fn()
+RETURNS bool SQL SECURITY DEFINER AS (
+  1
+)
+--
+ALTERNATION GROUP: CREATOR
+--
+ERROR: Syntax error: Expected keyword DEFINER or keyword INVOKER but got identifier "CREATOR" [at 1:49]
+create  function fn() returns bool sql security CREATOR as (1);
+                                                ^
+--
+ALTERNATION GROUP: TURNIP
+--
+ERROR: Syntax error: Expected keyword DEFINER or keyword INVOKER but got identifier "TURNIP" [at 1:49]
+create  function fn() returns bool sql security TURNIP as (1);
+                                                ^
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected keyword DEFINER or keyword INVOKER but got keyword AS [at 1:50]
+create  function fn() returns bool sql security  as (1);
+                                                 ^
+==
+
+create function myfunc()  returns interval
+--
+CreateFunctionStatement [0-42] [create function...rns interval]
+  FunctionDeclaration [16-24] [myfunc()]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [22-24] [()]
+  SimpleType [34-42] [interval]
+    PathExpression [34-42] [interval]
+      Identifier(`interval`) [34-42] [interval]
+--
+CREATE FUNCTION myfunc()
+RETURNS interval
+==
+
+# Create a scalar function with a default argument.
+create function myfunc(a int64, b string default "abc") returns double
+--
+CreateFunctionStatement [0-70] [create function...turns double]
+  FunctionDeclaration [16-55] [myfunc(a int64...efault "abc")]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [22-55] [(a int64,...default "abc")]
+      FunctionParameter [23-30] [a int64]
+        Identifier(a) [23-24] [a]
+        SimpleType [25-30] [int64]
+          PathExpression [25-30] [int64]
+            Identifier(int64) [25-30] [int64]
+      FunctionParameter(default_value=(StringLiteral)) [32-54] [b string default "abc"]
+        Identifier(b) [32-33] [b]
+        SimpleType [34-40] [string]
+          PathExpression [34-40] [string]
+            Identifier(string) [34-40] [string]
+        StringLiteral [49-54] ["abc"]
+          StringLiteralComponent("abc") [49-54] ["abc"]
+  SimpleType [64-70] [double]
+    PathExpression [64-70] [double]
+      Identifier(double) [64-70] [double]
+--
+CREATE FUNCTION myfunc(a int64, b string DEFAULT "abc")
+RETURNS double
+==
+
+# Create a scalar function with multiple default arguments.
+CREATE FUNCTION myfunc(a int64 DEFAULT -314,
+                       b string DEFAULT "abc",
+                       c double DEFAULT 3.14)
+returns double
+--
+CreateFunctionStatement [0-152] [CREATE FUNCTION...turns double]
+  FunctionDeclaration [16-137] [myfunc(a int64...DEFAULT 3.14)]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [22-137] [(a int64 DEFAULT...FAULT 3.14)]
+      FunctionParameter(default_value=(UnaryExpression(-))) [23-43] [a int64 DEFAULT -314]
+        Identifier(a) [23-24] [a]
+        SimpleType [25-30] [int64]
+          PathExpression [25-30] [int64]
+            Identifier(int64) [25-30] [int64]
+        UnaryExpression(-) [39-43] [-314]
+          IntLiteral(314) [40-43] [314]
+      FunctionParameter(default_value=(StringLiteral)) [68-90] [b string DEFAULT "abc"]
+        Identifier(b) [68-69] [b]
+        SimpleType [70-76] [string]
+          PathExpression [70-76] [string]
+            Identifier(string) [70-76] [string]
+        StringLiteral [85-90] ["abc"]
+          StringLiteralComponent("abc") [85-90] ["abc"]
+      FunctionParameter(default_value=(FloatLiteral(3.14))) [115-136] [c double DEFAULT 3.14]
+        Identifier(c) [115-116] [c]
+        SimpleType [117-123] [double]
+          PathExpression [117-123] [double]
+            Identifier(double) [117-123] [double]
+        FloatLiteral(3.14) [132-136] [3.14]
+  SimpleType [146-152] [double]
+    PathExpression [146-152] [double]
+      Identifier(double) [146-152] [double]
+--
+CREATE FUNCTION myfunc(a int64 DEFAULT -314, b string DEFAULT "abc", c double DEFAULT 3.14)
+RETURNS double
+==
+
+# Create a scalar function with templated default arguments.
+Create Function myfunc(a int64,
+                       b ANY TYPE Default "abc",
+                       c ANY TYPE Default 3.14)
+returns double
+--
+CreateFunctionStatement [0-143] [Create Function...turns double]
+  FunctionDeclaration [16-128] [myfunc(a int64...Default 3.14)]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [22-128] [(a int64,...Default 3.14)]
+      FunctionParameter [23-30] [a int64]
+        Identifier(a) [23-24] [a]
+        SimpleType [25-30] [int64]
+          PathExpression [25-30] [int64]
+            Identifier(int64) [25-30] [int64]
+      FunctionParameter(default_value=(StringLiteral)) [55-79] [b ANY TYPE Default "abc"]
+        Identifier(b) [55-56] [b]
+        TemplatedParameterType [57-65] [ANY TYPE]
+        StringLiteral [74-79] ["abc"]
+          StringLiteralComponent("abc") [74-79] ["abc"]
+      FunctionParameter(default_value=(FloatLiteral(3.14))) [104-127] [c ANY TYPE Default 3.14]
+        Identifier(c) [104-105] [c]
+        TemplatedParameterType [106-114] [ANY TYPE]
+        FloatLiteral(3.14) [123-127] [3.14]
+  SimpleType [137-143] [double]
+    PathExpression [137-143] [double]
+      Identifier(double) [137-143] [double]
+--
+CREATE FUNCTION myfunc(a int64, b ANY TYPE DEFAULT "abc", c ANY TYPE DEFAULT 3.14)
+RETURNS double
+==
+
+# Create a scalar function with a default argument.
+# This is an edge case that has multiple 'default's.
+CREATE FUNCTION myfunc(default string default 'default')
+as (default);
+--
+ERROR: Syntax error: Expected ")" but got keyword DEFAULT [at 1:24]
+CREATE FUNCTION myfunc(default string default 'default')
+                       ^
+==
+
+# Create a scalar function with a default argument, but forget the 'default'
+# keyword.
+CREATE FUNCTION myfunc(x INT64 5)
+as (x);
+--
+ERROR: Syntax error: Expected ")" but got integer literal "5" [at 1:32]
+CREATE FUNCTION myfunc(x INT64 5)
+                               ^
+==
+
+# Create a scalar function with a default argument, but incorrectly use a '='
+# instead of 'default'.
+CREATE FUNCTION myfunc(x INT64 = 5)
+as (x);
+--
+ERROR: Syntax error: Expected ")" but got "=" [at 1:32]
+CREATE FUNCTION myfunc(x INT64 = 5)
+                               ^
+==
+
+# Create a scalar function with a default argument, but the 'default' keyword
+# and the value are in the wrong order.
+CREATE FUNCTION myfunc(x INT64 5 DEFAULT)
+as (x);
+--
+ERROR: Syntax error: Expected ")" but got integer literal "5" [at 1:32]
+CREATE FUNCTION myfunc(x INT64 5 DEFAULT)
+                               ^
+==
+
+# Remote function without connection.
+create function myfunc ( ) returns string remote;
+--
+CreateFunctionStatement [0-48] [create function...tring remote]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-41] [string]
+    PathExpression [35-41] [string]
+      Identifier(string) [35-41] [string]
+--
+CREATE FUNCTION myfunc()
+RETURNS string REMOTE
+==
+
+# Remote function with custom connection.
+create function myfunc ( ) returns string remote with connection myconn;
+--
+CreateFunctionStatement [0-71] [create function...ction myconn]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-41] [string]
+    PathExpression [35-41] [string]
+      Identifier(string) [35-41] [string]
+  WithConnectionClause [49-71] [with connection myconn]
+    ConnectionClause [54-71] [connection myconn]
+      PathExpression [65-71] [myconn]
+        Identifier(myconn) [65-71] [myconn]
+--
+CREATE FUNCTION myfunc()
+RETURNS string REMOTE WITH CONNECTION myconn
+==
+
+# Remote function with default connection.
+create function myfunc ( ) returns string remote with connection default;
+--
+CreateFunctionStatement [0-72] [create function...tion default]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-41] [string]
+    PathExpression [35-41] [string]
+      Identifier(string) [35-41] [string]
+  WithConnectionClause [49-72] [with connection default]
+    ConnectionClause [54-72] [connection default]
+      DefaultLiteral [65-72] [default]
+--
+CREATE FUNCTION myfunc()
+RETURNS string REMOTE WITH CONNECTION DEFAULT
+==
+
+# Remote function with connection name with -.
+create function myfunc ( ) returns string remote with connection `myconn-abc`;
+--
+CreateFunctionStatement [0-77] [create function...myconn-abc`]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-41] [string]
+    PathExpression [35-41] [string]
+      Identifier(string) [35-41] [string]
+  WithConnectionClause [49-77] [with connection `myconn-abc`]
+    ConnectionClause [54-77] [connection `myconn-abc`]
+      PathExpression [65-77] [`myconn-abc`]
+        Identifier(`myconn-abc`) [65-77] [`myconn-abc`]
+--
+CREATE FUNCTION myfunc()
+RETURNS string REMOTE WITH CONNECTION `myconn-abc`
+==
+
+# Remote function with missing connection.
+create function myfunc ( ) returns string remote with connection;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:65]
+create function myfunc ( ) returns string remote with connection;
+                                                                ^
+==
+
+# Non-remote function with connection after language clause.
+# It's accepted by the parser when the feature is enabled but will be excluded
+# by the analyzer.
+[language_features=NONE,{{|+REMOTE_FUNCTION|+CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION|+REMOTE_FUNCTION,+CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION}}]
+create function myfunc ( ) returns string language js with connection c;
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: WITH CONNECTION clause is not supported [at 1:55]
+create function myfunc ( ) returns string language js with connection c;
+                                                      ^
+--
+ALTERNATION GROUPS:
+    +REMOTE_FUNCTION
+    +CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION
+    +REMOTE_FUNCTION,+CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION
+--
+CreateFunctionStatement [0-71] [create function...connection c]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-41] [string]
+    PathExpression [35-41] [string]
+      Identifier(string) [35-41] [string]
+  Identifier(js) [51-53] [js]
+  WithConnectionClause [54-71] [with connection c]
+    ConnectionClause [59-71] [connection c]
+      PathExpression [70-71] [c]
+        Identifier(c) [70-71] [c]
+--
+CREATE FUNCTION myfunc()
+RETURNS string LANGUAGE js WITH CONNECTION c
+==
+
+# Non-remote function without language clause with connection.
+[language_features=NONE,{{|+REMOTE_FUNCTION|+CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION}}]
+create function myfunc ( ) returns string with connection c;
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: WITH CONNECTION clause is not supported [at 1:43]
+create function myfunc ( ) returns string with connection c;
+                                          ^
+--
+ALTERNATION GROUPS:
+    +REMOTE_FUNCTION
+    +CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION
+--
+CreateFunctionStatement [0-59] [create function...connection c]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-41] [string]
+    PathExpression [35-41] [string]
+      Identifier(string) [35-41] [string]
+  WithConnectionClause [42-59] [with connection c]
+    ConnectionClause [47-59] [connection c]
+      PathExpression [58-59] [c]
+        Identifier(c) [58-59] [c]
+--
+CREATE FUNCTION myfunc()
+RETURNS string WITH CONNECTION c
+==
+
+# Remote function with connection and options.
+create function myfunc ( )
+  returns string remote with connection myconn OPTIONS (a = b, bruce = lee);
+--
+CreateFunctionStatement [0-102] [create function...bruce = lee)]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [37-43] [string]
+    PathExpression [37-43] [string]
+      Identifier(string) [37-43] [string]
+  WithConnectionClause [51-73] [with connection myconn]
+    ConnectionClause [56-73] [connection myconn]
+      PathExpression [67-73] [myconn]
+        Identifier(myconn) [67-73] [myconn]
+  OptionsList [82-102] [(a = b, bruce = lee)]
+    OptionsEntry [83-88] [a = b]
+      Identifier(a) [83-84] [a]
+      PathExpression [87-88] [b]
+        Identifier(b) [87-88] [b]
+    OptionsEntry [90-101] [bruce = lee]
+      Identifier(bruce) [90-95] [bruce]
+      PathExpression [98-101] [lee]
+        Identifier(lee) [98-101] [lee]
+--
+CREATE FUNCTION myfunc()
+RETURNS string REMOTE WITH CONNECTION myconn OPTIONS
+  (a = b, bruce = lee)
+==
+
+# Determinism modifiers for remote function
+create function myfunc (  )
+  returns string {{deterministic|not deterministic|immutable|stable|volatile}} remote;
+--
+ALTERNATION GROUP: deterministic
+--
+CreateFunctionStatement(DETERMINISTIC) [0-65] [create function...istic remote]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+--
+CREATE FUNCTION myfunc()
+RETURNS string DETERMINISTIC REMOTE
+--
+ALTERNATION GROUP: not deterministic
+--
+CreateFunctionStatement(NOT DETERMINISTIC) [0-69] [create function...istic remote]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+--
+CREATE FUNCTION myfunc()
+RETURNS string NOT DETERMINISTIC REMOTE
+--
+ALTERNATION GROUP: immutable
+--
+CreateFunctionStatement(IMMUTABLE) [0-61] [create function...table remote]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+--
+CREATE FUNCTION myfunc()
+RETURNS string IMMUTABLE REMOTE
+--
+ALTERNATION GROUP: stable
+--
+CreateFunctionStatement(STABLE) [0-58] [create function...table remote]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+--
+CREATE FUNCTION myfunc()
+RETURNS string STABLE REMOTE
+--
+ALTERNATION GROUP: volatile
+--
+CreateFunctionStatement(VOLATILE) [0-60] [create function...atile remote]
+  FunctionDeclaration [16-27] [myfunc (  )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-27] [(  )]
+  SimpleType [38-44] [string]
+    PathExpression [38-44] [string]
+      Identifier(string) [38-44] [string]
+--
+CREATE FUNCTION myfunc()
+RETURNS string VOLATILE REMOTE
+==
+
+# Language clause is allowed to appear after remote keyword in parser.
+# This combination will be excluded in analyzer.
+create function myfunc ( ) returns int remote language js;
+--
+CreateFunctionStatement [0-57] [create function...language js]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-38] [int]
+    PathExpression [35-38] [int]
+      Identifier(int) [35-38] [int]
+  Identifier(js) [55-57] [js]
+--
+CREATE FUNCTION myfunc()
+RETURNS int LANGUAGE js REMOTE
+==
+
+# Language clause is allowed to appear before remote keyword in parser.
+# This combination will be excluded in analyzer.
+create function myfunc ( ) returns int language js remote with connection c;
+--
+CreateFunctionStatement [0-75] [create function...connection c]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-38] [int]
+    PathExpression [35-38] [int]
+      Identifier(int) [35-38] [int]
+  Identifier(js) [48-50] [js]
+  WithConnectionClause [58-75] [with connection c]
+    ConnectionClause [63-75] [connection c]
+      PathExpression [74-75] [c]
+        Identifier(c) [74-75] [c]
+--
+CREATE FUNCTION myfunc()
+RETURNS int LANGUAGE js REMOTE WITH CONNECTION c
+==
+
+# Remote keyword with language clause, when the remote function option
+# is turned on or off
+[language_features=NONE,{{|+REMOTE_FUNCTION}}]
+create function myfunc ( ) returns int language js remote;
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Keyword REMOTE is not supported [at 1:52]
+create function myfunc ( ) returns int language js remote;
+                                                   ^
+--
+ALTERNATION GROUP: +REMOTE_FUNCTION
+--
+CreateFunctionStatement [0-57] [create function...js remote]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-38] [int]
+    PathExpression [35-38] [int]
+      Identifier(int) [35-38] [int]
+  Identifier(js) [48-50] [js]
+--
+CREATE FUNCTION myfunc()
+RETURNS int LANGUAGE js REMOTE
+==
+
+# AS clause is allowed for remote function in parser.
+# This combination will be excluded in analyzer.
+create function myfunc ( ) returns int remote AS (5) ;
+--
+CreateFunctionStatement [0-52] [create function...emote AS (5)]
+  FunctionDeclaration [16-26] [myfunc ( )]
+    PathExpression [16-22] [myfunc]
+      Identifier(myfunc) [16-22] [myfunc]
+    FunctionParameters [23-26] [( )]
+  SimpleType [35-38] [int]
+    PathExpression [35-38] [int]
+      Identifier(int) [35-38] [int]
+  SqlFunctionBody [49-52] [(5)]
+    IntLiteral(5) [50-51] [5]
+--
+CREATE FUNCTION myfunc()
+RETURNS int REMOTE AS (
+  5
+)
+==
+
+# Remote keyword used in alternative position.
+create function remote (int remote )
+  returns int remote with connection remote ;
+--
+CreateFunctionStatement [0-80] [create function...ction remote]
+  FunctionDeclaration [16-36] [remote (int remote )]
+    PathExpression [16-22] [remote]
+      Identifier(remote) [16-22] [remote]
+    FunctionParameters [23-36] [(int remote )]
+      FunctionParameter [24-34] [int remote]
+        Identifier(int) [24-27] [int]
+        SimpleType [28-34] [remote]
+          PathExpression [28-34] [remote]
+            Identifier(remote) [28-34] [remote]
+  SimpleType [47-50] [int]
+    PathExpression [47-50] [int]
+      Identifier(int) [47-50] [int]
+  WithConnectionClause [58-80] [with connection remote]
+    ConnectionClause [63-80] [connection remote]
+      PathExpression [74-80] [remote]
+        Identifier(remote) [74-80] [remote]
+--
+CREATE FUNCTION remote(int remote)
+RETURNS int REMOTE WITH CONNECTION remote
+==
+
+# Remote used in a non-remote function as a return type .
+create function returns_remote() returns remote AS (NULL);
+--
+CreateFunctionStatement [0-57] [create function...AS (NULL)]
+  FunctionDeclaration [16-32] [returns_remote()]
+    PathExpression [16-30] [returns_remote]
+      Identifier(returns_remote) [16-30] [returns_remote]
+    FunctionParameters [30-32] [()]
+  SimpleType [41-47] [remote]
+    PathExpression [41-47] [remote]
+      Identifier(remote) [41-47] [remote]
+  SqlFunctionBody [51-57] [(NULL)]
+    NullLiteral(NULL) [52-56] [NULL]
+--
+CREATE FUNCTION returns_remote()
+RETURNS remote AS (
+  NULL
+)
+==
+
+# Remote used in a remote function as a return type.
+create function returns_remote() returns remote remote;
+--
+CreateFunctionStatement [0-54] [create function...emote remote]
+  FunctionDeclaration [16-32] [returns_remote()]
+    PathExpression [16-30] [returns_remote]
+      Identifier(returns_remote) [16-30] [returns_remote]
+    FunctionParameters [30-32] [()]
+  SimpleType [41-47] [remote]
+    PathExpression [41-47] [remote]
+      Identifier(remote) [41-47] [remote]
+--
+CREATE FUNCTION returns_remote()
+RETURNS remote REMOTE
+==
+
+# Simple remote function when the remote function feature is turned off.
+[language_features=NONE]
+create function myfunc ( ) returns string remote;
+--
+ERROR: Keyword REMOTE is not supported [at 1:43]
+create function myfunc ( ) returns string remote;
+                                          ^
+==
+
+# Remote function with determinism specifier when the remote function feature is
+# turned off.
+[language_features=NONE]
+create function myfunc ( ) returns string deterministic remote;
+--
+ERROR: Keyword REMOTE is not supported [at 1:57]
+create function myfunc ( ) returns string deterministic remote;
+                                                        ^
+==
+
+# Remote function with connection and options when the remote function feature
+# is turned off.
+[language_features=NONE]
+create function myfunc ( ) returns string remote with connection c options(a=b);
+--
+ERROR: Keyword REMOTE is not supported [at 1:43]
+create function myfunc ( ) returns string remote with connection c options(a=b);
+                                          ^
+==
+
+# Testing a dot generalized identifier operating in a case statement. This case
+# was regressed during authoring a prototype change and we had no covering test.
+CREATE PUBLIC FUNCTION MatchesBucket(
+  value DOUBLE, bucket project_namespace.Bucket)
+RETURNS BOOL
+AS (
+  CASE bucket.type
+    WHEN "point" THEN value = bucket.point
+    WHEN "range" THEN bucket.range.low <= value AND value < bucket.range.high
+    ELSE ERROR("Unsupported bucket type")
+    END
+);
+--
+CreateFunctionStatement(is_public) [0-296] [CREATE PUBLIC...END )]
+  FunctionDeclaration [23-86] [MatchesBucket...espace.Bucket)]
+    PathExpression [23-36] [MatchesBucket]
+      Identifier(MatchesBucket) [23-36] [MatchesBucket]
+    FunctionParameters [36-86] [(   value..._namespace.Bucket)]
+      FunctionParameter [40-52] [value DOUBLE]
+        Identifier(value) [40-45] [value]
+        SimpleType [46-52] [DOUBLE]
+          PathExpression [46-52] [DOUBLE]
+            Identifier(DOUBLE) [46-52] [DOUBLE]
+      FunctionParameter [54-85] [bucket project_na...ace.Bucket]
+        Identifier(bucket) [54-60] [bucket]
+        SimpleType [61-85] [project_namespace.Bucket]
+          PathExpression [61-85] [project_namespace.Bucket]
+            Identifier(project_namespace) [61-78] [project_namespace]
+            Identifier(Bucket) [79-85] [Bucket]
+  SimpleType [95-99] [BOOL]
+    PathExpression [95-99] [BOOL]
+      Identifier(BOOL) [95-99] [BOOL]
+  SqlFunctionBody [103-296] [(   CASE bucket...END )]
+    CaseValueExpression [107-294] [CASE bucket...")     END]
+      PathExpression [112-123] [bucket.type]
+        Identifier(bucket) [112-118] [bucket]
+        Identifier(type) [119-123] [type]
+      StringLiteral [133-140] ["point"]
+        StringLiteralComponent("point") [133-140] ["point"]
+      BinaryExpression(=) [146-166] [value = bucket.point]
+        PathExpression [146-151] [value]
+          Identifier(value) [146-151] [value]
+        PathExpression [154-166] [bucket.point]
+          Identifier(bucket) [154-160] [bucket]
+          Identifier(point) [161-166] [point]
+      StringLiteral [176-183] ["range"]
+        StringLiteralComponent("range") [176-183] ["range"]
+      AndExpr [189-244] [bucket.range...range.high]
+        BinaryExpression(<=) [189-214] [bucket.range.low <= value]
+          PathExpression [189-205] [bucket.range.low]
+            Identifier(bucket) [189-195] [bucket]
+            Identifier(`range`) [196-201] [range]
+            Identifier(low) [202-205] [low]
+          PathExpression [209-214] [value]
+            Identifier(value) [209-214] [value]
+        BinaryExpression(<) [219-244] [value < bucket.range.high]
+          PathExpression [219-224] [value]
+            Identifier(value) [219-224] [value]
+          PathExpression [227-244] [bucket.range.high]
+            Identifier(bucket) [227-233] [bucket]
+            Identifier(`range`) [234-239] [range]
+            Identifier(high) [240-244] [high]
+      FunctionCall [254-286] [ERROR("Unsupporte...ket type")]
+        PathExpression [254-259] [ERROR]
+          Identifier(ERROR) [254-259] [ERROR]
+        StringLiteral [260-285] ["Unsupported bucket type"]
+          StringLiteralComponent("Unsupported bucket type") [260-285] ["Unsupported bucket type"]
+
+--
+CREATE PUBLIC FUNCTION MatchesBucket(value DOUBLE, bucket project_namespace.Bucket)
+RETURNS BOOL AS (
+  CASE bucket.type
+    WHEN "point" THEN value = bucket.point
+    WHEN "range" THEN bucket.`range`.low <= value AND value < bucket.`range`.high
+    ELSE ERROR("Unsupported bucket type")
+  END
+)
+
+==
+
+# Function type arguments - empty input type
+create function my_func (x FUNCTION<()->{{INT64|STRUCT<INT64>}}>) as
+  (x());
+--
+ALTERNATION GROUP: INT64
+--
+CreateFunctionStatement [0-58] [create function...as   (x())]
+  FunctionDeclaration [16-47] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-47] [(x FUNCTION<()->INT64>)]
+      FunctionParameter [25-46] [x FUNCTION<()->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-46] [FUNCTION<()->INT64>]
+          FunctionTypeArgList [36-38] [()]
+          SimpleType [40-45] [INT64]
+            PathExpression [40-45] [INT64]
+              Identifier(INT64) [40-45] [INT64]
+  SqlFunctionBody [53-58] [(x())]
+    FunctionCall [54-57] [x()]
+      PathExpression [54-55] [x]
+        Identifier(x) [54-55] [x]
+--
+CREATE FUNCTION my_func(x FUNCTION<() -> INT64 >)
+AS (
+  x()
+)
+--
+ALTERNATION GROUP: STRUCT<INT64>
+--
+CreateFunctionStatement [0-66] [create function...as   (x())]
+  FunctionDeclaration [16-55] [my_func (x...STRUCT<INT64>>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-55] [(x FUNCTION...STRUCT<INT64>>)]
+      FunctionParameter [25-54] [x FUNCTION<()->STRUCT<INT64>>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-54] [FUNCTION<()->STRUCT<INT64>>]
+          FunctionTypeArgList [36-38] [()]
+          StructType [40-53] [STRUCT<INT64>]
+            StructField [47-52] [INT64]
+              SimpleType [47-52] [INT64]
+                PathExpression [47-52] [INT64]
+                  Identifier(INT64) [47-52] [INT64]
+  SqlFunctionBody [61-66] [(x())]
+    FunctionCall [62-65] [x()]
+      PathExpression [62-63] [x]
+        Identifier(x) [62-63] [x]
+--
+CREATE FUNCTION my_func(x FUNCTION<() -> STRUCT< INT64 > >)
+AS (
+  x()
+)
+==
+
+# Function type arguments - single input - no parens
+create function my_func (x FUNCTION<{{INT64|STRUCT<INT64>}}->INT64>) as
+  (x(1));
+--
+ALTERNATION GROUP: INT64
+--
+CreateFunctionStatement [0-62] [create function...as   (x(1))]
+  FunctionDeclaration [16-50] [my_func (x...INT64->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-50] [(x FUNCTION<INT64->INT64>)]
+      FunctionParameter [25-49] [x FUNCTION<INT64->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-49] [FUNCTION<INT64->INT64>]
+          FunctionTypeArgList [36-41] [INT64]
+            SimpleType [36-41] [INT64]
+              PathExpression [36-41] [INT64]
+                Identifier(INT64) [36-41] [INT64]
+          SimpleType [43-48] [INT64]
+            PathExpression [43-48] [INT64]
+              Identifier(INT64) [43-48] [INT64]
+  SqlFunctionBody [56-62] [(x(1))]
+    FunctionCall [57-61] [x(1)]
+      PathExpression [57-58] [x]
+        Identifier(x) [57-58] [x]
+      IntLiteral(1) [59-60] [1]
+--
+CREATE FUNCTION my_func(x FUNCTION<(INT64) -> INT64 >)
+AS (
+  x(1)
+)
+--
+ALTERNATION GROUP: STRUCT<INT64>
+--
+CreateFunctionStatement [0-70] [create function...as   (x(1))]
+  FunctionDeclaration [16-58] [my_func (x...>->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-58] [(x FUNCTION...>->INT64>)]
+      FunctionParameter [25-57] [x FUNCTION...INT64>->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-57] [FUNCTION<STRUCT<INT64>->INT64>]
+          FunctionTypeArgList [36-49] [STRUCT<INT64>]
+            StructType [36-49] [STRUCT<INT64>]
+              StructField [43-48] [INT64]
+                SimpleType [43-48] [INT64]
+                  PathExpression [43-48] [INT64]
+                    Identifier(INT64) [43-48] [INT64]
+          SimpleType [51-56] [INT64]
+            PathExpression [51-56] [INT64]
+              Identifier(INT64) [51-56] [INT64]
+  SqlFunctionBody [64-70] [(x(1))]
+    FunctionCall [65-69] [x(1)]
+      PathExpression [65-66] [x]
+        Identifier(x) [65-66] [x]
+      IntLiteral(1) [67-68] [1]
+--
+CREATE FUNCTION my_func(x FUNCTION<(STRUCT< INT64 >) -> INT64 >)
+AS (
+  x(1)
+)
+==
+
+# Function type arguments - single input - with parens
+create function my_func (x FUNCTION<({{INT64|STRUCT<INT64>}})->INT64>) as
+  (x(1));
+--
+ALTERNATION GROUP: INT64
+--
+CreateFunctionStatement [0-64] [create function...as   (x(1))]
+  FunctionDeclaration [16-52] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-52] [(x FUNCTION<(INT64)->INT64>)]
+      FunctionParameter [25-51] [x FUNCTION<(INT64)->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-51] [FUNCTION<(INT64)->INT64>]
+          FunctionTypeArgList [27-42] [FUNCTION<(INT64]
+            SimpleType [37-42] [INT64]
+              PathExpression [37-42] [INT64]
+                Identifier(INT64) [37-42] [INT64]
+          SimpleType [45-50] [INT64]
+            PathExpression [45-50] [INT64]
+              Identifier(INT64) [45-50] [INT64]
+  SqlFunctionBody [58-64] [(x(1))]
+    FunctionCall [59-63] [x(1)]
+      PathExpression [59-60] [x]
+        Identifier(x) [59-60] [x]
+      IntLiteral(1) [61-62] [1]
+--
+CREATE FUNCTION my_func(x FUNCTION<(INT64) -> INT64 >)
+AS (
+  x(1)
+)
+--
+ALTERNATION GROUP: STRUCT<INT64>
+--
+CreateFunctionStatement [0-72] [create function...as   (x(1))]
+  FunctionDeclaration [16-60] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-60] [(x FUNCTION...)->INT64>)]
+      FunctionParameter [25-59] [x FUNCTION...>)->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-59] [FUNCTION<(...>)->INT64>]
+          FunctionTypeArgList [27-50] [FUNCTION<(STRUCT<INT64>]
+            StructType [37-50] [STRUCT<INT64>]
+              StructField [44-49] [INT64]
+                SimpleType [44-49] [INT64]
+                  PathExpression [44-49] [INT64]
+                    Identifier(INT64) [44-49] [INT64]
+          SimpleType [53-58] [INT64]
+            PathExpression [53-58] [INT64]
+              Identifier(INT64) [53-58] [INT64]
+  SqlFunctionBody [66-72] [(x(1))]
+    FunctionCall [67-71] [x(1)]
+      PathExpression [67-68] [x]
+        Identifier(x) [67-68] [x]
+      IntLiteral(1) [69-70] [1]
+--
+CREATE FUNCTION my_func(x FUNCTION<(STRUCT< INT64 >) -> INT64 >)
+AS (
+  x(1)
+)
+==
+
+# Function type arguments - multi-inputs - with parens
+create function my_func (x FUNCTION<({{INT64|STRUCT<INT64>}}, {{INT64|STRUCT<INT64>}})->INT64>) as
+  (x(1, 2));
+--
+ALTERNATION GROUP: INT64,INT64
+--
+CreateFunctionStatement [0-74] [create function...(x(1, 2))]
+  FunctionDeclaration [16-59] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-59] [(x FUNCTION...)->INT64>)]
+      FunctionParameter [25-58] [x FUNCTION...INT64)->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-58] [FUNCTION<(...INT64)->INT64>]
+          FunctionTypeArgList [27-49] [FUNCTION<(INT64, INT64]
+            SimpleType [37-42] [INT64]
+              PathExpression [37-42] [INT64]
+                Identifier(INT64) [37-42] [INT64]
+            SimpleType [44-49] [INT64]
+              PathExpression [44-49] [INT64]
+                Identifier(INT64) [44-49] [INT64]
+          SimpleType [52-57] [INT64]
+            PathExpression [52-57] [INT64]
+              Identifier(INT64) [52-57] [INT64]
+  SqlFunctionBody [65-74] [(x(1, 2))]
+    FunctionCall [66-73] [x(1, 2)]
+      PathExpression [66-67] [x]
+        Identifier(x) [66-67] [x]
+      IntLiteral(1) [68-69] [1]
+      IntLiteral(2) [71-72] [2]
+--
+CREATE FUNCTION my_func(x FUNCTION<(INT64, INT64) -> INT64 >)
+AS (
+  x(1, 2)
+)
+--
+ALTERNATION GROUP: INT64,STRUCT<INT64>
+--
+CreateFunctionStatement [0-82] [create function...(x(1, 2))]
+  FunctionDeclaration [16-67] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-67] [(x FUNCTION...)->INT64>)]
+      FunctionParameter [25-66] [x FUNCTION...>)->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-66] [FUNCTION<(...>)->INT64>]
+          FunctionTypeArgList [27-57] [FUNCTION<(INT64, STRUCT<INT64>]
+            SimpleType [37-42] [INT64]
+              PathExpression [37-42] [INT64]
+                Identifier(INT64) [37-42] [INT64]
+            StructType [44-57] [STRUCT<INT64>]
+              StructField [51-56] [INT64]
+                SimpleType [51-56] [INT64]
+                  PathExpression [51-56] [INT64]
+                    Identifier(INT64) [51-56] [INT64]
+          SimpleType [60-65] [INT64]
+            PathExpression [60-65] [INT64]
+              Identifier(INT64) [60-65] [INT64]
+  SqlFunctionBody [73-82] [(x(1, 2))]
+    FunctionCall [74-81] [x(1, 2)]
+      PathExpression [74-75] [x]
+        Identifier(x) [74-75] [x]
+      IntLiteral(1) [76-77] [1]
+      IntLiteral(2) [79-80] [2]
+--
+CREATE FUNCTION my_func(x FUNCTION<(INT64, STRUCT< INT64 >) -> INT64 >)
+AS (
+  x(1, 2)
+)
+--
+ALTERNATION GROUP: STRUCT<INT64>,INT64
+--
+CreateFunctionStatement [0-82] [create function...(x(1, 2))]
+  FunctionDeclaration [16-67] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-67] [(x FUNCTION...)->INT64>)]
+      FunctionParameter [25-66] [x FUNCTION...INT64)->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-66] [FUNCTION<(...INT64)->INT64>]
+          FunctionTypeArgList [27-57] [FUNCTION<(STRUCT<INT64>, INT64]
+            StructType [37-50] [STRUCT<INT64>]
+              StructField [44-49] [INT64]
+                SimpleType [44-49] [INT64]
+                  PathExpression [44-49] [INT64]
+                    Identifier(INT64) [44-49] [INT64]
+            SimpleType [52-57] [INT64]
+              PathExpression [52-57] [INT64]
+                Identifier(INT64) [52-57] [INT64]
+          SimpleType [60-65] [INT64]
+            PathExpression [60-65] [INT64]
+              Identifier(INT64) [60-65] [INT64]
+  SqlFunctionBody [73-82] [(x(1, 2))]
+    FunctionCall [74-81] [x(1, 2)]
+      PathExpression [74-75] [x]
+        Identifier(x) [74-75] [x]
+      IntLiteral(1) [76-77] [1]
+      IntLiteral(2) [79-80] [2]
+--
+CREATE FUNCTION my_func(x FUNCTION<(STRUCT< INT64 >, INT64) -> INT64 >)
+AS (
+  x(1, 2)
+)
+--
+ALTERNATION GROUP: STRUCT<INT64>,STRUCT<INT64>
+--
+CreateFunctionStatement [0-90] [create function...(x(1, 2))]
+  FunctionDeclaration [16-75] [my_func (x...)->INT64>)]
+    PathExpression [16-23] [my_func]
+      Identifier(my_func) [16-23] [my_func]
+    FunctionParameters [24-75] [(x FUNCTION...)->INT64>)]
+      FunctionParameter [25-74] [x FUNCTION...>)->INT64>]
+        Identifier(x) [25-26] [x]
+        FunctionType [27-74] [FUNCTION<(...>)->INT64>]
+          FunctionTypeArgList [27-65] [FUNCTION<(...STRUCT<INT64>]
+            StructType [37-50] [STRUCT<INT64>]
+              StructField [44-49] [INT64]
+                SimpleType [44-49] [INT64]
+                  PathExpression [44-49] [INT64]
+                    Identifier(INT64) [44-49] [INT64]
+            StructType [52-65] [STRUCT<INT64>]
+              StructField [59-64] [INT64]
+                SimpleType [59-64] [INT64]
+                  PathExpression [59-64] [INT64]
+                    Identifier(INT64) [59-64] [INT64]
+          SimpleType [68-73] [INT64]
+            PathExpression [68-73] [INT64]
+              Identifier(INT64) [68-73] [INT64]
+  SqlFunctionBody [81-90] [(x(1, 2))]
+    FunctionCall [82-89] [x(1, 2)]
+      PathExpression [82-83] [x]
+        Identifier(x) [82-83] [x]
+      IntLiteral(1) [84-85] [1]
+      IntLiteral(2) [87-88] [2]
+--
+CREATE FUNCTION my_func(x FUNCTION<(STRUCT< INT64 >, STRUCT< INT64 >) -> INT64 >)
+AS (
+  x(1, 2)
+)
+==
+
+# Function as a function name, and an argument name
+create function function (function FUNCTION<()->INT64>) as
+  (function());
+--
+CreateFunctionStatement [0-73] [create function...function())]
+  FunctionDeclaration [16-55] [function (...)->INT64>)]
+    PathExpression [16-24] [function]
+      Identifier(`function`) [16-24] [function]
+    FunctionParameters [25-55] [(function FUNCTION<()->INT64>)]
+      FunctionParameter [26-54] [function FUNCTION<()->INT64>]
+        Identifier(`function`) [26-34] [function]
+        FunctionType [35-54] [FUNCTION<()->INT64>]
+          FunctionTypeArgList [44-46] [()]
+          SimpleType [48-53] [INT64]
+            PathExpression [48-53] [INT64]
+              Identifier(INT64) [48-53] [INT64]
+  SqlFunctionBody [61-73] [(function())]
+    FunctionCall [62-72] [function()]
+      PathExpression [62-70] [function]
+        Identifier(`function`) [62-70] [function]
+--
+CREATE FUNCTION `function`(`function` FUNCTION<() -> INT64 >)
+AS (
+  `function`()
+)
+
+==
+
+# Type parameter, this is not allowed, will be enforce in resolver
+create function func (x FUNCTION<()->INT64>(0)) as
+  (1);
+--
+CreateFunctionStatement [0-56] [create function...) as   (1)]
+  FunctionDeclaration [16-47] [func (x FUNCTION...INT64>(0))]
+    PathExpression [16-20] [func]
+      Identifier(func) [16-20] [func]
+    FunctionParameters [21-47] [(x FUNCTION<()->INT64>(0))]
+      FunctionParameter [22-46] [x FUNCTION<()->INT64>(0)]
+        Identifier(x) [22-23] [x]
+        FunctionType [24-46] [FUNCTION<()->INT64>(0)]
+          FunctionTypeArgList [33-35] [()]
+          SimpleType [37-42] [INT64]
+            PathExpression [37-42] [INT64]
+              Identifier(INT64) [37-42] [INT64]
+          TypeParameterList [43-45] [(0]
+            IntLiteral(0) [44-45] [0]
+  SqlFunctionBody [53-56] [(1)]
+    IntLiteral(1) [54-55] [1]
+--
+CREATE FUNCTION func(x FUNCTION<() -> INT64 > (0))
+AS (
+  1
+)
+==
+
+# collation on the function argument, this is not allowed, will be enforce in resolver
+create function func (x FUNCTION<()->INT64> collate 'und:ci') as
+  (1);
+--
+CreateFunctionStatement [0-70] [create function...) as   (1)]
+  FunctionDeclaration [16-61] [func (x FUNCTION...'und:ci')]
+    PathExpression [16-20] [func]
+      Identifier(func) [16-20] [func]
+    FunctionParameters [21-61] [(x FUNCTION...'und:ci')]
+      FunctionParameter [22-60] [x FUNCTION...collate 'und:ci']
+        Identifier(x) [22-23] [x]
+        FunctionType [24-60] [FUNCTION<(...collate 'und:ci']
+          FunctionTypeArgList [33-35] [()]
+          SimpleType [37-42] [INT64]
+            PathExpression [37-42] [INT64]
+              Identifier(INT64) [37-42] [INT64]
+          Collate [44-60] [collate 'und:ci']
+            StringLiteral [52-60] ['und:ci']
+              StringLiteralComponent('und:ci') [52-60] ['und:ci']
+  SqlFunctionBody [67-70] [(1)]
+    IntLiteral(1) [68-69] [1]
+--
+CREATE FUNCTION func(x FUNCTION<() -> INT64 > COLLATE 'und:ci')
+AS (
+  1
+)

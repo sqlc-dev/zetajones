@@ -1,0 +1,886 @@
+# Single declaration
+[default mode=script]
+[default node_kind=VariableDeclaration]
+DECLARE x STRING{{;|}}
+--
+ALTERNATION GROUP: ;
+--
+Script [0-17] [DECLARE x STRING;]
+  StatementList [0-17] [DECLARE x STRING;]
+    VariableDeclaration [0-16] [DECLARE x STRING]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-16] [STRING]
+        PathExpression [10-16] [STRING]
+          Identifier(STRING) [10-16] [STRING]
+--
+DECLARE x STRING ;
+--
+ALTERNATION GROUP: <empty>
+--
+Script [0-16] [DECLARE x STRING]
+  StatementList [0-16] [DECLARE x STRING]
+    VariableDeclaration [0-16] [DECLARE x STRING]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-16] [STRING]
+        PathExpression [10-16] [STRING]
+          Identifier(STRING) [10-16] [STRING]
+--
+DECLARE x STRING ;
+==
+
+# Multiple declarations
+DECLARE x STRING;
+DECLARE y INT32{{;|}}
+--
+ALTERNATION GROUP: ;
+--
+Script [0-34] [DECLARE x...DECLARE y INT32;]
+  StatementList [0-34] [DECLARE x...DECLARE y INT32;]
+    VariableDeclaration [0-16] [DECLARE x STRING]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-16] [STRING]
+        PathExpression [10-16] [STRING]
+          Identifier(STRING) [10-16] [STRING]
+    VariableDeclaration [18-33] [DECLARE y INT32]
+      IdentifierList [26-27] [y]
+        Identifier(y) [26-27] [y]
+      SimpleType [28-33] [INT32]
+        PathExpression [28-33] [INT32]
+          Identifier(INT32) [28-33] [INT32]
+--
+DECLARE x STRING ;
+DECLARE y INT32 ;
+--
+ALTERNATION GROUP: <empty>
+--
+Script [0-33] [DECLARE x...DECLARE y INT32]
+  StatementList [0-33] [DECLARE x...DECLARE y INT32]
+    VariableDeclaration [0-16] [DECLARE x STRING]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-16] [STRING]
+        PathExpression [10-16] [STRING]
+          Identifier(STRING) [10-16] [STRING]
+    VariableDeclaration [18-33] [DECLARE y INT32]
+      IdentifierList [26-27] [y]
+        Identifier(y) [26-27] [y]
+      SimpleType [28-33] [INT32]
+        PathExpression [28-33] [INT32]
+          Identifier(INT32) [28-33] [INT32]
+--
+DECLARE x STRING ;
+DECLARE y INT32 ;
+==
+
+# Declaration of multiple variables in one statement.
+DECLARE x, y INT32;
+--
+Script [0-19] [DECLARE x, y INT32;]
+  StatementList [0-19] [DECLARE x, y INT32;]
+    VariableDeclaration [0-18] [DECLARE x, y INT32]
+      IdentifierList [8-12] [x, y]
+        Identifier(x) [8-9] [x]
+        Identifier(y) [11-12] [y]
+      SimpleType [13-18] [INT32]
+        PathExpression [13-18] [INT32]
+          Identifier(INT32) [13-18] [INT32]
+--
+DECLARE x, y INT32 ;
+==
+
+# Single variable with default value
+DECLARE x INT32 DEFAULT 5;
+--
+Script [0-26] [DECLARE x INT32 DEFAULT 5;]
+  StatementList [0-26] [DECLARE x INT32 DEFAULT 5;]
+    VariableDeclaration [0-25] [DECLARE x INT32 DEFAULT 5]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+      IntLiteral(5) [24-25] [5]
+--
+DECLARE x INT32 DEFAULT 5 ;
+==
+
+# Multiple declarations statements with default value
+DECLARE x INT32 DEFAULT 5;
+DECLARE y INT32 DEFAULT x + 23;
+--
+Script [0-58] [DECLARE x...DEFAULT x + 23;]
+  StatementList [0-58] [DECLARE x...DEFAULT x + 23;]
+    VariableDeclaration [0-25] [DECLARE x INT32 DEFAULT 5]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+      IntLiteral(5) [24-25] [5]
+    VariableDeclaration [27-57] [DECLARE y INT32 DEFAULT x + 23]
+      IdentifierList [35-36] [y]
+        Identifier(y) [35-36] [y]
+      SimpleType [37-42] [INT32]
+        PathExpression [37-42] [INT32]
+          Identifier(INT32) [37-42] [INT32]
+      BinaryExpression(+) [51-57] [x + 23]
+        PathExpression [51-52] [x]
+          Identifier(x) [51-52] [x]
+        IntLiteral(23) [55-57] [23]
+--
+DECLARE x INT32 DEFAULT 5 ;
+DECLARE y INT32 DEFAULT x + 23 ;
+==
+
+# Declaration followed by other statement
+DECLARE x INT32;
+SELECT x;
+--
+Script [0-26] [DECLARE x INT32; SELECT x;]
+  StatementList [0-26] [DECLARE x INT32; SELECT x;]
+    VariableDeclaration [0-15] [DECLARE x INT32]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    QueryStatement [17-25] [SELECT x]
+      Query [17-25] [SELECT x]
+        Select [17-25] [SELECT x]
+          SelectList [24-25] [x]
+            SelectColumn [24-25] [x]
+              PathExpression [24-25] [x]
+                Identifier(x) [24-25] [x]
+--
+DECLARE x INT32 ;
+SELECT
+  x
+;
+==
+
+# Declaration inside a begin/end block
+[node_kind=BeginStatement]
+BEGIN
+  DECLARE x INT32;
+  SELECT x;
+END
+--
+Script [0-40] [BEGIN   DECLARE...ELECT x; END]
+  StatementList [0-40] [BEGIN   DECLARE...ELECT x; END]
+    BeginEndBlock [0-40] [BEGIN   DECLARE...ELECT x; END]
+      StatementList [8-36] [DECLARE x INT32;   SELECT x;]
+        VariableDeclaration [8-23] [DECLARE x INT32]
+          IdentifierList [16-17] [x]
+            Identifier(x) [16-17] [x]
+          SimpleType [18-23] [INT32]
+            PathExpression [18-23] [INT32]
+              Identifier(INT32) [18-23] [INT32]
+        QueryStatement [27-35] [SELECT x]
+          Query [27-35] [SELECT x]
+            Select [27-35] [SELECT x]
+              SelectList [34-35] [x]
+                SelectColumn [34-35] [x]
+                  PathExpression [34-35] [x]
+                    Identifier(x) [34-35] [x]
+--
+BEGIN
+  DECLARE x INT32 ;
+  SELECT
+    x
+  ;
+END
+;
+==
+
+# 'declare' used as an identifier
+[node_kind=QueryStatement]
+SELECT * from declare
+--
+Script [0-21] [SELECT * from declare]
+  StatementList [0-21] [SELECT * from declare]
+    QueryStatement [0-21] [SELECT * from declare]
+      Query [0-21] [SELECT * from declare]
+        Select [0-21] [SELECT * from declare]
+          SelectList [7-8] [*]
+            SelectColumn [7-8] [*]
+              Star(*) [7-8] [*]
+          FromClause [9-21] [from declare]
+            TablePathExpression [14-21] [declare]
+              PathExpression [14-21] [declare]
+                Identifier(declare) [14-21] [declare]
+--
+SELECT
+  *
+FROM
+  declare
+;
+==
+
+# 'DECLARE' used both as a keyword and identifier in the same statement.
+DECLARE declare declare;
+--
+Script [0-24] [DECLARE declare declare;]
+  StatementList [0-24] [DECLARE declare declare;]
+    VariableDeclaration [0-23] [DECLARE declare declare]
+      IdentifierList [8-15] [declare]
+        Identifier(declare) [8-15] [declare]
+      SimpleType [16-23] [declare]
+        PathExpression [16-23] [declare]
+          Identifier(declare) [16-23] [declare]
+--
+DECLARE declare declare ;
+==
+
+DECLARE declare declare DEFAULT declare;
+--
+Script [0-40] [DECLARE declare...ULT declare;]
+  StatementList [0-40] [DECLARE declare...ULT declare;]
+    VariableDeclaration [0-39] [DECLARE declare...AULT declare]
+      IdentifierList [8-15] [declare]
+        Identifier(declare) [8-15] [declare]
+      SimpleType [16-23] [declare]
+        PathExpression [16-23] [declare]
+          Identifier(declare) [16-23] [declare]
+      PathExpression [32-39] [declare]
+        Identifier(declare) [32-39] [declare]
+--
+DECLARE declare declare DEFAULT declare ;
+==
+
+DECLARE x INT64 DEFAULT IF(a,b,c);
+--
+Script [0-34] [DECLARE x...IF(a,b,c);]
+  StatementList [0-34] [DECLARE x...IF(a,b,c);]
+    VariableDeclaration [0-33] [DECLARE x...IF(a,b,c)]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT64]
+        PathExpression [10-15] [INT64]
+          Identifier(INT64) [10-15] [INT64]
+      FunctionCall [24-33] [IF(a,b,c)]
+        PathExpression [24-26] [IF]
+          Identifier(`IF`) [24-26] [IF]
+        PathExpression [27-28] [a]
+          Identifier(a) [27-28] [a]
+        PathExpression [29-30] [b]
+          Identifier(b) [29-30] [b]
+        PathExpression [31-32] [c]
+          Identifier(c) [31-32] [c]
+--
+DECLARE x INT64 DEFAULT `IF`(a, b, c) ;
+==
+
+DECLARE x INT64 DEFAULT (SELECT MIN(a) FROM t);
+--
+Script [0-47] [DECLARE x...) FROM t);]
+  StatementList [0-47] [DECLARE x...) FROM t);]
+    VariableDeclaration [0-46] [DECLARE x...a) FROM t)]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT64]
+        PathExpression [10-15] [INT64]
+          Identifier(INT64) [10-15] [INT64]
+      ExpressionSubquery [24-46] [(SELECT MIN(a) FROM t)]
+        Query [25-45] [SELECT MIN(a) FROM t]
+          Select [25-45] [SELECT MIN(a) FROM t]
+            SelectList [32-38] [MIN(a)]
+              SelectColumn [32-38] [MIN(a)]
+                FunctionCall [32-38] [MIN(a)]
+                  PathExpression [32-35] [MIN]
+                    Identifier(MIN) [32-35] [MIN]
+                  PathExpression [36-37] [a]
+                    Identifier(a) [36-37] [a]
+            FromClause [39-45] [FROM t]
+              TablePathExpression [44-45] [t]
+                PathExpression [44-45] [t]
+                  Identifier(t) [44-45] [t]
+--
+DECLARE x INT64 DEFAULT(
+  SELECT
+    MIN(a)
+  FROM
+    t
+) ;
+==
+
+# Declaration with raw struct keyword
+DECLARE x STRUCT;
+--
+ERROR: Syntax error: Expected "<" but got ";" [at 1:17]
+DECLARE x STRUCT;
+                ^
+==
+
+# Reserved keyword used as variable name
+DECLARE STRUCT INT64;
+--
+ERROR: Syntax error: Unexpected keyword STRUCT [at 1:9]
+DECLARE STRUCT INT64;
+        ^
+==
+
+# Declaration with no variables (error)
+DECLARE INT32;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:14]
+DECLARE INT32;
+             ^
+==
+
+# Declaration in unsupported context (error)
+[node_kind=IfStatement]
+IF true THEN
+  DECLARE x INT32;
+END IF;
+--
+Script [0-39] [IF true THEN...INT32; END IF;]
+  StatementList [0-39] [IF true THEN...INT32; END IF;]
+    IfStatement [0-38] [IF true THEN...INT32; END IF]
+      BooleanLiteral(true) [3-7] [true]
+      StatementList [15-31] [DECLARE x INT32;]
+        VariableDeclaration [15-30] [DECLARE x INT32]
+          IdentifierList [23-24] [x]
+            Identifier(x) [23-24] [x]
+          SimpleType [25-30] [INT32]
+            PathExpression [25-30] [INT32]
+              Identifier(INT32) [25-30] [INT32]
+--
+IF true THEN
+  DECLARE x INT32 ;
+END IF ;
+==
+
+[node_kind=IfStatement]
+IF declare then
+  DECLARE x INT64;
+END IF;
+--
+Script [0-42] [IF declare...INT64; END IF;]
+  StatementList [0-42] [IF declare...INT64; END IF;]
+    IfStatement [0-41] [IF declare...INT64; END IF]
+      PathExpression [3-10] [declare]
+        Identifier(declare) [3-10] [declare]
+      StatementList [18-34] [DECLARE x INT64;]
+        VariableDeclaration [18-33] [DECLARE x INT64]
+          IdentifierList [26-27] [x]
+            Identifier(x) [26-27] [x]
+          SimpleType [28-33] [INT64]
+            PathExpression [28-33] [INT64]
+              Identifier(INT64) [28-33] [INT64]
+--
+IF declare THEN
+  DECLARE x INT64 ;
+END IF ;
+==
+
+# Declaration followed by a non-declaration (error)
+[node_kind=QueryStatement]
+SELECT 5;
+DECLARE x INT32;
+--
+Script [0-26] [SELECT 5; DECLARE x INT32;]
+  StatementList [0-26] [SELECT 5; DECLARE x INT32;]
+    QueryStatement [0-8] [SELECT 5]
+      Query [0-8] [SELECT 5]
+        Select [0-8] [SELECT 5]
+          SelectList [7-8] [5]
+            SelectColumn [7-8] [5]
+              IntLiteral(5) [7-8] [5]
+    VariableDeclaration [10-25] [DECLARE x INT32]
+      IdentifierList [18-19] [x]
+        Identifier(x) [18-19] [x]
+      SimpleType [20-25] [INT32]
+        PathExpression [20-25] [INT32]
+          Identifier(INT32) [20-25] [INT32]
+--
+SELECT
+  5
+;
+DECLARE x INT32 ;
+==
+
+
+# Declaration followed by a non-declaration, inside of a block (error)
+[node_kind=BeginStatement]
+BEGIN
+  SELECT 5;
+  DECLARE x INT32;
+END
+--
+Script [0-40] [BEGIN   SELECT...INT32; END]
+  StatementList [0-40] [BEGIN   SELECT...INT32; END]
+    BeginEndBlock [0-40] [BEGIN   SELECT...INT32; END]
+      StatementList [8-36] [SELECT 5;   DECLARE x INT32;]
+        QueryStatement [8-16] [SELECT 5]
+          Query [8-16] [SELECT 5]
+            Select [8-16] [SELECT 5]
+              SelectList [15-16] [5]
+                SelectColumn [15-16] [5]
+                  IntLiteral(5) [15-16] [5]
+        VariableDeclaration [20-35] [DECLARE x INT32]
+          IdentifierList [28-29] [x]
+            Identifier(x) [28-29] [x]
+          SimpleType [30-35] [INT32]
+            PathExpression [30-35] [INT32]
+              Identifier(INT32) [30-35] [INT32]
+--
+BEGIN
+  SELECT
+    5
+  ;
+  DECLARE x INT32 ;
+END
+;
+==
+
+# Error: Declaring the same variable twice in the same statement
+DECLARE x,x INT32;
+--
+Script [0-18] [DECLARE x,x INT32;]
+  StatementList [0-18] [DECLARE x,x INT32;]
+    VariableDeclaration [0-17] [DECLARE x,x INT32]
+      IdentifierList [8-11] [x,x]
+        Identifier(x) [8-9] [x]
+        Identifier(x) [10-11] [x]
+      SimpleType [12-17] [INT32]
+        PathExpression [12-17] [INT32]
+          Identifier(INT32) [12-17] [INT32]
+--
+DECLARE x, x INT32 ;
+==
+
+# Error: Declaring the same variable twice in the same statement
+# (variable names differ only in case).
+DECLARE X,x INT32;
+--
+Script [0-18] [DECLARE X,x INT32;]
+  StatementList [0-18] [DECLARE X,x INT32;]
+    VariableDeclaration [0-17] [DECLARE X,x INT32]
+      IdentifierList [8-11] [X,x]
+        Identifier(X) [8-9] [X]
+        Identifier(x) [10-11] [x]
+      SimpleType [12-17] [INT32]
+        PathExpression [12-17] [INT32]
+          Identifier(INT32) [12-17] [INT32]
+--
+DECLARE X, x INT32 ;
+==
+
+# Error: Re-declaring a variable from an earlier statement in the same scope.
+DECLARE x INT32;
+DECLARE x INT64;
+--
+Script [0-33] [DECLARE x...DECLARE x INT64;]
+  StatementList [0-33] [DECLARE x...DECLARE x INT64;]
+    VariableDeclaration [0-15] [DECLARE x INT32]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    VariableDeclaration [17-32] [DECLARE x INT64]
+      IdentifierList [25-26] [x]
+        Identifier(x) [25-26] [x]
+      SimpleType [27-32] [INT64]
+        PathExpression [27-32] [INT64]
+          Identifier(INT64) [27-32] [INT64]
+--
+DECLARE x INT32 ;
+DECLARE x INT64 ;
+==
+
+# Error: Re-declaring a variable from an earlier statement in the same scope.
+# (variable names differ only in case).
+DECLARE X INT32;
+DECLARE x INT64;
+--
+Script [0-33] [DECLARE X...DECLARE x INT64;]
+  StatementList [0-33] [DECLARE X...DECLARE x INT64;]
+    VariableDeclaration [0-15] [DECLARE X INT32]
+      IdentifierList [8-9] [X]
+        Identifier(X) [8-9] [X]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    VariableDeclaration [17-32] [DECLARE x INT64]
+      IdentifierList [25-26] [x]
+        Identifier(x) [25-26] [x]
+      SimpleType [27-32] [INT64]
+        PathExpression [27-32] [INT64]
+          Identifier(INT64) [27-32] [INT64]
+--
+DECLARE X INT32 ;
+DECLARE x INT64 ;
+==
+
+# Error: Re-declaring a variable of the same name in an enclosing scope.
+DECLARE x INT32;
+BEGIN
+  DECLARE x INT64;
+END;
+--
+Script [0-46] [DECLARE x...INT64; END;]
+  StatementList [0-46] [DECLARE x...INT64; END;]
+    VariableDeclaration [0-15] [DECLARE x INT32]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    BeginEndBlock [17-45] [BEGIN   DECLARE x INT64; END]
+      StatementList [25-41] [DECLARE x INT64;]
+        VariableDeclaration [25-40] [DECLARE x INT64]
+          IdentifierList [33-34] [x]
+            Identifier(x) [33-34] [x]
+          SimpleType [35-40] [INT64]
+            PathExpression [35-40] [INT64]
+              Identifier(INT64) [35-40] [INT64]
+--
+DECLARE x INT32 ;
+BEGIN
+  DECLARE x INT64 ;
+END
+;
+==
+
+# Error: Re-declaring a variable of the same name in an enclosing scope.
+# (variable names differ only in case).
+DECLARE X INT32;
+BEGIN
+  DECLARE x INT64;
+END;
+--
+Script [0-46] [DECLARE X...INT64; END;]
+  StatementList [0-46] [DECLARE X...INT64; END;]
+    VariableDeclaration [0-15] [DECLARE X INT32]
+      IdentifierList [8-9] [X]
+        Identifier(X) [8-9] [X]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    BeginEndBlock [17-45] [BEGIN   DECLARE x INT64; END]
+      StatementList [25-41] [DECLARE x INT64;]
+        VariableDeclaration [25-40] [DECLARE x INT64]
+          IdentifierList [33-34] [x]
+            Identifier(x) [33-34] [x]
+          SimpleType [35-40] [INT64]
+            PathExpression [35-40] [INT64]
+              Identifier(INT64) [35-40] [INT64]
+--
+DECLARE X INT32 ;
+BEGIN
+  DECLARE x INT64 ;
+END
+;
+==
+
+# Error: Re-declaring a variable of the same name in a grandparent scope.
+DECLARE x INT32;
+BEGIN
+  BEGIN
+    DECLARE x INT64;
+  END;
+END;
+--
+Script [0-63] [DECLARE x...END; END;]
+  StatementList [0-63] [DECLARE x...END; END;]
+    VariableDeclaration [0-15] [DECLARE x INT32]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    BeginEndBlock [17-62] [BEGIN   BEGIN...END; END]
+      StatementList [25-58] [BEGIN...INT64;   END;]
+        BeginEndBlock [25-57] [BEGIN...INT64;   END]
+          StatementList [35-51] [DECLARE x INT64;]
+            VariableDeclaration [35-50] [DECLARE x INT64]
+              IdentifierList [43-44] [x]
+                Identifier(x) [43-44] [x]
+              SimpleType [45-50] [INT64]
+                PathExpression [45-50] [INT64]
+                  Identifier(INT64) [45-50] [INT64]
+--
+DECLARE x INT32 ;
+BEGIN
+  BEGIN
+    DECLARE x INT64 ;
+  END
+  ;
+END
+;
+==
+
+# Error: Re-declaring a variable of the same name in a grandparent scope.
+# (variable names differ only in case).
+DECLARE X INT32;
+BEGIN
+  BEGIN
+    DECLARE x INT64;
+  END;
+END;
+--
+Script [0-63] [DECLARE X...END; END;]
+  StatementList [0-63] [DECLARE X...END; END;]
+    VariableDeclaration [0-15] [DECLARE X INT32]
+      IdentifierList [8-9] [X]
+        Identifier(X) [8-9] [X]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    BeginEndBlock [17-62] [BEGIN   BEGIN...END; END]
+      StatementList [25-58] [BEGIN...INT64;   END;]
+        BeginEndBlock [25-57] [BEGIN...INT64;   END]
+          StatementList [35-51] [DECLARE x INT64;]
+            VariableDeclaration [35-50] [DECLARE x INT64]
+              IdentifierList [43-44] [x]
+                Identifier(x) [43-44] [x]
+              SimpleType [45-50] [INT64]
+                PathExpression [45-50] [INT64]
+                  Identifier(INT64) [45-50] [INT64]
+--
+DECLARE X INT32 ;
+BEGIN
+  BEGIN
+    DECLARE x INT64 ;
+  END
+  ;
+END
+;
+==
+
+# Declaring variable of a different name from a variable in a parent scope.
+DECLARE x INT32;
+BEGIN
+  DECLARE y INT64;
+END;
+--
+Script [0-46] [DECLARE x...INT64; END;]
+  StatementList [0-46] [DECLARE x...INT64; END;]
+    VariableDeclaration [0-15] [DECLARE x INT32]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+    BeginEndBlock [17-45] [BEGIN   DECLARE y INT64; END]
+      StatementList [25-41] [DECLARE y INT64;]
+        VariableDeclaration [25-40] [DECLARE y INT64]
+          IdentifierList [33-34] [y]
+            Identifier(y) [33-34] [y]
+          SimpleType [35-40] [INT64]
+            PathExpression [35-40] [INT64]
+              Identifier(INT64) [35-40] [INT64]
+--
+DECLARE x INT32 ;
+BEGIN
+  DECLARE y INT64 ;
+END
+;
+==
+
+# Declaring variables of the same name in different, but non-overlapping scopes.
+[node_kind=BeginStatement]
+BEGIN
+  DECLARE x INT32;
+END;
+BEGIN
+  DECLARE x INT32;
+END;
+--
+Script [0-59] [BEGIN   DECLARE...INT32; END;]
+  StatementList [0-59] [BEGIN   DECLARE...INT32; END;]
+    BeginEndBlock [0-28] [BEGIN   DECLARE x INT32; END]
+      StatementList [8-24] [DECLARE x INT32;]
+        VariableDeclaration [8-23] [DECLARE x INT32]
+          IdentifierList [16-17] [x]
+            Identifier(x) [16-17] [x]
+          SimpleType [18-23] [INT32]
+            PathExpression [18-23] [INT32]
+              Identifier(INT32) [18-23] [INT32]
+    BeginEndBlock [30-58] [BEGIN   DECLARE x INT32; END]
+      StatementList [38-54] [DECLARE x INT32;]
+        VariableDeclaration [38-53] [DECLARE x INT32]
+          IdentifierList [46-47] [x]
+            Identifier(x) [46-47] [x]
+          SimpleType [48-53] [INT32]
+            PathExpression [48-53] [INT32]
+              Identifier(INT32) [48-53] [INT32]
+--
+BEGIN
+  DECLARE x INT32 ;
+END
+;
+BEGIN
+  DECLARE x INT32 ;
+END
+;
+==
+
+# Attempting to re-declare a variable after the completion of a begin/end block.
+# (Error, since declaration is not at the start of its block).
+[node_kind=BeginStatement]
+BEGIN
+  DECLARE x INT32;
+END;
+DECLARE y INT64;
+--
+Script [0-46] [BEGIN   DECLARE...ARE y INT64;]
+  StatementList [0-46] [BEGIN   DECLARE...ARE y INT64;]
+    BeginEndBlock [0-28] [BEGIN   DECLARE x INT32; END]
+      StatementList [8-24] [DECLARE x INT32;]
+        VariableDeclaration [8-23] [DECLARE x INT32]
+          IdentifierList [16-17] [x]
+            Identifier(x) [16-17] [x]
+          SimpleType [18-23] [INT32]
+            PathExpression [18-23] [INT32]
+              Identifier(INT32) [18-23] [INT32]
+    VariableDeclaration [30-45] [DECLARE y INT64]
+      IdentifierList [38-39] [y]
+        Identifier(y) [38-39] [y]
+      SimpleType [40-45] [INT64]
+        PathExpression [40-45] [INT64]
+          Identifier(INT64) [40-45] [INT64]
+--
+BEGIN
+  DECLARE x INT32 ;
+END
+;
+DECLARE y INT64 ;
+==
+
+# Cannot declare a system variable
+DECLARE @@sysvar INT32;
+--
+ERROR: Syntax error: Unexpected "@@" [at 1:9]
+DECLARE @@sysvar INT32;
+        ^
+==
+
+# Can default to a system variable.
+DECLARE x INT32 DEFAULT @@sysvar;
+--
+Script [0-33] [DECLARE x...@@sysvar;]
+  StatementList [0-33] [DECLARE x...@@sysvar;]
+    VariableDeclaration [0-32] [DECLARE x...DEFAULT @@sysvar]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      SimpleType [10-15] [INT32]
+        PathExpression [10-15] [INT32]
+          Identifier(INT32) [10-15] [INT32]
+      SystemVariableExpr [24-32] [@@sysvar]
+        PathExpression [26-32] [sysvar]
+          Identifier(sysvar) [26-32] [sysvar]
+--
+DECLARE x INT32 DEFAULT @@sysvar ;
+
+==
+
+# Automatically inferred variable type
+DECLARE x DEFAULT 5;
+--
+Script [0-20] [DECLARE x DEFAULT 5;]
+  StatementList [0-20] [DECLARE x DEFAULT 5;]
+    VariableDeclaration [0-19] [DECLARE x DEFAULT 5]
+      IdentifierList [8-9] [x]
+        Identifier(x) [8-9] [x]
+      IntLiteral(5) [18-19] [5]
+--
+DECLARE x DEFAULT 5 ;
+==
+
+# Automatically inferred variable type, multiple variables
+DECLARE x, y, z DEFAULT 5;
+--
+Script [0-26] [DECLARE x, y, z DEFAULT 5;]
+  StatementList [0-26] [DECLARE x, y, z DEFAULT 5;]
+    VariableDeclaration [0-25] [DECLARE x, y, z DEFAULT 5]
+      IdentifierList [8-15] [x, y, z]
+        Identifier(x) [8-9] [x]
+        Identifier(y) [11-12] [y]
+        Identifier(z) [14-15] [z]
+      IntLiteral(5) [24-25] [5]
+--
+DECLARE x, y, z DEFAULT 5 ;
+==
+
+# ERROR: DEFAULT is a reserved keyword
+DECLARE DEFAULT DEFAULT 5;
+--
+ERROR: Syntax error: Unexpected keyword DEFAULT [at 1:9]
+DECLARE DEFAULT DEFAULT 5;
+        ^
+==
+
+# Omitting both the default expression and the type is not allowed.
+DECLARE x;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:10]
+DECLARE x;
+         ^
+==
+
+# Expression as default value, inferred type.
+DECLARE y DEFAULT x + 1;
+--
+Script [0-24] [DECLARE y DEFAULT x + 1;]
+  StatementList [0-24] [DECLARE y DEFAULT x + 1;]
+    VariableDeclaration [0-23] [DECLARE y DEFAULT x + 1]
+      IdentifierList [8-9] [y]
+        Identifier(y) [8-9] [y]
+      BinaryExpression(+) [18-23] [x + 1]
+        PathExpression [18-19] [x]
+          Identifier(x) [18-19] [x]
+        IntLiteral(1) [22-23] [1]
+--
+DECLARE y DEFAULT x + 1 ;
+==
+
+# Subquery as default value, inferred type.
+DECLARE y DEFAULT (SELECT x FROM MyTable);
+--
+Script [0-42] [DECLARE y...MyTable);]
+  StatementList [0-42] [DECLARE y...MyTable);]
+    VariableDeclaration [0-41] [DECLARE y...FROM MyTable)]
+      IdentifierList [8-9] [y]
+        Identifier(y) [8-9] [y]
+      ExpressionSubquery [18-41] [(SELECT x FROM MyTable)]
+        Query [19-40] [SELECT x FROM MyTable]
+          Select [19-40] [SELECT x FROM MyTable]
+            SelectList [26-27] [x]
+              SelectColumn [26-27] [x]
+                PathExpression [26-27] [x]
+                  Identifier(x) [26-27] [x]
+            FromClause [28-40] [FROM MyTable]
+              TablePathExpression [33-40] [MyTable]
+                PathExpression [33-40] [MyTable]
+                  Identifier(MyTable) [33-40] [MyTable]
+--
+DECLARE y DEFAULT(
+  SELECT
+    x
+  FROM
+    MyTable
+) ;
+
+==
+
+# Declare variable with parameterized type
+DECLARE y string(100);
+--
+Script [0-22] [DECLARE y string(100);]
+  StatementList [0-22] [DECLARE y string(100);]
+    VariableDeclaration [0-21] [DECLARE y string(100)]
+      IdentifierList [8-9] [y]
+        Identifier(y) [8-9] [y]
+      SimpleType [10-21] [string(100)]
+        PathExpression [10-16] [string]
+          Identifier(string) [10-16] [string]
+        TypeParameterList [16-20] [(100]
+          IntLiteral(100) [17-20] [100]
+--
+DECLARE y string(100) ;
+

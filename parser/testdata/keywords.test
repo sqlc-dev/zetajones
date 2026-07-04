@@ -1,0 +1,2219 @@
+# Tests that various non-reserved keywords can still be used as identifiers.
+
+# IF is a reserved keyword, but also works like a function call.
+select if(x), if(x,y,if(z,1,2)), `if`(x, y, z), 123 as `if`
+--
+QueryStatement [0-59] [select if(...123 as `if`]
+  Query [0-59] [select if(...123 as `if`]
+    Select [0-59] [select if(...123 as `if`]
+      SelectList [7-59] [if(x), if(...123 as `if`]
+        SelectColumn [7-12] [if(x)]
+          FunctionCall [7-12] [if(x)]
+            PathExpression [7-9] [if]
+              Identifier(`if`) [7-9] [if]
+            PathExpression [10-11] [x]
+              Identifier(x) [10-11] [x]
+        SelectColumn [14-31] [if(x,y,if(z,1,2))]
+          FunctionCall [14-31] [if(x,y,if(z,1,2))]
+            PathExpression [14-16] [if]
+              Identifier(`if`) [14-16] [if]
+            PathExpression [17-18] [x]
+              Identifier(x) [17-18] [x]
+            PathExpression [19-20] [y]
+              Identifier(y) [19-20] [y]
+            FunctionCall [21-30] [if(z,1,2)]
+              PathExpression [21-23] [if]
+                Identifier(`if`) [21-23] [if]
+              PathExpression [24-25] [z]
+                Identifier(z) [24-25] [z]
+              IntLiteral(1) [26-27] [1]
+              IntLiteral(2) [28-29] [2]
+        SelectColumn [33-46] [`if`(x, y, z)]
+          FunctionCall [33-46] [`if`(x, y, z)]
+            PathExpression [33-37] [`if`]
+              Identifier(`if`) [33-37] [`if`]
+            PathExpression [38-39] [x]
+              Identifier(x) [38-39] [x]
+            PathExpression [41-42] [y]
+              Identifier(y) [41-42] [y]
+            PathExpression [44-45] [z]
+              Identifier(z) [44-45] [z]
+        SelectColumn [48-59] [123 as `if`]
+          IntLiteral(123) [48-51] [123]
+          Alias [52-59] [as `if`]
+            Identifier(`if`) [55-59] [`if`]
+--
+SELECT
+  `if`(x),
+  `if`(x, y, `if`(z, 1, 2)),
+  `if`(x, y, z),
+  123 AS `if`
+==
+
+# IF is a keyword, so it has to be quoted with backticks.
+SELECT 123 AS if
+--
+ERROR: Syntax error: Unexpected keyword IF [at 1:15]
+SELECT 123 AS if
+              ^
+==
+
+# DISTINCT will parse on functions like IF but will fail analysis.
+select if(distinct 1, 2, 3)
+--
+QueryStatement [0-27] [select if(distinct 1, 2, 3)]
+  Query [0-27] [select if(distinct 1, 2, 3)]
+    Select [0-27] [select if(distinct 1, 2, 3)]
+      SelectList [7-27] [if(distinct 1, 2, 3)]
+        SelectColumn [7-27] [if(distinct 1, 2, 3)]
+          FunctionCall(distinct=true) [7-27] [if(distinct 1, 2, 3)]
+            PathExpression [7-9] [if]
+              Identifier(`if`) [7-9] [if]
+            IntLiteral(1) [19-20] [1]
+            IntLiteral(2) [22-23] [2]
+            IntLiteral(3) [25-26] [3]
+--
+SELECT
+  `if`(DISTINCT 1, 2, 3)
+==
+
+# DISTINCT is only supported for the first argument in a function call.
+select corr(1.0, distinct 1.0)
+--
+ERROR: Syntax error: Unexpected keyword DISTINCT [at 1:18]
+select corr(1.0, distinct 1.0)
+                 ^
+==
+
+# LANGUAGE is a keyword in CREATE FUNCTION statements; make sure it still works
+# elsewhere in a query.
+select lang as language, count(*)
+from language
+where language like 'sv%'
+group by language
+order by language
+--
+QueryStatement [0-109] [select lang...by language]
+  Query [0-109] [select lang...by language]
+    Select [0-91] [select lang...by language]
+      SelectList [7-33] [lang as language, count(*)]
+        SelectColumn [7-23] [lang as language]
+          PathExpression [7-11] [lang]
+            Identifier(lang) [7-11] [lang]
+          Alias [12-23] [as language]
+            Identifier(language) [15-23] [language]
+        SelectColumn [25-33] [count(*)]
+          FunctionCall [25-33] [count(*)]
+            PathExpression [25-30] [count]
+              Identifier(count) [25-30] [count]
+            Star(*) [31-32] [*]
+      FromClause [34-47] [from language]
+        TablePathExpression [39-47] [language]
+          PathExpression [39-47] [language]
+            Identifier(language) [39-47] [language]
+      WhereClause [48-73] [where language like 'sv%']
+        BinaryExpression(LIKE) [54-73] [language like 'sv%']
+          PathExpression [54-62] [language]
+            Identifier(language) [54-62] [language]
+          StringLiteral [68-73] ['sv%']
+            StringLiteralComponent('sv%') [68-73] ['sv%']
+      GroupBy [74-91] [group by language]
+        GroupingItem [83-91] [language]
+          PathExpression [83-91] [language]
+            Identifier(language) [83-91] [language]
+    OrderBy [92-109] [order by language]
+      OrderingExpression(ASC) [101-109] [language]
+        PathExpression [101-109] [language]
+          Identifier(language) [101-109] [language]
+--
+SELECT
+  lang AS language,
+  count(*)
+FROM
+  language
+WHERE
+  language LIKE 'sv%'
+GROUP BY language
+ORDER BY language
+==
+
+# FUNCTION is a keyword in CREATE FUNCTION statements; make sure it still works
+# elsewhere in a query.
+select func as function, count(*)
+from function
+where function like 'sv%'
+group by function
+order by function
+--
+QueryStatement [0-109] [select func...by function]
+  Query [0-109] [select func...by function]
+    Select [0-91] [select func...by function]
+      SelectList [7-33] [func as function, count(*)]
+        SelectColumn [7-23] [func as function]
+          PathExpression [7-11] [func]
+            Identifier(func) [7-11] [func]
+          Alias [12-23] [as function]
+            Identifier(`function`) [15-23] [function]
+        SelectColumn [25-33] [count(*)]
+          FunctionCall [25-33] [count(*)]
+            PathExpression [25-30] [count]
+              Identifier(count) [25-30] [count]
+            Star(*) [31-32] [*]
+      FromClause [34-47] [from function]
+        TablePathExpression [39-47] [function]
+          PathExpression [39-47] [function]
+            Identifier(`function`) [39-47] [function]
+      WhereClause [48-73] [where function like 'sv%']
+        BinaryExpression(LIKE) [54-73] [function like 'sv%']
+          PathExpression [54-62] [function]
+            Identifier(`function`) [54-62] [function]
+          StringLiteral [68-73] ['sv%']
+            StringLiteralComponent('sv%') [68-73] ['sv%']
+      GroupBy [74-91] [group by function]
+        GroupingItem [83-91] [function]
+          PathExpression [83-91] [function]
+            Identifier(`function`) [83-91] [function]
+    OrderBy [92-109] [order by function]
+      OrderingExpression(ASC) [101-109] [function]
+        PathExpression [101-109] [function]
+          Identifier(`function`) [101-109] [function]
+--
+SELECT
+  func AS `function`,
+  count(*)
+FROM
+  `function`
+WHERE
+  `function` LIKE 'sv%'
+GROUP BY `function`
+ORDER BY `function`
+==
+
+# RETURNS is a keyword in CREATE FUNCTION statements; make sure it still works
+# elsewhere in a query.
+select func as returns, count(*)
+from returns
+where returns like 'sv%'
+group by returns
+order by returns
+--
+QueryStatement [0-104] [select func...by returns]
+  Query [0-104] [select func...by returns]
+    Select [0-87] [select func...by returns]
+      SelectList [7-32] [func as returns, count(*)]
+        SelectColumn [7-22] [func as returns]
+          PathExpression [7-11] [func]
+            Identifier(func) [7-11] [func]
+          Alias [12-22] [as returns]
+            Identifier(returns) [15-22] [returns]
+        SelectColumn [24-32] [count(*)]
+          FunctionCall [24-32] [count(*)]
+            PathExpression [24-29] [count]
+              Identifier(count) [24-29] [count]
+            Star(*) [30-31] [*]
+      FromClause [33-45] [from returns]
+        TablePathExpression [38-45] [returns]
+          PathExpression [38-45] [returns]
+            Identifier(returns) [38-45] [returns]
+      WhereClause [46-70] [where returns like 'sv%']
+        BinaryExpression(LIKE) [52-70] [returns like 'sv%']
+          PathExpression [52-59] [returns]
+            Identifier(returns) [52-59] [returns]
+          StringLiteral [65-70] ['sv%']
+            StringLiteralComponent('sv%') [65-70] ['sv%']
+      GroupBy [71-87] [group by returns]
+        GroupingItem [80-87] [returns]
+          PathExpression [80-87] [returns]
+            Identifier(returns) [80-87] [returns]
+    OrderBy [88-104] [order by returns]
+      OrderingExpression(ASC) [97-104] [returns]
+        PathExpression [97-104] [returns]
+          Identifier(returns) [97-104] [returns]
+--
+SELECT
+  func AS returns,
+  count(*)
+FROM
+  returns
+WHERE
+  returns LIKE 'sv%'
+GROUP BY returns
+ORDER BY returns
+==
+
+# safe_cast should still be used as column or path name.
+select safe_cast from (select 1 as safe_cast)
+--
+QueryStatement [0-45] [select safe_cast...safe_cast)]
+  Query [0-45] [select safe_cast...safe_cast)]
+    Select [0-45] [select safe_cast...safe_cast)]
+      SelectList [7-16] [safe_cast]
+        SelectColumn [7-16] [safe_cast]
+          PathExpression [7-16] [safe_cast]
+            Identifier(`safe_cast`) [7-16] [safe_cast]
+      FromClause [17-45] [from (select 1 as safe_cast)]
+        TableSubquery [22-45] [(select 1 as safe_cast)]
+          Query [23-44] [select 1 as safe_cast]
+            Select [23-44] [select 1 as safe_cast]
+              SelectList [30-44] [1 as safe_cast]
+                SelectColumn [30-44] [1 as safe_cast]
+                  IntLiteral(1) [30-31] [1]
+                  Alias [32-44] [as safe_cast]
+                    Identifier(`safe_cast`) [35-44] [safe_cast]
+--
+SELECT
+  `safe_cast`
+FROM
+  (
+    SELECT
+      1 AS `safe_cast`
+  )
+==
+
+# Test that unreserved keyword DATE_ADD and similar keywords can be used as an
+# alias and column name.
+select date_add, date_sub, timestamp_add, timestamp_sub,
+       datetime_add, datetime_sub, time_add, time_sub
+from (select 1 as date_add, 1 as date_sub, 1 as timestamp_add,
+      1 as timestamp_sub, 1 as datetime_add, 1 as datetime_sub,
+      1 as time_ad, 1 as time_sub);
+--
+QueryStatement [0-272] [select date_add...time_sub)]
+  Query [0-272] [select date_add...time_sub)]
+    Select [0-272] [select date_add...time_sub)]
+      SelectList [7-110] [date_add,..., time_sub]
+        SelectColumn [7-15] [date_add]
+          PathExpression [7-15] [date_add]
+            Identifier(date_add) [7-15] [date_add]
+        SelectColumn [17-25] [date_sub]
+          PathExpression [17-25] [date_sub]
+            Identifier(date_sub) [17-25] [date_sub]
+        SelectColumn [27-40] [timestamp_add]
+          PathExpression [27-40] [timestamp_add]
+            Identifier(timestamp_add) [27-40] [timestamp_add]
+        SelectColumn [42-55] [timestamp_sub]
+          PathExpression [42-55] [timestamp_sub]
+            Identifier(timestamp_sub) [42-55] [timestamp_sub]
+        SelectColumn [64-76] [datetime_add]
+          PathExpression [64-76] [datetime_add]
+            Identifier(datetime_add) [64-76] [datetime_add]
+        SelectColumn [78-90] [datetime_sub]
+          PathExpression [78-90] [datetime_sub]
+            Identifier(datetime_sub) [78-90] [datetime_sub]
+        SelectColumn [92-100] [time_add]
+          PathExpression [92-100] [time_add]
+            Identifier(time_add) [92-100] [time_add]
+        SelectColumn [102-110] [time_sub]
+          PathExpression [102-110] [time_sub]
+            Identifier(time_sub) [102-110] [time_sub]
+      FromClause [111-272] [from (select...time_sub)]
+        TableSubquery [116-272] [(select 1...time_sub)]
+          Query [117-271] [select 1 as...as time_sub]
+            Select [117-271] [select 1 as...as time_sub]
+              SelectList [124-271] [1 as date_add...as time_sub]
+                SelectColumn [124-137] [1 as date_add]
+                  IntLiteral(1) [124-125] [1]
+                  Alias [126-137] [as date_add]
+                    Identifier(date_add) [129-137] [date_add]
+                SelectColumn [139-152] [1 as date_sub]
+                  IntLiteral(1) [139-140] [1]
+                  Alias [141-152] [as date_sub]
+                    Identifier(date_sub) [144-152] [date_sub]
+                SelectColumn [154-172] [1 as timestamp_add]
+                  IntLiteral(1) [154-155] [1]
+                  Alias [156-172] [as timestamp_add]
+                    Identifier(timestamp_add) [159-172] [timestamp_add]
+                SelectColumn [180-198] [1 as timestamp_sub]
+                  IntLiteral(1) [180-181] [1]
+                  Alias [182-198] [as timestamp_sub]
+                    Identifier(timestamp_sub) [185-198] [timestamp_sub]
+                SelectColumn [200-217] [1 as datetime_add]
+                  IntLiteral(1) [200-201] [1]
+                  Alias [202-217] [as datetime_add]
+                    Identifier(datetime_add) [205-217] [datetime_add]
+                SelectColumn [219-236] [1 as datetime_sub]
+                  IntLiteral(1) [219-220] [1]
+                  Alias [221-236] [as datetime_sub]
+                    Identifier(datetime_sub) [224-236] [datetime_sub]
+                SelectColumn [244-256] [1 as time_ad]
+                  IntLiteral(1) [244-245] [1]
+                  Alias [246-256] [as time_ad]
+                    Identifier(time_ad) [249-256] [time_ad]
+                SelectColumn [258-271] [1 as time_sub]
+                  IntLiteral(1) [258-259] [1]
+                  Alias [260-271] [as time_sub]
+                    Identifier(time_sub) [263-271] [time_sub]
+--
+SELECT
+  date_add,
+  date_sub,
+  timestamp_add,
+  timestamp_sub,
+  datetime_add,
+  datetime_sub,
+  time_add,
+  time_sub
+FROM
+  (
+    SELECT
+      1 AS date_add,
+      1 AS date_sub,
+      1 AS timestamp_add,
+      1 AS timestamp_sub,
+      1 AS datetime_add,
+      1 AS datetime_sub,
+      1 AS time_ad,
+      1 AS time_sub
+  )
+==
+
+# Most unquoted reserved keywords (KeywordInfo::kReserved) cannot be used
+# as an identifier or in a path expression (at the start, middle, or end).
+select 1 as {{array|`array`}}
+--
+ALTERNATION GROUP: array
+--
+ERROR: Syntax error: Unexpected keyword ARRAY [at 1:13]
+select 1 as array
+            ^
+--
+ALTERNATION GROUP: `array`
+--
+QueryStatement [0-19] [select 1 as `array`]
+  Query [0-19] [select 1 as `array`]
+    Select [0-19] [select 1 as `array`]
+      SelectList [7-19] [1 as `array`]
+        SelectColumn [7-19] [1 as `array`]
+          IntLiteral(1) [7-8] [1]
+          Alias [9-19] [as `array`]
+            Identifier(`array`) [12-19] [`array`]
+--
+SELECT
+  1 AS `array`
+==
+
+select {{array|`array`}} from foo;
+--
+ALTERNATION GROUP: array
+--
+ERROR: Syntax error: Expected "<" but got keyword FROM [at 1:14]
+select array from foo;
+             ^
+--
+ALTERNATION GROUP: `array`
+--
+QueryStatement [0-23] [select `array` from foo]
+  Query [0-23] [select `array` from foo]
+    Select [0-23] [select `array` from foo]
+      SelectList [7-14] [`array`]
+        SelectColumn [7-14] [`array`]
+          PathExpression [7-14] [`array`]
+            Identifier(`array`) [7-14] [`array`]
+      FromClause [15-23] [from foo]
+        TablePathExpression [20-23] [foo]
+          PathExpression [20-23] [foo]
+            Identifier(foo) [20-23] [foo]
+--
+SELECT
+  `array`
+FROM
+  foo
+==
+
+select foo.{{array|`array`}} from foo;
+--
+ALTERNATION GROUP: array
+--
+QueryStatement [0-25] [select foo.array from foo]
+  Query [0-25] [select foo.array from foo]
+    Select [0-25] [select foo.array from foo]
+      SelectList [7-16] [foo.array]
+        SelectColumn [7-16] [foo.array]
+          PathExpression [7-16] [foo.array]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`array`) [11-16] [array]
+      FromClause [17-25] [from foo]
+        TablePathExpression [22-25] [foo]
+          PathExpression [22-25] [foo]
+            Identifier(foo) [22-25] [foo]
+--
+SELECT
+  foo.`array`
+FROM
+  foo
+--
+ALTERNATION GROUP: `array`
+--
+QueryStatement [0-27] [select foo.`array` from foo]
+  Query [0-27] [select foo.`array` from foo]
+    Select [0-27] [select foo.`array` from foo]
+      SelectList [7-18] [foo.`array`]
+        SelectColumn [7-18] [foo.`array`]
+          PathExpression [7-18] [foo.`array`]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`array`) [11-18] [`array`]
+      FromClause [19-27] [from foo]
+        TablePathExpression [24-27] [foo]
+          PathExpression [24-27] [foo]
+            Identifier(foo) [24-27] [foo]
+--
+SELECT
+  foo.`array`
+FROM
+  foo
+==
+
+# Reserved keywords as identifiers work after a closing parenthesis or square
+# bracket followed by a dot.
+select FOO().array, (foo).array, foo[3].array, ?.array, @param.array, @@sysvar.array from foo;
+--
+QueryStatement [0-93] [select FOO...array from foo]
+  Query [0-93] [select FOO...array from foo]
+    Select [0-93] [select FOO...array from foo]
+      SelectList [7-84] [FOO().array...sysvar.array]
+        SelectColumn [7-18] [FOO().array]
+          DotIdentifier [7-18] [FOO().array]
+            FunctionCall [7-12] [FOO()]
+              PathExpression [7-10] [FOO]
+                Identifier(FOO) [7-10] [FOO]
+            Identifier(`array`) [13-18] [array]
+        SelectColumn [20-31] [(foo).array]
+          DotIdentifier [20-31] [(foo).array]
+            PathExpression [21-24] [foo]
+              Identifier(foo) [21-24] [foo]
+            Identifier(`array`) [26-31] [array]
+        SelectColumn [33-45] [foo[3].array]
+          DotIdentifier [33-45] [foo[3].array]
+            ArrayElement [33-39] [foo[3]]
+              PathExpression [33-36] [foo]
+                Identifier(foo) [33-36] [foo]
+              Location [36-37] [[]
+              IntLiteral(3) [37-38] [3]
+            Identifier(`array`) [40-45] [array]
+        SelectColumn [47-54] [?.array]
+          DotIdentifier [47-54] [?.array]
+            ParameterExpr(1) [47-48] [?]
+            Identifier(`array`) [49-54] [array]
+        SelectColumn [56-68] [@param.array]
+          DotIdentifier [56-68] [@param.array]
+            ParameterExpr [56-62] [@param]
+              Identifier(param) [57-62] [param]
+            Identifier(`array`) [63-68] [array]
+        SelectColumn [70-84] [@@sysvar.array]
+          SystemVariableExpr [70-84] [@@sysvar.array]
+            PathExpression [72-84] [sysvar.array]
+              Identifier(sysvar) [72-78] [sysvar]
+              Identifier(`array`) [79-84] [array]
+      FromClause [85-93] [from foo]
+        TablePathExpression [90-93] [foo]
+          PathExpression [90-93] [foo]
+            Identifier(foo) [90-93] [foo]
+--
+SELECT
+  FOO().`array`,
+  (foo).`array`,
+  foo[3].`array`,
+  ?.`array`,
+  @param.`array`,
+  @@sysvar.`array`
+FROM
+  foo
+==
+
+# Identifiers that start with a digit work after a closing parenthesis or square
+# bracket followed by a dot. Even if they look like floating point numbers, like
+# ".1e2".
+select FOO().123, (foo).123, foo[3].123, ?.123, @param.123, @@sysvar.123,
+       FOO().1e2, (foo).1e2, foo[3].1e2, ?.1e2, @param.1e2, @@sysvar.1e2 from foo;
+--
+QueryStatement [0-155] [select FOO...1e2 from foo]
+  Query [0-155] [select FOO...1e2 from foo]
+    Select [0-155] [select FOO...1e2 from foo]
+      SelectList [7-146] [FOO().123,...sysvar.1e2]
+        SelectColumn [7-16] [FOO().123]
+          DotIdentifier [7-16] [FOO().123]
+            FunctionCall [7-12] [FOO()]
+              PathExpression [7-10] [FOO]
+                Identifier(FOO) [7-10] [FOO]
+            Identifier(`123`) [13-16] [123]
+        SelectColumn [18-27] [(foo).123]
+          DotIdentifier [18-27] [(foo).123]
+            PathExpression [19-22] [foo]
+              Identifier(foo) [19-22] [foo]
+            Identifier(`123`) [24-27] [123]
+        SelectColumn [29-39] [foo[3].123]
+          DotIdentifier [29-39] [foo[3].123]
+            ArrayElement [29-35] [foo[3]]
+              PathExpression [29-32] [foo]
+                Identifier(foo) [29-32] [foo]
+              Location [32-33] [[]
+              IntLiteral(3) [33-34] [3]
+            Identifier(`123`) [36-39] [123]
+        SelectColumn [41-46] [?.123]
+          DotIdentifier [41-46] [?.123]
+            ParameterExpr(1) [41-42] [?]
+            Identifier(`123`) [43-46] [123]
+        SelectColumn [48-58] [@param.123]
+          DotIdentifier [48-58] [@param.123]
+            ParameterExpr [48-54] [@param]
+              Identifier(param) [49-54] [param]
+            Identifier(`123`) [55-58] [123]
+        SelectColumn [60-72] [@@sysvar.123]
+          SystemVariableExpr [60-72] [@@sysvar.123]
+            PathExpression [62-72] [sysvar.123]
+              Identifier(sysvar) [62-68] [sysvar]
+              Identifier(`123`) [69-72] [123]
+        SelectColumn [81-90] [FOO().1e2]
+          DotIdentifier [81-90] [FOO().1e2]
+            FunctionCall [81-86] [FOO()]
+              PathExpression [81-84] [FOO]
+                Identifier(FOO) [81-84] [FOO]
+            Identifier(`1e2`) [87-90] [1e2]
+        SelectColumn [92-101] [(foo).1e2]
+          DotIdentifier [92-101] [(foo).1e2]
+            PathExpression [93-96] [foo]
+              Identifier(foo) [93-96] [foo]
+            Identifier(`1e2`) [98-101] [1e2]
+        SelectColumn [103-113] [foo[3].1e2]
+          DotIdentifier [103-113] [foo[3].1e2]
+            ArrayElement [103-109] [foo[3]]
+              PathExpression [103-106] [foo]
+                Identifier(foo) [103-106] [foo]
+              Location [106-107] [[]
+              IntLiteral(3) [107-108] [3]
+            Identifier(`1e2`) [110-113] [1e2]
+        SelectColumn [115-120] [?.1e2]
+          DotIdentifier [115-120] [?.1e2]
+            ParameterExpr(2) [115-116] [?]
+            Identifier(`1e2`) [117-120] [1e2]
+        SelectColumn [122-132] [@param.1e2]
+          DotIdentifier [122-132] [@param.1e2]
+            ParameterExpr [122-128] [@param]
+              Identifier(param) [123-128] [param]
+            Identifier(`1e2`) [129-132] [1e2]
+        SelectColumn [134-146] [@@sysvar.1e2]
+          SystemVariableExpr [134-146] [@@sysvar.1e2]
+            PathExpression [136-146] [sysvar.1e2]
+              Identifier(sysvar) [136-142] [sysvar]
+              Identifier(`1e2`) [143-146] [1e2]
+      FromClause [147-155] [from foo]
+        TablePathExpression [152-155] [foo]
+          PathExpression [152-155] [foo]
+            Identifier(foo) [152-155] [foo]
+--
+SELECT
+  FOO().`123`,
+  (foo).`123`,
+  foo[3].`123`,
+  ?.`123`,
+  @param.`123`,
+  @@sysvar.`123`,
+  FOO().`1e2`,
+  (foo).`1e2`,
+  foo[3].`1e2`,
+  ?.`1e2`,
+  @param.`1e2`,
+  @@sysvar.`1e2`
+FROM
+  foo
+==
+
+# Reserved keywords as identifiers work after an identifier followed by a dot,
+# even when the path epxression does not consist of only identifiers.
+select FOO().bar.array from foo;
+--
+QueryStatement [0-31] [select FOO...array from foo]
+  Query [0-31] [select FOO...array from foo]
+    Select [0-31] [select FOO...array from foo]
+      SelectList [7-22] [FOO().bar.array]
+        SelectColumn [7-22] [FOO().bar.array]
+          DotIdentifier [7-22] [FOO().bar.array]
+            DotIdentifier [7-16] [FOO().bar]
+              FunctionCall [7-12] [FOO()]
+                PathExpression [7-10] [FOO]
+                  Identifier(FOO) [7-10] [FOO]
+              Identifier(bar) [13-16] [bar]
+            Identifier(`array`) [17-22] [array]
+      FromClause [23-31] [from foo]
+        TablePathExpression [28-31] [foo]
+          PathExpression [28-31] [foo]
+            Identifier(foo) [28-31] [foo]
+--
+SELECT
+  FOO().bar.`array`
+FROM
+  foo
+==
+
+select {{array|`array`}}.foo from foo;
+--
+ALTERNATION GROUP: array
+--
+ERROR: Syntax error: Expected "<" but got "." [at 1:13]
+select array.foo from foo;
+            ^
+--
+ALTERNATION GROUP: `array`
+--
+QueryStatement [0-27] [select `array`.foo from foo]
+  Query [0-27] [select `array`.foo from foo]
+    Select [0-27] [select `array`.foo from foo]
+      SelectList [7-18] [`array`.foo]
+        SelectColumn [7-18] [`array`.foo]
+          PathExpression [7-18] [`array`.foo]
+            Identifier(`array`) [7-14] [`array`]
+            Identifier(foo) [15-18] [foo]
+      FromClause [19-27] [from foo]
+        TablePathExpression [24-27] [foo]
+          PathExpression [24-27] [foo]
+            Identifier(foo) [24-27] [foo]
+--
+SELECT
+  `array`.foo
+FROM
+  foo
+==
+
+select * from {{foo.|}}`array`;
+--
+ALTERNATION GROUP: foo.
+--
+QueryStatement [0-25] [select * from foo.`array`]
+  Query [0-25] [select * from foo.`array`]
+    Select [0-25] [select * from foo.`array`]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-25] [from foo.`array`]
+        TablePathExpression [14-25] [foo.`array`]
+          PathExpression [14-25] [foo.`array`]
+            Identifier(foo) [14-17] [foo]
+            Identifier(`array`) [18-25] [`array`]
+--
+SELECT
+  *
+FROM
+  foo.`array`
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-21] [select * from `array`]
+  Query [0-21] [select * from `array`]
+    Select [0-21] [select * from `array`]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-21] [from `array`]
+        TablePathExpression [14-21] [`array`]
+          PathExpression [14-21] [`array`]
+            Identifier(`array`) [14-21] [`array`]
+--
+SELECT
+  *
+FROM
+  `array`
+==
+
+# Some unquoted reserved keywords
+# (KeywordInfo::kReservedGeneralizedIdentifierAllowed) cannot be used alone
+# as an identifier or at the start of a path expression, but can be used as a
+# trailing part of a path expression.
+select 1 as {{all|`all`}}
+--
+ALTERNATION GROUP: all
+--
+ERROR: Syntax error: Unexpected keyword ALL [at 1:13]
+select 1 as all
+            ^
+--
+ALTERNATION GROUP: `all`
+--
+QueryStatement [0-17] [select 1 as `all`]
+  Query [0-17] [select 1 as `all`]
+    Select [0-17] [select 1 as `all`]
+      SelectList [7-17] [1 as `all`]
+        SelectColumn [7-17] [1 as `all`]
+          IntLiteral(1) [7-8] [1]
+          Alias [9-17] [as `all`]
+            Identifier(`all`) [12-17] [`all`]
+--
+SELECT
+  1 AS `all`
+==
+
+select {{all|`all`}} from foo;
+--
+ALTERNATION GROUP: all
+--
+ERROR: Syntax error: SELECT list must not be empty [at 1:12]
+select all from foo;
+           ^
+--
+ALTERNATION GROUP: `all`
+--
+QueryStatement [0-21] [select `all` from foo]
+  Query [0-21] [select `all` from foo]
+    Select [0-21] [select `all` from foo]
+      SelectList [7-12] [`all`]
+        SelectColumn [7-12] [`all`]
+          PathExpression [7-12] [`all`]
+            Identifier(`all`) [7-12] [`all`]
+      FromClause [13-21] [from foo]
+        TablePathExpression [18-21] [foo]
+          PathExpression [18-21] [foo]
+            Identifier(foo) [18-21] [foo]
+--
+SELECT
+  `all`
+FROM
+  foo
+==
+
+select foo.{{all|`all`}} from foo;
+--
+ALTERNATION GROUP: all
+--
+QueryStatement [0-23] [select foo.all from foo]
+  Query [0-23] [select foo.all from foo]
+    Select [0-23] [select foo.all from foo]
+      SelectList [7-14] [foo.all]
+        SelectColumn [7-14] [foo.all]
+          PathExpression [7-14] [foo.all]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`all`) [11-14] [all]
+      FromClause [15-23] [from foo]
+        TablePathExpression [20-23] [foo]
+          PathExpression [20-23] [foo]
+            Identifier(foo) [20-23] [foo]
+--
+SELECT
+  foo.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: `all`
+--
+QueryStatement [0-25] [select foo.`all` from foo]
+  Query [0-25] [select foo.`all` from foo]
+    Select [0-25] [select foo.`all` from foo]
+      SelectList [7-16] [foo.`all`]
+        SelectColumn [7-16] [foo.`all`]
+          PathExpression [7-16] [foo.`all`]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`all`) [11-16] [`all`]
+      FromClause [17-25] [from foo]
+        TablePathExpression [22-25] [foo]
+          PathExpression [22-25] [foo]
+            Identifier(foo) [22-25] [foo]
+--
+SELECT
+  foo.`all`
+FROM
+  foo
+==
+
+select {{all|`all`}}.foo from foo;
+--
+ALTERNATION GROUP: all
+--
+ERROR: Syntax error: Unexpected "." [at 1:11]
+select all.foo from foo;
+          ^
+--
+ALTERNATION GROUP: `all`
+--
+QueryStatement [0-25] [select `all`.foo from foo]
+  Query [0-25] [select `all`.foo from foo]
+    Select [0-25] [select `all`.foo from foo]
+      SelectList [7-16] [`all`.foo]
+        SelectColumn [7-16] [`all`.foo]
+          PathExpression [7-16] [`all`.foo]
+            Identifier(`all`) [7-12] [`all`]
+            Identifier(foo) [13-16] [foo]
+      FromClause [17-25] [from foo]
+        TablePathExpression [22-25] [foo]
+          PathExpression [22-25] [foo]
+            Identifier(foo) [22-25] [foo]
+--
+SELECT
+  `all`.foo
+FROM
+  foo
+==
+
+select * from {{foo.|}}`all`;
+--
+ALTERNATION GROUP: foo.
+--
+QueryStatement [0-23] [select * from foo.`all`]
+  Query [0-23] [select * from foo.`all`]
+    Select [0-23] [select * from foo.`all`]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-23] [from foo.`all`]
+        TablePathExpression [14-23] [foo.`all`]
+          PathExpression [14-23] [foo.`all`]
+            Identifier(foo) [14-17] [foo]
+            Identifier(`all`) [18-23] [`all`]
+--
+SELECT
+  *
+FROM
+  foo.`all`
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-19] [select * from `all`]
+  Query [0-19] [select * from `all`]
+    Select [0-19] [select * from `all`]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-19] [from `all`]
+        TablePathExpression [14-19] [`all`]
+          PathExpression [14-19] [`all`]
+            Identifier(`all`) [14-19] [`all`]
+--
+SELECT
+  *
+FROM
+  `all`
+==
+
+# Unreserved keywords can be used as identifiers and anywhere in a
+# path expression.
+select 1 as {{call|`call`}}
+--
+ALTERNATION GROUP: call
+--
+QueryStatement [0-16] [select 1 as call]
+  Query [0-16] [select 1 as call]
+    Select [0-16] [select 1 as call]
+      SelectList [7-16] [1 as call]
+        SelectColumn [7-16] [1 as call]
+          IntLiteral(1) [7-8] [1]
+          Alias [9-16] [as call]
+            Identifier(call) [12-16] [call]
+--
+SELECT
+  1 AS call
+--
+ALTERNATION GROUP: `call`
+--
+QueryStatement [0-18] [select 1 as `call`]
+  Query [0-18] [select 1 as `call`]
+    Select [0-18] [select 1 as `call`]
+      SelectList [7-18] [1 as `call`]
+        SelectColumn [7-18] [1 as `call`]
+          IntLiteral(1) [7-8] [1]
+          Alias [9-18] [as `call`]
+            Identifier(call) [12-18] [`call`]
+--
+SELECT
+  1 AS call
+==
+
+select {{call|`call`}} from foo;
+--
+ALTERNATION GROUP: call
+--
+QueryStatement [0-20] [select call from foo]
+  Query [0-20] [select call from foo]
+    Select [0-20] [select call from foo]
+      SelectList [7-11] [call]
+        SelectColumn [7-11] [call]
+          PathExpression [7-11] [call]
+            Identifier(call) [7-11] [call]
+      FromClause [12-20] [from foo]
+        TablePathExpression [17-20] [foo]
+          PathExpression [17-20] [foo]
+            Identifier(foo) [17-20] [foo]
+--
+SELECT
+  call
+FROM
+  foo
+--
+ALTERNATION GROUP: `call`
+--
+QueryStatement [0-22] [select `call` from foo]
+  Query [0-22] [select `call` from foo]
+    Select [0-22] [select `call` from foo]
+      SelectList [7-13] [`call`]
+        SelectColumn [7-13] [`call`]
+          PathExpression [7-13] [`call`]
+            Identifier(call) [7-13] [`call`]
+      FromClause [14-22] [from foo]
+        TablePathExpression [19-22] [foo]
+          PathExpression [19-22] [foo]
+            Identifier(foo) [19-22] [foo]
+--
+SELECT
+  call
+FROM
+  foo
+==
+
+select foo.{{call|`call`}} from foo;
+--
+ALTERNATION GROUP: call
+--
+QueryStatement [0-24] [select foo.call from foo]
+  Query [0-24] [select foo.call from foo]
+    Select [0-24] [select foo.call from foo]
+      SelectList [7-15] [foo.call]
+        SelectColumn [7-15] [foo.call]
+          PathExpression [7-15] [foo.call]
+            Identifier(foo) [7-10] [foo]
+            Identifier(call) [11-15] [call]
+      FromClause [16-24] [from foo]
+        TablePathExpression [21-24] [foo]
+          PathExpression [21-24] [foo]
+            Identifier(foo) [21-24] [foo]
+--
+SELECT
+  foo.call
+FROM
+  foo
+--
+ALTERNATION GROUP: `call`
+--
+QueryStatement [0-26] [select foo.`call` from foo]
+  Query [0-26] [select foo.`call` from foo]
+    Select [0-26] [select foo.`call` from foo]
+      SelectList [7-17] [foo.`call`]
+        SelectColumn [7-17] [foo.`call`]
+          PathExpression [7-17] [foo.`call`]
+            Identifier(foo) [7-10] [foo]
+            Identifier(call) [11-17] [`call`]
+      FromClause [18-26] [from foo]
+        TablePathExpression [23-26] [foo]
+          PathExpression [23-26] [foo]
+            Identifier(foo) [23-26] [foo]
+--
+SELECT
+  foo.call
+FROM
+  foo
+==
+
+select {{call|`call`}}.foo from foo;
+--
+ALTERNATION GROUP: call
+--
+QueryStatement [0-24] [select call.foo from foo]
+  Query [0-24] [select call.foo from foo]
+    Select [0-24] [select call.foo from foo]
+      SelectList [7-15] [call.foo]
+        SelectColumn [7-15] [call.foo]
+          PathExpression [7-15] [call.foo]
+            Identifier(call) [7-11] [call]
+            Identifier(foo) [12-15] [foo]
+      FromClause [16-24] [from foo]
+        TablePathExpression [21-24] [foo]
+          PathExpression [21-24] [foo]
+            Identifier(foo) [21-24] [foo]
+--
+SELECT
+  call.foo
+FROM
+  foo
+--
+ALTERNATION GROUP: `call`
+--
+QueryStatement [0-26] [select `call`.foo from foo]
+  Query [0-26] [select `call`.foo from foo]
+    Select [0-26] [select `call`.foo from foo]
+      SelectList [7-17] [`call`.foo]
+        SelectColumn [7-17] [`call`.foo]
+          PathExpression [7-17] [`call`.foo]
+            Identifier(call) [7-13] [`call`]
+            Identifier(foo) [14-17] [foo]
+      FromClause [18-26] [from foo]
+        TablePathExpression [23-26] [foo]
+          PathExpression [23-26] [foo]
+            Identifier(foo) [23-26] [foo]
+--
+SELECT
+  call.foo
+FROM
+  foo
+==
+
+select * from {{foo.|}}`call`;
+--
+ALTERNATION GROUP: foo.
+--
+QueryStatement [0-24] [select * from foo.`call`]
+  Query [0-24] [select * from foo.`call`]
+    Select [0-24] [select * from foo.`call`]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-24] [from foo.`call`]
+        TablePathExpression [14-24] [foo.`call`]
+          PathExpression [14-24] [foo.`call`]
+            Identifier(foo) [14-17] [foo]
+            Identifier(call) [18-24] [`call`]
+--
+SELECT
+  *
+FROM
+  foo.call
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-20] [select * from `call`]
+  Query [0-20] [select * from `call`]
+    Select [0-20] [select * from `call`]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-20] [from `call`]
+        TablePathExpression [14-20] [`call`]
+          PathExpression [14-20] [`call`]
+            Identifier(call) [14-20] [`call`]
+--
+SELECT
+  *
+FROM
+  call
+==
+
+# Path expressions like kUnreserved.kReserved are allowed, as are
+# arbitrary_identifier.kReserved. "foo" is an arbitrary identifier, "call" is
+# a reserved word.
+select {{foo|call}}.array from bar;
+--
+ALTERNATION GROUP: foo
+--
+QueryStatement [0-25] [select foo.array from bar]
+  Query [0-25] [select foo.array from bar]
+    Select [0-25] [select foo.array from bar]
+      SelectList [7-16] [foo.array]
+        SelectColumn [7-16] [foo.array]
+          PathExpression [7-16] [foo.array]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`array`) [11-16] [array]
+      FromClause [17-25] [from bar]
+        TablePathExpression [22-25] [bar]
+          PathExpression [22-25] [bar]
+            Identifier(bar) [22-25] [bar]
+--
+SELECT
+  foo.`array`
+FROM
+  bar
+--
+ALTERNATION GROUP: call
+--
+QueryStatement [0-26] [select call.array from bar]
+  Query [0-26] [select call.array from bar]
+    Select [0-26] [select call.array from bar]
+      SelectList [7-17] [call.array]
+        SelectColumn [7-17] [call.array]
+          PathExpression [7-17] [call.array]
+            Identifier(call) [7-11] [call]
+            Identifier(`array`) [12-17] [array]
+      FromClause [18-26] [from bar]
+        TablePathExpression [23-26] [bar]
+          PathExpression [23-26] [bar]
+            Identifier(bar) [23-26] [bar]
+--
+SELECT
+  call.`array`
+FROM
+  bar
+==
+
+# Path expressions like kUnreserved.kReservedGeneralizedIdentifierAllowed
+# are ok.  This test mixes unreserved keywords, reserved keywords, and
+# non-keywords in various orders.
+select call.{{all.|}}{{call.|}}{{foo.|}}all from foo;
+--
+ALTERNATION GROUP: all.,call.,foo.
+--
+QueryStatement [0-37] [select call...all from foo]
+  Query [0-37] [select call...all from foo]
+    Select [0-37] [select call...all from foo]
+      SelectList [7-28] [call.all.call.foo.all]
+        SelectColumn [7-28] [call.all.call.foo.all]
+          PathExpression [7-28] [call.all.call.foo.all]
+            Identifier(call) [7-11] [call]
+            Identifier(`all`) [12-15] [all]
+            Identifier(call) [16-20] [call]
+            Identifier(foo) [21-24] [foo]
+            Identifier(`all`) [25-28] [all]
+      FromClause [29-37] [from foo]
+        TablePathExpression [34-37] [foo]
+          PathExpression [34-37] [foo]
+            Identifier(foo) [34-37] [foo]
+--
+SELECT
+  call.`all`.call.foo.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: all.,call.,
+--
+QueryStatement [0-33] [select call...all from foo]
+  Query [0-33] [select call...all from foo]
+    Select [0-33] [select call...all from foo]
+      SelectList [7-24] [call.all.call.all]
+        SelectColumn [7-24] [call.all.call.all]
+          PathExpression [7-24] [call.all.call.all]
+            Identifier(call) [7-11] [call]
+            Identifier(`all`) [12-15] [all]
+            Identifier(call) [16-20] [call]
+            Identifier(`all`) [21-24] [all]
+      FromClause [25-33] [from foo]
+        TablePathExpression [30-33] [foo]
+          PathExpression [30-33] [foo]
+            Identifier(foo) [30-33] [foo]
+--
+SELECT
+  call.`all`.call.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: all.,,foo.
+--
+QueryStatement [0-32] [select call...all from foo]
+  Query [0-32] [select call...all from foo]
+    Select [0-32] [select call...all from foo]
+      SelectList [7-23] [call.all.foo.all]
+        SelectColumn [7-23] [call.all.foo.all]
+          PathExpression [7-23] [call.all.foo.all]
+            Identifier(call) [7-11] [call]
+            Identifier(`all`) [12-15] [all]
+            Identifier(foo) [16-19] [foo]
+            Identifier(`all`) [20-23] [all]
+      FromClause [24-32] [from foo]
+        TablePathExpression [29-32] [foo]
+          PathExpression [29-32] [foo]
+            Identifier(foo) [29-32] [foo]
+--
+SELECT
+  call.`all`.foo.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: all.,,
+--
+QueryStatement [0-28] [select call.all.all from foo]
+  Query [0-28] [select call.all.all from foo]
+    Select [0-28] [select call.all.all from foo]
+      SelectList [7-19] [call.all.all]
+        SelectColumn [7-19] [call.all.all]
+          PathExpression [7-19] [call.all.all]
+            Identifier(call) [7-11] [call]
+            Identifier(`all`) [12-15] [all]
+            Identifier(`all`) [16-19] [all]
+      FromClause [20-28] [from foo]
+        TablePathExpression [25-28] [foo]
+          PathExpression [25-28] [foo]
+            Identifier(foo) [25-28] [foo]
+--
+SELECT
+  call.`all`.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: call.,foo.
+--
+QueryStatement [0-33] [select call...all from foo]
+  Query [0-33] [select call...all from foo]
+    Select [0-33] [select call...all from foo]
+      SelectList [7-24] [call.call.foo.all]
+        SelectColumn [7-24] [call.call.foo.all]
+          PathExpression [7-24] [call.call.foo.all]
+            Identifier(call) [7-11] [call]
+            Identifier(call) [12-16] [call]
+            Identifier(foo) [17-20] [foo]
+            Identifier(`all`) [21-24] [all]
+      FromClause [25-33] [from foo]
+        TablePathExpression [30-33] [foo]
+          PathExpression [30-33] [foo]
+            Identifier(foo) [30-33] [foo]
+--
+SELECT
+  call.call.foo.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: call.,
+--
+QueryStatement [0-29] [select call.call.all from foo]
+  Query [0-29] [select call.call.all from foo]
+    Select [0-29] [select call.call.all from foo]
+      SelectList [7-20] [call.call.all]
+        SelectColumn [7-20] [call.call.all]
+          PathExpression [7-20] [call.call.all]
+            Identifier(call) [7-11] [call]
+            Identifier(call) [12-16] [call]
+            Identifier(`all`) [17-20] [all]
+      FromClause [21-29] [from foo]
+        TablePathExpression [26-29] [foo]
+          PathExpression [26-29] [foo]
+            Identifier(foo) [26-29] [foo]
+--
+SELECT
+  call.call.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: foo.
+--
+QueryStatement [0-28] [select call.foo.all from foo]
+  Query [0-28] [select call.foo.all from foo]
+    Select [0-28] [select call.foo.all from foo]
+      SelectList [7-19] [call.foo.all]
+        SelectColumn [7-19] [call.foo.all]
+          PathExpression [7-19] [call.foo.all]
+            Identifier(call) [7-11] [call]
+            Identifier(foo) [12-15] [foo]
+            Identifier(`all`) [16-19] [all]
+      FromClause [20-28] [from foo]
+        TablePathExpression [25-28] [foo]
+          PathExpression [25-28] [foo]
+            Identifier(foo) [25-28] [foo]
+--
+SELECT
+  call.foo.`all`
+FROM
+  foo
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-24] [select call.all from foo]
+  Query [0-24] [select call.all from foo]
+    Select [0-24] [select call.all from foo]
+      SelectList [7-15] [call.all]
+        SelectColumn [7-15] [call.all]
+          PathExpression [7-15] [call.all]
+            Identifier(call) [7-11] [call]
+            Identifier(`all`) [12-15] [all]
+      FromClause [16-24] [from foo]
+        TablePathExpression [21-24] [foo]
+          PathExpression [21-24] [foo]
+            Identifier(foo) [21-24] [foo]
+--
+SELECT
+  call.`all`
+FROM
+  foo
+==
+
+# Other supported trailing generalized identifiers can start with numbers.
+select {{foo|call}}.123{{|.bar}} from foo;
+--
+ALTERNATION GROUP: foo,
+--
+QueryStatement [0-23] [select foo.123 from foo]
+  Query [0-23] [select foo.123 from foo]
+    Select [0-23] [select foo.123 from foo]
+      SelectList [7-14] [foo.123]
+        SelectColumn [7-14] [foo.123]
+          PathExpression [7-14] [foo.123]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`123`) [11-14] [123]
+      FromClause [15-23] [from foo]
+        TablePathExpression [20-23] [foo]
+          PathExpression [20-23] [foo]
+            Identifier(foo) [20-23] [foo]
+--
+SELECT
+  foo.`123`
+FROM
+  foo
+--
+ALTERNATION GROUP: foo,.bar
+--
+QueryStatement [0-27] [select foo.123.bar from foo]
+  Query [0-27] [select foo.123.bar from foo]
+    Select [0-27] [select foo.123.bar from foo]
+      SelectList [7-18] [foo.123.bar]
+        SelectColumn [7-18] [foo.123.bar]
+          PathExpression [7-18] [foo.123.bar]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`123`) [11-14] [123]
+            Identifier(bar) [15-18] [bar]
+      FromClause [19-27] [from foo]
+        TablePathExpression [24-27] [foo]
+          PathExpression [24-27] [foo]
+            Identifier(foo) [24-27] [foo]
+--
+SELECT
+  foo.`123`.bar
+FROM
+  foo
+--
+ALTERNATION GROUP: call,
+--
+QueryStatement [0-24] [select call.123 from foo]
+  Query [0-24] [select call.123 from foo]
+    Select [0-24] [select call.123 from foo]
+      SelectList [7-15] [call.123]
+        SelectColumn [7-15] [call.123]
+          PathExpression [7-15] [call.123]
+            Identifier(call) [7-11] [call]
+            Identifier(`123`) [12-15] [123]
+      FromClause [16-24] [from foo]
+        TablePathExpression [21-24] [foo]
+          PathExpression [21-24] [foo]
+            Identifier(foo) [21-24] [foo]
+--
+SELECT
+  call.`123`
+FROM
+  foo
+--
+ALTERNATION GROUP: call,.bar
+--
+QueryStatement [0-28] [select call.123.bar from foo]
+  Query [0-28] [select call.123.bar from foo]
+    Select [0-28] [select call.123.bar from foo]
+      SelectList [7-19] [call.123.bar]
+        SelectColumn [7-19] [call.123.bar]
+          PathExpression [7-19] [call.123.bar]
+            Identifier(call) [7-11] [call]
+            Identifier(`123`) [12-15] [123]
+            Identifier(bar) [16-19] [bar]
+      FromClause [20-28] [from foo]
+        TablePathExpression [25-28] [foo]
+          PathExpression [25-28] [foo]
+            Identifier(foo) [25-28] [foo]
+--
+SELECT
+  call.`123`.bar
+FROM
+  foo
+==
+
+select {{foo|call}}.123bar{{|.baz}} from foo;
+--
+ALTERNATION GROUP: foo,
+--
+QueryStatement [0-26] [select foo.123bar from foo]
+  Query [0-26] [select foo.123bar from foo]
+    Select [0-26] [select foo.123bar from foo]
+      SelectList [7-17] [foo.123bar]
+        SelectColumn [7-17] [foo.123bar]
+          PathExpression [7-17] [foo.123bar]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`123bar`) [11-17] [123bar]
+      FromClause [18-26] [from foo]
+        TablePathExpression [23-26] [foo]
+          PathExpression [23-26] [foo]
+            Identifier(foo) [23-26] [foo]
+--
+SELECT
+  foo.`123bar`
+FROM
+  foo
+--
+ALTERNATION GROUP: foo,.baz
+--
+QueryStatement [0-30] [select foo.123bar.baz from foo]
+  Query [0-30] [select foo.123bar.baz from foo]
+    Select [0-30] [select foo.123bar.baz from foo]
+      SelectList [7-21] [foo.123bar.baz]
+        SelectColumn [7-21] [foo.123bar.baz]
+          PathExpression [7-21] [foo.123bar.baz]
+            Identifier(foo) [7-10] [foo]
+            Identifier(`123bar`) [11-17] [123bar]
+            Identifier(baz) [18-21] [baz]
+      FromClause [22-30] [from foo]
+        TablePathExpression [27-30] [foo]
+          PathExpression [27-30] [foo]
+            Identifier(foo) [27-30] [foo]
+--
+SELECT
+  foo.`123bar`.baz
+FROM
+  foo
+--
+ALTERNATION GROUP: call,
+--
+QueryStatement [0-27] [select call.123bar from foo]
+  Query [0-27] [select call.123bar from foo]
+    Select [0-27] [select call.123bar from foo]
+      SelectList [7-18] [call.123bar]
+        SelectColumn [7-18] [call.123bar]
+          PathExpression [7-18] [call.123bar]
+            Identifier(call) [7-11] [call]
+            Identifier(`123bar`) [12-18] [123bar]
+      FromClause [19-27] [from foo]
+        TablePathExpression [24-27] [foo]
+          PathExpression [24-27] [foo]
+            Identifier(foo) [24-27] [foo]
+--
+SELECT
+  call.`123bar`
+FROM
+  foo
+--
+ALTERNATION GROUP: call,.baz
+--
+QueryStatement [0-31] [select call...baz from foo]
+  Query [0-31] [select call...baz from foo]
+    Select [0-31] [select call...baz from foo]
+      SelectList [7-22] [call.123bar.baz]
+        SelectColumn [7-22] [call.123bar.baz]
+          PathExpression [7-22] [call.123bar.baz]
+            Identifier(call) [7-11] [call]
+            Identifier(`123bar`) [12-18] [123bar]
+            Identifier(baz) [19-22] [baz]
+      FromClause [23-31] [from foo]
+        TablePathExpression [28-31] [foo]
+          PathExpression [28-31] [foo]
+            Identifier(foo) [28-31] [foo]
+--
+SELECT
+  call.`123bar`.baz
+FROM
+  foo
+==
+
+# IMPORT and MODULE are recently added non-reserved keywords that can
+# still be used as identifiers and in path expressions.
+select module, module.import as import
+from datascape.import.module as module
+where module.intcol = 0
+group by import;
+--
+QueryStatement [0-117] [select module...by import]
+  Query [0-117] [select module...by import]
+    Select [0-117] [select module...by import]
+      SelectList [7-38] [module, module...as import]
+        SelectColumn [7-13] [module]
+          PathExpression [7-13] [module]
+            Identifier(module) [7-13] [module]
+        SelectColumn [15-38] [module.import as import]
+          PathExpression [15-28] [module.import]
+            Identifier(module) [15-21] [module]
+            Identifier(import) [22-28] [import]
+          Alias [29-38] [as import]
+            Identifier(import) [32-38] [import]
+      FromClause [39-77] [from datascape...as module]
+        TablePathExpression [44-77] [datascape....as module]
+          PathExpression [44-67] [datascape.import.module]
+            Identifier(datascape) [44-53] [datascape]
+            Identifier(import) [54-60] [import]
+            Identifier(module) [61-67] [module]
+          Alias [68-77] [as module]
+            Identifier(module) [71-77] [module]
+      WhereClause [78-101] [where module.intcol = 0]
+        BinaryExpression(=) [84-101] [module.intcol = 0]
+          PathExpression [84-97] [module.intcol]
+            Identifier(module) [84-90] [module]
+            Identifier(intcol) [91-97] [intcol]
+          IntLiteral(0) [100-101] [0]
+      GroupBy [102-117] [group by import]
+        GroupingItem [111-117] [import]
+          PathExpression [111-117] [import]
+            Identifier(import) [111-117] [import]
+--
+SELECT
+  module,
+  module.import AS import
+FROM
+  datascape.import.module AS module
+WHERE
+  module.intcol = 0
+GROUP BY import
+==
+
+create table module as select 1 as foo;
+--
+CreateTableStatement [0-38] [create table...select 1 as foo]
+  PathExpression [13-19] [module]
+    Identifier(module) [13-19] [module]
+  Query [23-38] [select 1 as foo]
+    Select [23-38] [select 1 as foo]
+      SelectList [30-38] [1 as foo]
+        SelectColumn [30-38] [1 as foo]
+          IntLiteral(1) [30-31] [1]
+          Alias [32-38] [as foo]
+            Identifier(foo) [35-38] [foo]
+--
+CREATE TABLE module AS
+SELECT
+  1 AS foo
+==
+
+define table import(a=1);
+--
+DefineTableStatement [0-24] [define table import(a=1)]
+  PathExpression [13-19] [import]
+    Identifier(import) [13-19] [import]
+  OptionsList [19-24] [(a=1)]
+    OptionsEntry [20-23] [a=1]
+      Identifier(a) [20-21] [a]
+      IntLiteral(1) [22-23] [1]
+--
+DEFINE TABLE import(a = 1)
+==
+
+create function {{import|module}}() as (1);
+--
+ALTERNATION GROUP: import
+--
+CreateFunctionStatement [0-31] [create function...ort() as (1)]
+  FunctionDeclaration [16-24] [import()]
+    PathExpression [16-22] [import]
+      Identifier(import) [16-22] [import]
+    FunctionParameters [22-24] [()]
+  SqlFunctionBody [28-31] [(1)]
+    IntLiteral(1) [29-30] [1]
+--
+CREATE FUNCTION import()
+AS (
+  1
+)
+--
+ALTERNATION GROUP: module
+--
+CreateFunctionStatement [0-31] [create function...ule() as (1)]
+  FunctionDeclaration [16-24] [module()]
+    PathExpression [16-22] [module]
+      Identifier(module) [16-22] [module]
+    FunctionParameters [22-24] [()]
+  SqlFunctionBody [28-31] [(1)]
+    IntLiteral(1) [29-30] [1]
+--
+CREATE FUNCTION module()
+AS (
+  1
+)
+==
+
+select {{|import.}}module();
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-15] [select module()]
+  Query [0-15] [select module()]
+    Select [0-15] [select module()]
+      SelectList [7-15] [module()]
+        SelectColumn [7-15] [module()]
+          FunctionCall [7-15] [module()]
+            PathExpression [7-13] [module]
+              Identifier(module) [7-13] [module]
+--
+SELECT
+  module()
+--
+ALTERNATION GROUP: import.
+--
+QueryStatement [0-22] [select import.module()]
+  Query [0-22] [select import.module()]
+    Select [0-22] [select import.module()]
+      SelectList [7-22] [import.module()]
+        SelectColumn [7-22] [import.module()]
+          FunctionCall [7-22] [import.module()]
+            PathExpression [7-20] [import.module]
+              Identifier(import) [7-13] [import]
+              Identifier(module) [14-20] [module]
+--
+SELECT
+  import.module()
+==
+
+# SYSTEM is not reserved keyword, and can be used as identifier.
+# Contrast different usages of SYSTEM, TIME, SYSTEM_TIME, AS keywords in
+# different contexts.
+select system as `of`, system_time as system
+from (select time '10:20:30' as system, cast(system as time) as system_time
+      from system.table cross join
+           important.system for system time as of @system)
+--
+QueryStatement [0-214] [select system...of @system)]
+  Query [0-214] [select system...of @system)]
+    Select [0-214] [select system...of @system)]
+      SelectList [7-44] [system as...as system]
+        SelectColumn [7-21] [system as `of`]
+          PathExpression [7-13] [system]
+            Identifier(system) [7-13] [system]
+          Alias [14-21] [as `of`]
+            Identifier(`of`) [17-21] [`of`]
+        SelectColumn [23-44] [system_time as system]
+          PathExpression [23-34] [system_time]
+            Identifier(system_time) [23-34] [system_time]
+          Alias [35-44] [as system]
+            Identifier(system) [38-44] [system]
+      FromClause [45-214] [from (select...of @system)]
+        TableSubquery [50-214] [(select time...of @system)]
+          Query [51-213] [select time...of @system]
+            Select [51-213] [select time...of @system]
+              SelectList [58-120] [time '10:20...system_time]
+                SelectColumn [58-83] [time '10:20:30' as system]
+                  DateOrTimeLiteral(TYPE_TIME) [58-73] [time '10:20:30']
+                    StringLiteral [63-73] ['10:20:30']
+                      StringLiteralComponent('10:20:30') [63-73] ['10:20:30']
+                  Alias [74-83] [as system]
+                    Identifier(system) [77-83] [system]
+                SelectColumn [85-120] [cast(system...system_time]
+                  CastExpression [85-105] [cast(system as time)]
+                    PathExpression [90-96] [system]
+                      Identifier(system) [90-96] [system]
+                    SimpleType [100-104] [time]
+                      PathExpression [100-104] [time]
+                        Identifier(time) [100-104] [time]
+                  Alias [106-120] [as system_time]
+                    Identifier(system_time) [109-120] [system_time]
+              FromClause [127-213] [from system...of @system]
+                Join(CROSS) [132-213] [system.table...of @system]
+                  TablePathExpression [132-144] [system.table]
+                    PathExpression [132-144] [system.table]
+                      Identifier(system) [132-138] [system]
+                      Identifier(table) [139-144] [table]
+                  Location [145-155] [cross join]
+                  TablePathExpression [167-213] [important....of @system]
+                    PathExpression [167-183] [important.system]
+                      Identifier(important) [167-176] [important]
+                      Identifier(system) [177-183] [system]
+                    ForSystemTime [184-213] [for system time as of @system]
+                      ParameterExpr [206-213] [@system]
+                        Identifier(system) [207-213] [system]
+--
+SELECT
+  system AS `of`,
+  system_time AS system
+FROM
+  (
+    SELECT
+      TIME '10:20:30' AS system,
+      CAST(system AS time) AS system_time
+    FROM
+      system.table
+      CROSS JOIN
+      important.system FOR SYSTEM_TIME AS OF @system
+  )
+==
+
+# Test reserved keyword that also works as function name.
+select {{if|grouping|left|right|collate}}(x)
+--
+ALTERNATION GROUP: if
+--
+QueryStatement [0-12] [select if(x)]
+  Query [0-12] [select if(x)]
+    Select [0-12] [select if(x)]
+      SelectList [7-12] [if(x)]
+        SelectColumn [7-12] [if(x)]
+          FunctionCall [7-12] [if(x)]
+            PathExpression [7-9] [if]
+              Identifier(`if`) [7-9] [if]
+            PathExpression [10-11] [x]
+              Identifier(x) [10-11] [x]
+--
+SELECT
+  `if`(x)
+--
+ALTERNATION GROUP: grouping
+--
+QueryStatement [0-18] [select grouping(x)]
+  Query [0-18] [select grouping(x)]
+    Select [0-18] [select grouping(x)]
+      SelectList [7-18] [grouping(x)]
+        SelectColumn [7-18] [grouping(x)]
+          FunctionCall [7-18] [grouping(x)]
+            PathExpression [7-15] [grouping]
+              Identifier(`grouping`) [7-15] [grouping]
+            PathExpression [16-17] [x]
+              Identifier(x) [16-17] [x]
+--
+SELECT
+  `grouping`(x)
+--
+ALTERNATION GROUP: left
+--
+QueryStatement [0-14] [select left(x)]
+  Query [0-14] [select left(x)]
+    Select [0-14] [select left(x)]
+      SelectList [7-14] [left(x)]
+        SelectColumn [7-14] [left(x)]
+          FunctionCall [7-14] [left(x)]
+            PathExpression [7-11] [left]
+              Identifier(`left`) [7-11] [left]
+            PathExpression [12-13] [x]
+              Identifier(x) [12-13] [x]
+--
+SELECT
+  `left`(x)
+--
+ALTERNATION GROUP: right
+--
+QueryStatement [0-15] [select right(x)]
+  Query [0-15] [select right(x)]
+    Select [0-15] [select right(x)]
+      SelectList [7-15] [right(x)]
+        SelectColumn [7-15] [right(x)]
+          FunctionCall [7-15] [right(x)]
+            PathExpression [7-12] [right]
+              Identifier(`right`) [7-12] [right]
+            PathExpression [13-14] [x]
+              Identifier(x) [13-14] [x]
+--
+SELECT
+  `right`(x)
+--
+ALTERNATION GROUP: collate
+--
+QueryStatement [0-17] [select collate(x)]
+  Query [0-17] [select collate(x)]
+    Select [0-17] [select collate(x)]
+      SelectList [7-17] [collate(x)]
+        SelectColumn [7-17] [collate(x)]
+          FunctionCall [7-17] [collate(x)]
+            PathExpression [7-14] [collate]
+              Identifier(`collate`) [7-14] [collate]
+            PathExpression [15-16] [x]
+              Identifier(x) [15-16] [x]
+--
+SELECT
+  `collate`(x)
+==
+
+# Test reserved keyword that also works as function name.
+select `{{if|grouping|left|right|collate}}`(x, y, z)
+--
+ALTERNATION GROUP: if
+--
+QueryStatement [0-20] [select `if`(x, y, z)]
+  Query [0-20] [select `if`(x, y, z)]
+    Select [0-20] [select `if`(x, y, z)]
+      SelectList [7-20] [`if`(x, y, z)]
+        SelectColumn [7-20] [`if`(x, y, z)]
+          FunctionCall [7-20] [`if`(x, y, z)]
+            PathExpression [7-11] [`if`]
+              Identifier(`if`) [7-11] [`if`]
+            PathExpression [12-13] [x]
+              Identifier(x) [12-13] [x]
+            PathExpression [15-16] [y]
+              Identifier(y) [15-16] [y]
+            PathExpression [18-19] [z]
+              Identifier(z) [18-19] [z]
+--
+SELECT
+  `if`(x, y, z)
+--
+ALTERNATION GROUP: grouping
+--
+QueryStatement [0-26] [select `grouping`(x, y, z)]
+  Query [0-26] [select `grouping`(x, y, z)]
+    Select [0-26] [select `grouping`(x, y, z)]
+      SelectList [7-26] [`grouping`(x, y, z)]
+        SelectColumn [7-26] [`grouping`(x, y, z)]
+          FunctionCall [7-26] [`grouping`(x, y, z)]
+            PathExpression [7-17] [`grouping`]
+              Identifier(`grouping`) [7-17] [`grouping`]
+            PathExpression [18-19] [x]
+              Identifier(x) [18-19] [x]
+            PathExpression [21-22] [y]
+              Identifier(y) [21-22] [y]
+            PathExpression [24-25] [z]
+              Identifier(z) [24-25] [z]
+--
+SELECT
+  `grouping`(x, y, z)
+--
+ALTERNATION GROUP: left
+--
+QueryStatement [0-22] [select `left`(x, y, z)]
+  Query [0-22] [select `left`(x, y, z)]
+    Select [0-22] [select `left`(x, y, z)]
+      SelectList [7-22] [`left`(x, y, z)]
+        SelectColumn [7-22] [`left`(x, y, z)]
+          FunctionCall [7-22] [`left`(x, y, z)]
+            PathExpression [7-13] [`left`]
+              Identifier(`left`) [7-13] [`left`]
+            PathExpression [14-15] [x]
+              Identifier(x) [14-15] [x]
+            PathExpression [17-18] [y]
+              Identifier(y) [17-18] [y]
+            PathExpression [20-21] [z]
+              Identifier(z) [20-21] [z]
+--
+SELECT
+  `left`(x, y, z)
+--
+ALTERNATION GROUP: right
+--
+QueryStatement [0-23] [select `right`(x, y, z)]
+  Query [0-23] [select `right`(x, y, z)]
+    Select [0-23] [select `right`(x, y, z)]
+      SelectList [7-23] [`right`(x, y, z)]
+        SelectColumn [7-23] [`right`(x, y, z)]
+          FunctionCall [7-23] [`right`(x, y, z)]
+            PathExpression [7-14] [`right`]
+              Identifier(`right`) [7-14] [`right`]
+            PathExpression [15-16] [x]
+              Identifier(x) [15-16] [x]
+            PathExpression [18-19] [y]
+              Identifier(y) [18-19] [y]
+            PathExpression [21-22] [z]
+              Identifier(z) [21-22] [z]
+--
+SELECT
+  `right`(x, y, z)
+--
+ALTERNATION GROUP: collate
+--
+QueryStatement [0-25] [select `collate`(x, y, z)]
+  Query [0-25] [select `collate`(x, y, z)]
+    Select [0-25] [select `collate`(x, y, z)]
+      SelectList [7-25] [`collate`(x, y, z)]
+        SelectColumn [7-25] [`collate`(x, y, z)]
+          FunctionCall [7-25] [`collate`(x, y, z)]
+            PathExpression [7-16] [`collate`]
+              Identifier(`collate`) [7-16] [`collate`]
+            PathExpression [17-18] [x]
+              Identifier(x) [17-18] [x]
+            PathExpression [20-21] [y]
+              Identifier(y) [20-21] [y]
+            PathExpression [23-24] [z]
+              Identifier(z) [23-24] [z]
+--
+SELECT
+  `collate`(x, y, z)
+==
+
+# Test reserved keyword that also works as function name
+# in a chained function call.
+select
+  "abc".if(),
+  "abc".grouping(),
+  "abc".left(),
+  "abc".right(),
+  "abc".collate(),
+--
+QueryStatement [0-92] [select   "...collate(),]
+  Query [0-92] [select   "...collate(),]
+    Select [0-92] [select   "...collate(),]
+      SelectList [9-92] ["abc".if()...collate(),]
+        SelectColumn [9-19] ["abc".if()]
+          FunctionCall(is_chained_call=true) [9-19] ["abc".if()]
+            PathExpression [15-17] [if]
+              Identifier(`if`) [15-17] [if]
+            StringLiteral [9-14] ["abc"]
+              StringLiteralComponent("abc") [9-14] ["abc"]
+        SelectColumn [23-39] ["abc".grouping()]
+          FunctionCall(is_chained_call=true) [23-39] ["abc".grouping()]
+            PathExpression [29-37] [grouping]
+              Identifier(`grouping`) [29-37] [grouping]
+            StringLiteral [23-28] ["abc"]
+              StringLiteralComponent("abc") [23-28] ["abc"]
+        SelectColumn [43-55] ["abc".left()]
+          FunctionCall(is_chained_call=true) [43-55] ["abc".left()]
+            PathExpression [49-53] [left]
+              Identifier(`left`) [49-53] [left]
+            StringLiteral [43-48] ["abc"]
+              StringLiteralComponent("abc") [43-48] ["abc"]
+        SelectColumn [59-72] ["abc".right()]
+          FunctionCall(is_chained_call=true) [59-72] ["abc".right()]
+            PathExpression [65-70] [right]
+              Identifier(`right`) [65-70] [right]
+            StringLiteral [59-64] ["abc"]
+              StringLiteralComponent("abc") [59-64] ["abc"]
+        SelectColumn [76-91] ["abc".collate()]
+          FunctionCall(is_chained_call=true) [76-91] ["abc".collate()]
+            PathExpression [82-89] [collate]
+              Identifier(`collate`) [82-89] [collate]
+            StringLiteral [76-81] ["abc"]
+              StringLiteralComponent("abc") [76-81] ["abc"]
+--
+SELECT
+  "abc".`if`(),
+  "abc".`grouping`(),
+  "abc".`left`(),
+  "abc".`right`(),
+  "abc".`collate`()
+==
+
+# Test reserved keyword that also works as function name,
+# as a dot-identifier.
+select
+  "abc".if,
+  "abc".grouping,
+  "abc".left,
+  "abc".right,
+  "abc".collate,
+--
+QueryStatement [0-82] [select   "...".collate,]
+  Query [0-82] [select   "...".collate,]
+    Select [0-82] [select   "...".collate,]
+      SelectList [9-82] ["abc".if,...".collate,]
+        SelectColumn [9-17] ["abc".if]
+          DotIdentifier [9-17] ["abc".if]
+            StringLiteral [9-14] ["abc"]
+              StringLiteralComponent("abc") [9-14] ["abc"]
+            Identifier(`if`) [15-17] [if]
+        SelectColumn [21-35] ["abc".grouping]
+          DotIdentifier [21-35] ["abc".grouping]
+            StringLiteral [21-26] ["abc"]
+              StringLiteralComponent("abc") [21-26] ["abc"]
+            Identifier(`grouping`) [27-35] [grouping]
+        SelectColumn [39-49] ["abc".left]
+          DotIdentifier [39-49] ["abc".left]
+            StringLiteral [39-44] ["abc"]
+              StringLiteralComponent("abc") [39-44] ["abc"]
+            Identifier(`left`) [45-49] [left]
+        SelectColumn [53-64] ["abc".right]
+          DotIdentifier [53-64] ["abc".right]
+            StringLiteral [53-58] ["abc"]
+              StringLiteralComponent("abc") [53-58] ["abc"]
+            Identifier(`right`) [59-64] [right]
+        SelectColumn [68-81] ["abc".collate]
+          DotIdentifier [68-81] ["abc".collate]
+            StringLiteral [68-73] ["abc"]
+              StringLiteralComponent("abc") [68-73] ["abc"]
+            Identifier(`collate`) [74-81] [collate]
+--
+SELECT
+  "abc".`if`,
+  "abc".`grouping`,
+  "abc".`left`,
+  "abc".`right`,
+  "abc".`collate`
+==
+
+# Paths or function names cannot start with these reserved keywords.
+select {{if|grouping|left|right|collate}}{{|.x|.x()}}
+--
+ALTERNATION GROUP: if,
+--
+ERROR: Syntax error: Expected "(" but got end of statement [at 1:10]
+select if
+         ^
+--
+ALTERNATION GROUP: if,.x
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:10]
+select if.x
+         ^
+--
+ALTERNATION GROUP: if,.x()
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:10]
+select if.x()
+         ^
+--
+ALTERNATION GROUP: grouping,
+--
+ERROR: Syntax error: Expected "(" but got end of statement [at 1:16]
+select grouping
+               ^
+--
+ALTERNATION GROUP: grouping,.x
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:16]
+select grouping.x
+               ^
+--
+ALTERNATION GROUP: grouping,.x()
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:16]
+select grouping.x()
+               ^
+--
+ALTERNATION GROUP: left,
+--
+ERROR: Syntax error: Expected "(" but got end of statement [at 1:12]
+select left
+           ^
+--
+ALTERNATION GROUP: left,.x
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:12]
+select left.x
+           ^
+--
+ALTERNATION GROUP: left,.x()
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:12]
+select left.x()
+           ^
+--
+ALTERNATION GROUP: right,
+--
+ERROR: Syntax error: Expected "(" but got end of statement [at 1:13]
+select right
+            ^
+--
+ALTERNATION GROUP: right,.x
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:13]
+select right.x
+            ^
+--
+ALTERNATION GROUP: right,.x()
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:13]
+select right.x()
+            ^
+--
+ALTERNATION GROUP: collate,
+--
+ERROR: Syntax error: Expected "(" but got end of statement [at 1:15]
+select collate
+              ^
+--
+ALTERNATION GROUP: collate,.x
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:15]
+select collate.x
+              ^
+--
+ALTERNATION GROUP: collate,.x()
+--
+ERROR: Syntax error: Expected "(" but got "." [at 1:15]
+select collate.x()
+              ^
+==
+
+# REPLACE is allowed to be a keyword after INSERT
+INSERT {{foo|REPLACE foo|REPLACE|replace.foo|`replace`.foo|UPDATE foo|UPDATE|update.foo|`update`.foo}} VALUES(1, 2, 3)
+--
+ALTERNATION GROUP: foo
+--
+InsertStatement [0-26] [INSERT foo VALUES(1, 2, 3)]
+  PathExpression [7-10] [foo]
+    Identifier(foo) [7-10] [foo]
+  InsertValuesRowList [11-26] [VALUES(1, 2, 3)]
+    InsertValuesRow [17-26] [(1, 2, 3)]
+      IntLiteral(1) [18-19] [1]
+      IntLiteral(2) [21-22] [2]
+      IntLiteral(3) [24-25] [3]
+--
+INSERT INTO foo
+VALUES
+  (1, 2, 3)
+--
+ALTERNATION GROUP: REPLACE foo
+--
+InsertStatement(insert_mode=REPLACE) [0-34] [INSERT REPLACE...LUES(1, 2, 3)]
+  PathExpression [15-18] [foo]
+    Identifier(foo) [15-18] [foo]
+  InsertValuesRowList [19-34] [VALUES(1, 2, 3)]
+    InsertValuesRow [25-34] [(1, 2, 3)]
+      IntLiteral(1) [26-27] [1]
+      IntLiteral(2) [29-30] [2]
+      IntLiteral(3) [32-33] [3]
+--
+INSERT OR REPLACE INTO foo
+VALUES
+  (1, 2, 3)
+--
+ALTERNATION GROUP: REPLACE
+--
+ERROR: Syntax error: Unexpected integer literal "1" [at 1:23]
+INSERT REPLACE VALUES(1, 2, 3)
+                      ^
+--
+ALTERNATION GROUP: replace.foo
+--
+InsertStatement [0-34] [INSERT replace...LUES(1, 2, 3)]
+  PathExpression [7-18] [replace.foo]
+    Identifier(`replace`) [7-14] [replace]
+    Identifier(foo) [15-18] [foo]
+  InsertValuesRowList [19-34] [VALUES(1, 2, 3)]
+    InsertValuesRow [25-34] [(1, 2, 3)]
+      IntLiteral(1) [26-27] [1]
+      IntLiteral(2) [29-30] [2]
+      IntLiteral(3) [32-33] [3]
+--
+INSERT INTO `replace`.foo
+VALUES
+  (1, 2, 3)
+--
+ALTERNATION GROUP: `replace`.foo
+--
+InsertStatement [0-36] [INSERT `replace...UES(1, 2, 3)]
+  PathExpression [7-20] [`replace`.foo]
+    Identifier(`replace`) [7-16] [`replace`]
+    Identifier(foo) [17-20] [foo]
+  InsertValuesRowList [21-36] [VALUES(1, 2, 3)]
+    InsertValuesRow [27-36] [(1, 2, 3)]
+      IntLiteral(1) [28-29] [1]
+      IntLiteral(2) [31-32] [2]
+      IntLiteral(3) [34-35] [3]
+--
+INSERT INTO `replace`.foo
+VALUES
+  (1, 2, 3)
+--
+ALTERNATION GROUP: UPDATE foo
+--
+InsertStatement(insert_mode=UPDATE) [0-33] [INSERT UPDATE...ALUES(1, 2, 3)]
+  PathExpression [14-17] [foo]
+    Identifier(foo) [14-17] [foo]
+  InsertValuesRowList [18-33] [VALUES(1, 2, 3)]
+    InsertValuesRow [24-33] [(1, 2, 3)]
+      IntLiteral(1) [25-26] [1]
+      IntLiteral(2) [28-29] [2]
+      IntLiteral(3) [31-32] [3]
+--
+INSERT OR UPDATE INTO foo
+VALUES
+  (1, 2, 3)
+--
+ALTERNATION GROUP: UPDATE
+--
+ERROR: Syntax error: Unexpected integer literal "1" [at 1:22]
+INSERT UPDATE VALUES(1, 2, 3)
+                     ^
+--
+ALTERNATION GROUP: update.foo
+--
+InsertStatement [0-33] [INSERT update...ALUES(1, 2, 3)]
+  PathExpression [7-17] [update.foo]
+    Identifier(`update`) [7-13] [update]
+    Identifier(foo) [14-17] [foo]
+  InsertValuesRowList [18-33] [VALUES(1, 2, 3)]
+    InsertValuesRow [24-33] [(1, 2, 3)]
+      IntLiteral(1) [25-26] [1]
+      IntLiteral(2) [28-29] [2]
+      IntLiteral(3) [31-32] [3]
+--
+INSERT INTO `update`.foo
+VALUES
+  (1, 2, 3)
+--
+ALTERNATION GROUP: `update`.foo
+--
+InsertStatement [0-35] [INSERT `update...LUES(1, 2, 3)]
+  PathExpression [7-19] [`update`.foo]
+    Identifier(`update`) [7-15] [`update`]
+    Identifier(foo) [16-19] [foo]
+  InsertValuesRowList [20-35] [VALUES(1, 2, 3)]
+    InsertValuesRow [26-35] [(1, 2, 3)]
+      IntLiteral(1) [27-28] [1]
+      IntLiteral(2) [30-31] [2]
+      IntLiteral(3) [33-34] [3]
+--
+INSERT INTO `update`.foo
+VALUES
+  (1, 2, 3)
+==
+
+# The parser gets further than we think it ought to in this case.
+# The interpretation is INSERT [or] REPLACE [into] `VALUES` (...
+# and then we get an expected-column-name in the parens.
+# This is possible because VALUES is a nonreserved keyword.
+# There may also be an artefact of Bison's default-reduce semantics here.
+INSERT REPLACE VALUES(1, 2, 3)
+--
+ERROR: Syntax error: Unexpected integer literal "1" [at 1:23]
+INSERT REPLACE VALUES(1, 2, 3)
+                      ^
+==
+
+# This is related to the INSERT REPLACE VALUES(1) test.
+INSERT REPLACE SELECT 1
+--
+ERROR: Syntax error: Unexpected keyword SELECT [at 1:16]
+INSERT REPLACE SELECT 1
+               ^

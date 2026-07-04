@@ -1,0 +1,498 @@
+# The initial few test cases document the errors when oneof(WHERE, GROUP BY, HAVING)
+# is missing before QUALIFY. We require those to be present to make resolve parser
+# ambiguity in the short term. More details at (broken link)
+# Ideally the marker in error for T QUALIFY QUALIFY should be at the following
+# QUALIFY, but we are not able to correctly output that. This usage should be
+# rare so we can probably live with this mis-handling.
+[default no_qualify_reserved]
+[default language_features=NONE,+QUALIFY]
+select f1, f2 from {{T|T QUALIFY|T AS QUALIFY|T SOMETHING}}
+  QUALIFY row_number() OVER (PARTITION BY f2 ORDER BY f3) = 1
+--
+ALTERNATION GROUPS:
+    T
+    T AS QUALIFY
+    T SOMETHING
+--
+ERROR: QUALIFY clause must be used in conjunction with WHERE or GROUP BY or HAVING clause [at 2:3]
+  QUALIFY row_number() OVER (PARTITION BY f2 ORDER BY f3) = 1
+  ^
+
+--
+ALTERNATION GROUP: T QUALIFY
+--
+ERROR: QUALIFY clause must be used in conjunction with WHERE or GROUP BY or HAVING clause [at 1:22]
+select f1, f2 from T QUALIFY
+                     ^
+==
+
+# The following tests cases are using QUALIFY as an identifier, these are to
+# make sure that we are not err'ing out when used as identifier.
+select f1, f2 from T QUALIFY
+--
+QueryStatement [0-28] [select f1, f2 from T QUALIFY]
+  Query [0-28] [select f1, f2 from T QUALIFY]
+    Select [0-28] [select f1, f2 from T QUALIFY]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-28] [from T QUALIFY]
+        TablePathExpression [19-28] [T QUALIFY]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+          Alias [21-28] [QUALIFY]
+            Identifier(`QUALIFY`) [21-28] [QUALIFY]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T AS `QUALIFY`
+==
+
+select f1, f2 from T AS QUALIFY
+--
+QueryStatement [0-31] [select f1,...AS QUALIFY]
+  Query [0-31] [select f1,...AS QUALIFY]
+    Select [0-31] [select f1,...AS QUALIFY]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-31] [from T AS QUALIFY]
+        TablePathExpression [19-31] [T AS QUALIFY]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+          Alias [21-31] [AS QUALIFY]
+            Identifier(`QUALIFY`) [24-31] [QUALIFY]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T AS `QUALIFY`
+==
+
+select f1, f2 from T QUALIFY WHERE true
+--
+QueryStatement [0-39] [select f1,...WHERE true]
+  Query [0-39] [select f1,...WHERE true]
+    Select [0-39] [select f1,...WHERE true]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-28] [from T QUALIFY]
+        TablePathExpression [19-28] [T QUALIFY]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+          Alias [21-28] [QUALIFY]
+            Identifier(`QUALIFY`) [21-28] [QUALIFY]
+      WhereClause [29-39] [WHERE true]
+        BooleanLiteral(true) [35-39] [true]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T AS `QUALIFY`
+WHERE
+  true
+==
+
+select f1, f2 from T AS QUALIFY WHERE false
+--
+QueryStatement [0-43] [select f1,...WHERE false]
+  Query [0-43] [select f1,...WHERE false]
+    Select [0-43] [select f1,...WHERE false]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-31] [from T AS QUALIFY]
+        TablePathExpression [19-31] [T AS QUALIFY]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+          Alias [21-31] [AS QUALIFY]
+            Identifier(`QUALIFY`) [24-31] [QUALIFY]
+      WhereClause [32-43] [WHERE false]
+        BooleanLiteral(false) [38-43] [false]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T AS `QUALIFY`
+WHERE
+  false
+==
+
+# QUALIFY language option disabled when QUALIFY is used as a table alias
+[language_features=NONE]
+select f1, f2 from T QUALIFY
+--
+QueryStatement [0-28] [select f1, f2 from T QUALIFY]
+  Query [0-28] [select f1, f2 from T QUALIFY]
+    Select [0-28] [select f1, f2 from T QUALIFY]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-28] [from T QUALIFY]
+        TablePathExpression [19-28] [T QUALIFY]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+          Alias [21-28] [QUALIFY]
+            Identifier(`QUALIFY`) [21-28] [QUALIFY]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T AS `QUALIFY`
+==
+
+# QUALIFY language option disabled when QUALIFY is used as a clause
+[language_features=NONE]
+select f1, f2 from T WHERE true QUALIFY row_number() OVER (PARTITION BY f2 ORDER BY f3) = 1
+--
+ERROR: QUALIFY is not supported [at 1:33]
+select f1, f2 from T WHERE true QUALIFY row_number() OVER (PARTITION BY f2 OR...
+                                ^
+==
+
+select f1, f2 from T WHERE true QUALIFY row_number() OVER (PARTITION BY f2 ORDER BY f3) = 1
+--
+QueryStatement [0-91] [select f1,...BY f3) = 1]
+  Query [0-91] [select f1,...BY f3) = 1]
+    Select [0-91] [select f1,...BY f3) = 1]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-20] [from T]
+        TablePathExpression [19-20] [T]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+      WhereClause [21-31] [WHERE true]
+        BooleanLiteral(true) [27-31] [true]
+      Qualify [32-91] [QUALIFY row_numbe...BY f3) = 1]
+        BinaryExpression(=) [40-91] [row_number...BY f3) = 1]
+          AnalyticFunctionCall [40-87] [row_number...ORDER BY f3)]
+            FunctionCall [40-52] [row_number()]
+              PathExpression [40-50] [row_number]
+                Identifier(row_number) [40-50] [row_number]
+            WindowSpecification [58-87] [(PARTITION BY f2 ORDER BY f3)]
+              PartitionBy [59-74] [PARTITION BY f2]
+                PathExpression [72-74] [f2]
+                  Identifier(f2) [72-74] [f2]
+              OrderBy [75-86] [ORDER BY f3]
+                OrderingExpression(ASC) [84-86] [f3]
+                  PathExpression [84-86] [f3]
+                    Identifier(f3) [84-86] [f3]
+          IntLiteral(1) [90-91] [1]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T
+WHERE
+  true
+QUALIFY row_number() OVER (PARTITION BY f2
+  ORDER BY f3) = 1
+==
+
+select f1, f2 from T GROUP BY f1, f2 QUALIFY row_number() OVER (PARTITION BY f2 ORDER BY f3) = 1
+--
+QueryStatement [0-96] [select f1,...BY f3) = 1]
+  Query [0-96] [select f1,...BY f3) = 1]
+    Select [0-96] [select f1,...BY f3) = 1]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-20] [from T]
+        TablePathExpression [19-20] [T]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+      GroupBy [21-36] [GROUP BY f1, f2]
+        GroupingItem [30-32] [f1]
+          PathExpression [30-32] [f1]
+            Identifier(f1) [30-32] [f1]
+        GroupingItem [34-36] [f2]
+          PathExpression [34-36] [f2]
+            Identifier(f2) [34-36] [f2]
+      Qualify [37-96] [QUALIFY row_numbe...BY f3) = 1]
+        BinaryExpression(=) [45-96] [row_number...BY f3) = 1]
+          AnalyticFunctionCall [45-92] [row_number...ORDER BY f3)]
+            FunctionCall [45-57] [row_number()]
+              PathExpression [45-55] [row_number]
+                Identifier(row_number) [45-55] [row_number]
+            WindowSpecification [63-92] [(PARTITION BY f2 ORDER BY f3)]
+              PartitionBy [64-79] [PARTITION BY f2]
+                PathExpression [77-79] [f2]
+                  Identifier(f2) [77-79] [f2]
+              OrderBy [80-91] [ORDER BY f3]
+                OrderingExpression(ASC) [89-91] [f3]
+                  PathExpression [89-91] [f3]
+                    Identifier(f3) [89-91] [f3]
+          IntLiteral(1) [95-96] [1]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T
+GROUP BY f1, f2
+QUALIFY row_number() OVER (PARTITION BY f2
+  ORDER BY f3) = 1
+==
+
+select f1, f2 from T HAVING SUM(f1) < 3 QUALIFY row_number() OVER (PARTITION BY f2 ORDER BY f3) = 1
+--
+QueryStatement [0-99] [select f1,...BY f3) = 1]
+  Query [0-99] [select f1,...BY f3) = 1]
+    Select [0-99] [select f1,...BY f3) = 1]
+      SelectList [7-13] [f1, f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+      FromClause [14-20] [from T]
+        TablePathExpression [19-20] [T]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+      Having [21-39] [HAVING SUM(f1) < 3]
+        BinaryExpression(<) [28-39] [SUM(f1) < 3]
+          FunctionCall [28-35] [SUM(f1)]
+            PathExpression [28-31] [SUM]
+              Identifier(SUM) [28-31] [SUM]
+            PathExpression [32-34] [f1]
+              Identifier(f1) [32-34] [f1]
+          IntLiteral(3) [38-39] [3]
+      Qualify [40-99] [QUALIFY row_numbe...BY f3) = 1]
+        BinaryExpression(=) [48-99] [row_number...BY f3) = 1]
+          AnalyticFunctionCall [48-95] [row_number...ORDER BY f3)]
+            FunctionCall [48-60] [row_number()]
+              PathExpression [48-58] [row_number]
+                Identifier(row_number) [48-58] [row_number]
+            WindowSpecification [66-95] [(PARTITION BY f2 ORDER BY f3)]
+              PartitionBy [67-82] [PARTITION BY f2]
+                PathExpression [80-82] [f2]
+                  Identifier(f2) [80-82] [f2]
+              OrderBy [83-94] [ORDER BY f3]
+                OrderingExpression(ASC) [92-94] [f3]
+                  PathExpression [92-94] [f3]
+                    Identifier(f3) [92-94] [f3]
+          IntLiteral(1) [98-99] [1]
+--
+SELECT
+  f1,
+  f2
+FROM
+  T
+HAVING SUM(f1) < 3
+QUALIFY row_number() OVER (PARTITION BY f2
+  ORDER BY f3) = 1
+==
+
+select f1, f2, f3, row_number() OVER (PARTITION BY f2 ORDER BY f3) as row_num from T WHERE true QUALIFY row_num = 1
+--
+QueryStatement [0-115] [select f1,...row_num = 1]
+  Query [0-115] [select f1,...row_num = 1]
+    Select [0-115] [select f1,...row_num = 1]
+      SelectList [7-77] [f1, f2, f3...as row_num]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-13] [f2]
+          PathExpression [11-13] [f2]
+            Identifier(f2) [11-13] [f2]
+        SelectColumn [15-17] [f3]
+          PathExpression [15-17] [f3]
+            Identifier(f3) [15-17] [f3]
+        SelectColumn [19-77] [row_number...as row_num]
+          AnalyticFunctionCall [19-66] [row_number...ORDER BY f3)]
+            FunctionCall [19-31] [row_number()]
+              PathExpression [19-29] [row_number]
+                Identifier(row_number) [19-29] [row_number]
+            WindowSpecification [37-66] [(PARTITION BY f2 ORDER BY f3)]
+              PartitionBy [38-53] [PARTITION BY f2]
+                PathExpression [51-53] [f2]
+                  Identifier(f2) [51-53] [f2]
+              OrderBy [54-65] [ORDER BY f3]
+                OrderingExpression(ASC) [63-65] [f3]
+                  PathExpression [63-65] [f3]
+                    Identifier(f3) [63-65] [f3]
+          Alias [67-77] [as row_num]
+            Identifier(row_num) [70-77] [row_num]
+      FromClause [78-84] [from T]
+        TablePathExpression [83-84] [T]
+          PathExpression [83-84] [T]
+            Identifier(T) [83-84] [T]
+      WhereClause [85-95] [WHERE true]
+        BooleanLiteral(true) [91-95] [true]
+      Qualify [96-115] [QUALIFY row_num = 1]
+        BinaryExpression(=) [104-115] [row_num = 1]
+          PathExpression [104-111] [row_num]
+            Identifier(row_num) [104-111] [row_num]
+          IntLiteral(1) [114-115] [1]
+--
+SELECT
+  f1,
+  f2,
+  f3,
+  row_number() OVER (PARTITION BY f2
+    ORDER BY f3) AS row_num
+FROM
+  T
+WHERE
+  true
+QUALIFY row_num = 1
+==
+
+select f1, sum(f2) over (partition by f1) as sum_f2
+  from T
+  where f2 < 4
+  group by f1, f2
+  having sum(f3) > 3
+  qualify sum_f2 in (
+    select min(f1)
+      from test
+      group by f1
+      having min(f3) > 3);
+--
+QueryStatement [0-215] [select f1,...min(f3) > 3)]
+  Query [0-215] [select f1,...min(f3) > 3)]
+    Select [0-215] [select f1,...min(f3) > 3)]
+      SelectList [7-51] [f1, sum(f2...as sum_f2]
+        SelectColumn [7-9] [f1]
+          PathExpression [7-9] [f1]
+            Identifier(f1) [7-9] [f1]
+        SelectColumn [11-51] [sum(f2) over...as sum_f2]
+          AnalyticFunctionCall [11-41] [sum(f2) over (partition by f1)]
+            FunctionCall [11-18] [sum(f2)]
+              PathExpression [11-14] [sum]
+                Identifier(sum) [11-14] [sum]
+              PathExpression [15-17] [f2]
+                Identifier(f2) [15-17] [f2]
+            WindowSpecification [24-41] [(partition by f1)]
+              PartitionBy [25-40] [partition by f1]
+                PathExpression [38-40] [f1]
+                  Identifier(f1) [38-40] [f1]
+          Alias [42-51] [as sum_f2]
+            Identifier(sum_f2) [45-51] [sum_f2]
+      FromClause [54-60] [from T]
+        TablePathExpression [59-60] [T]
+          PathExpression [59-60] [T]
+            Identifier(T) [59-60] [T]
+      WhereClause [63-75] [where f2 < 4]
+        BinaryExpression(<) [69-75] [f2 < 4]
+          PathExpression [69-71] [f2]
+            Identifier(f2) [69-71] [f2]
+          IntLiteral(4) [74-75] [4]
+      GroupBy [78-93] [group by f1, f2]
+        GroupingItem [87-89] [f1]
+          PathExpression [87-89] [f1]
+            Identifier(f1) [87-89] [f1]
+        GroupingItem [91-93] [f2]
+          PathExpression [91-93] [f2]
+            Identifier(f2) [91-93] [f2]
+      Having [96-114] [having sum(f3) > 3]
+        BinaryExpression(>) [103-114] [sum(f3) > 3]
+          FunctionCall [103-110] [sum(f3)]
+            PathExpression [103-106] [sum]
+              Identifier(sum) [103-106] [sum]
+            PathExpression [107-109] [f3]
+              Identifier(f3) [107-109] [f3]
+          IntLiteral(3) [113-114] [3]
+      Qualify [117-215] [qualify sum_f2...min(f3) > 3)]
+        InExpression(IN) [125-215] [sum_f2 in...min(f3) > 3)]
+          PathExpression [125-131] [sum_f2]
+            Identifier(sum_f2) [125-131] [sum_f2]
+          Location [132-134] [in]
+          Query [141-214] [select min...min(f3) > 3]
+            Select [141-214] [select min...min(f3) > 3]
+              SelectList [148-155] [min(f1)]
+                SelectColumn [148-155] [min(f1)]
+                  FunctionCall [148-155] [min(f1)]
+                    PathExpression [148-151] [min]
+                      Identifier(min) [148-151] [min]
+                    PathExpression [152-154] [f1]
+                      Identifier(f1) [152-154] [f1]
+              FromClause [162-171] [from test]
+                TablePathExpression [167-171] [test]
+                  PathExpression [167-171] [test]
+                    Identifier(test) [167-171] [test]
+              GroupBy [178-189] [group by f1]
+                GroupingItem [187-189] [f1]
+                  PathExpression [187-189] [f1]
+                    Identifier(f1) [187-189] [f1]
+              Having [196-214] [having min(f3) > 3]
+                BinaryExpression(>) [203-214] [min(f3) > 3]
+                  FunctionCall [203-210] [min(f3)]
+                    PathExpression [203-206] [min]
+                      Identifier(min) [203-206] [min]
+                    PathExpression [207-209] [f3]
+                      Identifier(f3) [207-209] [f3]
+                  IntLiteral(3) [213-214] [3]
+--
+SELECT
+  f1,
+  sum(f2) OVER (PARTITION BY f1) AS sum_f2
+FROM
+  T
+WHERE
+  f2 < 4
+GROUP BY f1, f2
+HAVING sum(f3) > 3
+QUALIFY sum_f2 IN (
+  SELECT
+    min(f1)
+  FROM
+    test
+  GROUP BY f1
+  HAVING min(f3) > 3
+)
+==
+
+[language_features=NONE]
+SELECT * FROM t qualify PIVOT(x+x+x+x FOR y IN (3,4))
+--
+ERROR: Syntax error: Expected ")" but got keyword FOR [at 1:39]
+SELECT * FROM t qualify PIVOT(x+x+x+x FOR y IN (3,4))
+                                      ^
+==
+
+[language_features=NONE]
+SELECT * FROM t qualify PIVOT(x+x+x+x)
+--
+ERROR: QUALIFY is not supported [at 1:17]
+SELECT * FROM t qualify PIVOT(x+x+x+x)
+                ^
+

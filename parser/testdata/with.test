@@ -1,0 +1,1312 @@
+WITH a as (select 1)
+select * from a;
+--
+QueryStatement [0-36] [WITH a as...select * from a]
+  Query [0-36] [WITH a as...select * from a]
+    WithClause [0-20] [WITH a as (select 1)]
+      WithClauseEntry [5-20] [a as (select 1)]
+        AliasedQuery [5-20] [a as (select 1)]
+          Identifier(a) [5-6] [a]
+          Query [10-20] [(select 1)]
+            Select [11-19] [select 1]
+              SelectList [18-19] [1]
+                SelectColumn [18-19] [1]
+                  IntLiteral(1) [18-19] [1]
+    Select [21-36] [select * from a]
+      SelectList [28-29] [*]
+        SelectColumn [28-29] [*]
+          Star(*) [28-29] [*]
+      FromClause [30-36] [from a]
+        TablePathExpression [35-36] [a]
+          PathExpression [35-36] [a]
+            Identifier(a) [35-36] [a]
+--
+WITH
+  a AS (
+    SELECT
+      1
+  )
+SELECT
+  *
+FROM
+  a
+==
+
+with a as (select 1),
+     b as (select * from a)
+select * from b
+--
+QueryStatement [0-65] [with a as...select * from b]
+  Query [0-65] [with a as...select * from b]
+    WithClause [0-49] [with a as...* from a)]
+      WithClauseEntry [5-20] [a as (select 1)]
+        AliasedQuery [5-20] [a as (select 1)]
+          Identifier(a) [5-6] [a]
+          Query [10-20] [(select 1)]
+            Select [11-19] [select 1]
+              SelectList [18-19] [1]
+                SelectColumn [18-19] [1]
+                  IntLiteral(1) [18-19] [1]
+      WithClauseEntry [27-49] [b as (select * from a)]
+        AliasedQuery [27-49] [b as (select * from a)]
+          Identifier(b) [27-28] [b]
+          Query [32-49] [(select * from a)]
+            Select [33-48] [select * from a]
+              SelectList [40-41] [*]
+                SelectColumn [40-41] [*]
+                  Star(*) [40-41] [*]
+              FromClause [42-48] [from a]
+                TablePathExpression [47-48] [a]
+                  PathExpression [47-48] [a]
+                    Identifier(a) [47-48] [a]
+    Select [50-65] [select * from b]
+      SelectList [57-58] [*]
+        SelectColumn [57-58] [*]
+          Star(*) [57-58] [*]
+      FromClause [59-65] [from b]
+        TablePathExpression [64-65] [b]
+          PathExpression [64-65] [b]
+            Identifier(b) [64-65] [b]
+--
+WITH
+  a AS (
+    SELECT
+      1
+  ),
+  b AS (
+    SELECT
+      *
+    FROM
+      a
+  )
+SELECT
+  *
+FROM
+  b
+==
+
+with a as (select 1 as a),
+     b as (select a as b from a),
+     c as (select b as c from b)
+select *
+from b join c on (c.c = b.b)
+--
+QueryStatement [0-131] [with a as...c.c = b.b)]
+  Query [0-131] [with a as...c.c = b.b)]
+    WithClause [0-93] [with a as...c from b)]
+      WithClauseEntry [5-25] [a as (select 1 as a)]
+        AliasedQuery [5-25] [a as (select 1 as a)]
+          Identifier(a) [5-6] [a]
+          Query [10-25] [(select 1 as a)]
+            Select [11-24] [select 1 as a]
+              SelectList [18-24] [1 as a]
+                SelectColumn [18-24] [1 as a]
+                  IntLiteral(1) [18-19] [1]
+                  Alias [20-24] [as a]
+                    Identifier(a) [23-24] [a]
+      WithClauseEntry [32-59] [b as (select a as b from a)]
+        AliasedQuery [32-59] [b as (select a as b from a)]
+          Identifier(b) [32-33] [b]
+          Query [37-59] [(select a as b from a)]
+            Select [38-58] [select a as b from a]
+              SelectList [45-51] [a as b]
+                SelectColumn [45-51] [a as b]
+                  PathExpression [45-46] [a]
+                    Identifier(a) [45-46] [a]
+                  Alias [47-51] [as b]
+                    Identifier(b) [50-51] [b]
+              FromClause [52-58] [from a]
+                TablePathExpression [57-58] [a]
+                  PathExpression [57-58] [a]
+                    Identifier(a) [57-58] [a]
+      WithClauseEntry [66-93] [c as (select b as c from b)]
+        AliasedQuery [66-93] [c as (select b as c from b)]
+          Identifier(c) [66-67] [c]
+          Query [71-93] [(select b as c from b)]
+            Select [72-92] [select b as c from b]
+              SelectList [79-85] [b as c]
+                SelectColumn [79-85] [b as c]
+                  PathExpression [79-80] [b]
+                    Identifier(b) [79-80] [b]
+                  Alias [81-85] [as c]
+                    Identifier(c) [84-85] [c]
+              FromClause [86-92] [from b]
+                TablePathExpression [91-92] [b]
+                  PathExpression [91-92] [b]
+                    Identifier(b) [91-92] [b]
+    Select [94-131] [select * from...c.c = b.b)]
+      SelectList [101-102] [*]
+        SelectColumn [101-102] [*]
+          Star(*) [101-102] [*]
+      FromClause [103-131] [from b join c on (c.c = b.b)]
+        Join [108-131] [b join c on (c.c = b.b)]
+          TablePathExpression [108-109] [b]
+            PathExpression [108-109] [b]
+              Identifier(b) [108-109] [b]
+          Location [110-114] [join]
+          TablePathExpression [115-116] [c]
+            PathExpression [115-116] [c]
+              Identifier(c) [115-116] [c]
+          OnClause [117-131] [on (c.c = b.b)]
+            BinaryExpression(=) [121-130] [c.c = b.b]
+              PathExpression [121-124] [c.c]
+                Identifier(c) [121-122] [c]
+                Identifier(c) [123-124] [c]
+              PathExpression [127-130] [b.b]
+                Identifier(b) [127-128] [b]
+                Identifier(b) [129-130] [b]
+--
+WITH
+  a AS (
+    SELECT
+      1 AS a
+  ),
+  b AS (
+    SELECT
+      a AS b
+    FROM
+      a
+  ),
+  c AS (
+    SELECT
+      b AS c
+    FROM
+      b
+  )
+SELECT
+  *
+FROM
+  b
+  JOIN
+  c
+  ON (c.c = b.b)
+==
+
+# Forgot a comma.
+with a as (select 1 as a),
+     b as (select a as b from a)
+     c as (select b as c from b)
+select *
+from b join c on (c.c = b.b)
+--
+ERROR: Syntax error: Unexpected identifier "c" [at 3:6]
+     c as (select b as c from b)
+     ^
+==
+
+# Missing parens around the WITH clause select is an error.
+WITH a as select 1
+select * from a;
+--
+ERROR: Syntax error: Expected "(" but got keyword SELECT [at 1:11]
+WITH a as select 1
+          ^
+==
+
+# No query after the WITH.
+WITH a as (select 1)
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:21]
+WITH a as (select 1)
+                    ^
+==
+
+# A comma at the end of the WITH clause is an error.
+WITH a as (select 1),
+select * from a;
+--
+ERROR: Syntax error: Trailing comma after the WITH clause before the main query is not allowed [at 2:1]
+select * from a;
+^
+==
+
+# Same as above, but with multiple WITH tables.
+WITH a as (select 1),
+     b as (select 2),
+select * from a;
+--
+ERROR: Syntax error: Trailing comma after the WITH clause before the main query is not allowed [at 3:1]
+select * from a;
+^
+==
+
+# Same as above, but with expression subquery.
+SELECT (WITH a as (SELECT 1 as a), SELECT a.a FROM a);
+--
+ERROR: Syntax error: Trailing comma after the WITH clause before the main query is not allowed [at 1:36]
+SELECT (WITH a as (SELECT 1 as a), SELECT a.a FROM a);
+                                   ^
+==
+
+# Same as above, but with table subquery.
+SELECT * FROM (WITH a as (SELECT 1 as a), SELECT a.a FROM a);
+--
+ERROR: Syntax error: Trailing comma after the WITH clause before the main query is not allowed [at 1:43]
+SELECT * FROM (WITH a as (SELECT 1 as a), SELECT a.a FROM a);
+                                          ^
+==
+
+# This error message is somewhat misleading, since if we add SELECT
+# here the query will still be invalid due to the trailing comma
+# after the WITH clause.
+WITH a AS (SELECT 1),
+--
+ERROR: Syntax error: Expected keyword SELECT but got end of statement [at 1:22]
+WITH a AS (SELECT 1),
+                     ^
+==
+
+not_WITH a as (select 1)
+select * from a;
+--
+ERROR: Syntax error: Unexpected identifier "not_WITH" [at 1:1]
+not_WITH a as (select 1)
+^
+==
+
+# WITH in table subquery.
+select * from (
+  WITH a as (select 1)
+  select * from a);
+--
+QueryStatement [0-57] [select * from...* from a)]
+  Query [0-57] [select * from...* from a)]
+    Select [0-57] [select * from...* from a)]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-57] [from (   WITH...* from a)]
+        TableSubquery [14-57] [(   WITH a...* from a)]
+          Query [18-56] [WITH a as...select * from a]
+            WithClause [18-38] [WITH a as (select 1)]
+              WithClauseEntry [23-38] [a as (select 1)]
+                AliasedQuery [23-38] [a as (select 1)]
+                  Identifier(a) [23-24] [a]
+                  Query [28-38] [(select 1)]
+                    Select [29-37] [select 1]
+                      SelectList [36-37] [1]
+                        SelectColumn [36-37] [1]
+                          IntLiteral(1) [36-37] [1]
+            Select [41-56] [select * from a]
+              SelectList [48-49] [*]
+                SelectColumn [48-49] [*]
+                  Star(*) [48-49] [*]
+              FromClause [50-56] [from a]
+                TablePathExpression [55-56] [a]
+                  PathExpression [55-56] [a]
+                    Identifier(a) [55-56] [a]
+--
+SELECT
+  *
+FROM
+  (WITH
+      a AS (
+        SELECT
+          1
+      )
+    SELECT
+      *
+    FROM
+      a
+  )
+==
+
+# WITH in expression subquery.
+select (select 1), (with a as (select 2) select 3)
+--
+QueryStatement [0-50] [select (select...select 3)]
+  Query [0-50] [select (select...select 3)]
+    Select [0-50] [select (select...select 3)]
+      SelectList [7-50] [(select 1)...select 3)]
+        SelectColumn [7-17] [(select 1)]
+          ExpressionSubquery [7-17] [(select 1)]
+            Query [8-16] [select 1]
+              Select [8-16] [select 1]
+                SelectList [15-16] [1]
+                  SelectColumn [15-16] [1]
+                    IntLiteral(1) [15-16] [1]
+        SelectColumn [19-50] [(with a as...select 3)]
+          ExpressionSubquery [19-50] [(with a as...select 3)]
+            Query [20-49] [with a as (select 2) select 3]
+              WithClause [20-40] [with a as (select 2)]
+                WithClauseEntry [25-40] [a as (select 2)]
+                  AliasedQuery [25-40] [a as (select 2)]
+                    Identifier(a) [25-26] [a]
+                    Query [30-40] [(select 2)]
+                      Select [31-39] [select 2]
+                        SelectList [38-39] [2]
+                          SelectColumn [38-39] [2]
+                            IntLiteral(2) [38-39] [2]
+              Select [41-49] [select 3]
+                SelectList [48-49] [3]
+                  SelectColumn [48-49] [3]
+                    IntLiteral(3) [48-49] [3]
+--
+SELECT
+  (
+    SELECT
+      1
+  ),
+  (WITH
+      a AS (
+        SELECT
+          2
+      )
+    SELECT
+      3
+  )
+==
+
+# WITH in expression subquery.
+select (select 1), (select 2)
+from foo
+where exists(with x as (select 3) select * from x)
+--
+QueryStatement [0-89] [select (select...* from x)]
+  Query [0-89] [select (select...* from x)]
+    Select [0-89] [select (select...* from x)]
+      SelectList [7-29] [(select 1), (select 2)]
+        SelectColumn [7-17] [(select 1)]
+          ExpressionSubquery [7-17] [(select 1)]
+            Query [8-16] [select 1]
+              Select [8-16] [select 1]
+                SelectList [15-16] [1]
+                  SelectColumn [15-16] [1]
+                    IntLiteral(1) [15-16] [1]
+        SelectColumn [19-29] [(select 2)]
+          ExpressionSubquery [19-29] [(select 2)]
+            Query [20-28] [select 2]
+              Select [20-28] [select 2]
+                SelectList [27-28] [2]
+                  SelectColumn [27-28] [2]
+                    IntLiteral(2) [27-28] [2]
+      FromClause [30-38] [from foo]
+        TablePathExpression [35-38] [foo]
+          PathExpression [35-38] [foo]
+            Identifier(foo) [35-38] [foo]
+      WhereClause [39-89] [where exists...* from x)]
+        ExpressionSubquery(modifier=EXISTS) [45-89] [exists(with...* from x)]
+          Query [52-88] [with x as...select * from x]
+            WithClause [52-72] [with x as (select 3)]
+              WithClauseEntry [57-72] [x as (select 3)]
+                AliasedQuery [57-72] [x as (select 3)]
+                  Identifier(x) [57-58] [x]
+                  Query [62-72] [(select 3)]
+                    Select [63-71] [select 3]
+                      SelectList [70-71] [3]
+                        SelectColumn [70-71] [3]
+                          IntLiteral(3) [70-71] [3]
+            Select [73-88] [select * from x]
+              SelectList [80-81] [*]
+                SelectColumn [80-81] [*]
+                  Star(*) [80-81] [*]
+              FromClause [82-88] [from x]
+                TablePathExpression [87-88] [x]
+                  PathExpression [87-88] [x]
+                    Identifier(x) [87-88] [x]
+--
+SELECT
+  (
+    SELECT
+      1
+  ),
+  (
+    SELECT
+      2
+  )
+FROM
+  foo
+WHERE
+  EXISTS(WITH
+      x AS (
+        SELECT
+          3
+      )
+    SELECT
+      *
+    FROM
+      x
+  )
+==
+
+# WITH in expression subquery.
+select 5 = (with x as (select 3) select * from x)
+--
+QueryStatement [0-49] [select 5 =...* from x)]
+  Query [0-49] [select 5 =...* from x)]
+    Select [0-49] [select 5 =...* from x)]
+      SelectList [7-49] [5 = (with...* from x)]
+        SelectColumn [7-49] [5 = (with...* from x)]
+          BinaryExpression(=) [7-49] [5 = (with...* from x)]
+            IntLiteral(5) [7-8] [5]
+            ExpressionSubquery [11-49] [(with x as...* from x)]
+              Query [12-48] [with x as...select * from x]
+                WithClause [12-32] [with x as (select 3)]
+                  WithClauseEntry [17-32] [x as (select 3)]
+                    AliasedQuery [17-32] [x as (select 3)]
+                      Identifier(x) [17-18] [x]
+                      Query [22-32] [(select 3)]
+                        Select [23-31] [select 3]
+                          SelectList [30-31] [3]
+                            SelectColumn [30-31] [3]
+                              IntLiteral(3) [30-31] [3]
+                Select [33-48] [select * from x]
+                  SelectList [40-41] [*]
+                    SelectColumn [40-41] [*]
+                      Star(*) [40-41] [*]
+                  FromClause [42-48] [from x]
+                    TablePathExpression [47-48] [x]
+                      PathExpression [47-48] [x]
+                        Identifier(x) [47-48] [x]
+--
+SELECT
+  5 = (WITH
+      x AS (
+        SELECT
+          3
+      )
+    SELECT
+      *
+    FROM
+      x
+  )
+==
+
+# WITH RECURSIVE (single entry)
+WITH recursive a as (select * from a)
+select * from a;
+--
+QueryStatement [0-53] [WITH recursive...lect * from a]
+  Query [0-53] [WITH recursive...lect * from a]
+    WithClause (recursive) [0-37] [WITH recursive...* from a)]
+      WithClauseEntry [15-37] [a as (select * from a)]
+        AliasedQuery [15-37] [a as (select * from a)]
+          Identifier(a) [15-16] [a]
+          Query [20-37] [(select * from a)]
+            Select [21-36] [select * from a]
+              SelectList [28-29] [*]
+                SelectColumn [28-29] [*]
+                  Star(*) [28-29] [*]
+              FromClause [30-36] [from a]
+                TablePathExpression [35-36] [a]
+                  PathExpression [35-36] [a]
+                    Identifier(a) [35-36] [a]
+    Select [38-53] [select * from a]
+      SelectList [45-46] [*]
+        SelectColumn [45-46] [*]
+          Star(*) [45-46] [*]
+      FromClause [47-53] [from a]
+        TablePathExpression [52-53] [a]
+          PathExpression [52-53] [a]
+            Identifier(a) [52-53] [a]
+--
+WITH RECURSIVE
+  a AS (
+    SELECT
+      *
+    FROM
+      a
+  )
+SELECT
+  *
+FROM
+  a
+==
+
+# WITH RECURSIVE (multiple entries)
+WITH RECURSIVE
+  a AS (SELECT * FROM a),
+  b AS (SELECT * FROM b)
+select * from a, b;
+--
+QueryStatement [0-84] [WITH RECURSIVE...from a, b]
+  Query [0-84] [WITH RECURSIVE...from a, b]
+    WithClause (recursive) [0-65] [WITH RECURSIVE...* FROM b)]
+      WithClauseEntry [17-39] [a AS (SELECT * FROM a)]
+        AliasedQuery [17-39] [a AS (SELECT * FROM a)]
+          Identifier(a) [17-18] [a]
+          Query [22-39] [(SELECT * FROM a)]
+            Select [23-38] [SELECT * FROM a]
+              SelectList [30-31] [*]
+                SelectColumn [30-31] [*]
+                  Star(*) [30-31] [*]
+              FromClause [32-38] [FROM a]
+                TablePathExpression [37-38] [a]
+                  PathExpression [37-38] [a]
+                    Identifier(a) [37-38] [a]
+      WithClauseEntry [43-65] [b AS (SELECT * FROM b)]
+        AliasedQuery [43-65] [b AS (SELECT * FROM b)]
+          Identifier(b) [43-44] [b]
+          Query [48-65] [(SELECT * FROM b)]
+            Select [49-64] [SELECT * FROM b]
+              SelectList [56-57] [*]
+                SelectColumn [56-57] [*]
+                  Star(*) [56-57] [*]
+              FromClause [58-64] [FROM b]
+                TablePathExpression [63-64] [b]
+                  PathExpression [63-64] [b]
+                    Identifier(b) [63-64] [b]
+    Select [66-84] [select * from a, b]
+      SelectList [73-74] [*]
+        SelectColumn [73-74] [*]
+          Star(*) [73-74] [*]
+      FromClause [75-84] [from a, b]
+        Join(COMMA) [80-84] [a, b]
+          TablePathExpression [80-81] [a]
+            PathExpression [80-81] [a]
+              Identifier(a) [80-81] [a]
+          Location [81-82] [,]
+          TablePathExpression [83-84] [b]
+            PathExpression [83-84] [b]
+              Identifier(b) [83-84] [b]
+--
+WITH RECURSIVE
+  a AS (
+    SELECT
+      *
+    FROM
+      a
+  ),
+  b AS (
+    SELECT
+      *
+    FROM
+      b
+  )
+SELECT
+  *
+FROM
+  a,
+  b
+==
+
+# WITH RECURSIVE (trailing comma)
+WITH RECURSIVE
+  a AS (SELECT * FROM a),
+  b AS (SELECT * FROM b),
+select * from a, b;
+--
+ERROR: Syntax error: Trailing comma after the WITH clause before the main query is not allowed [at 4:1]
+select * from a, b;
+^
+==
+
+# Similar in structure to recursive query, but not using the recursive
+# keyword.
+WITH not_recursive a as (select * from a)
+select * from a;
+--
+ERROR: Syntax error: Expected "(" or keyword AS but got identifier "a" [at 1:20]
+WITH not_recursive a as (select * from a)
+                   ^
+==
+
+# WITH mixed with UNION ALL.
+WITH q1 AS (select 5 UNION ALL select 6)
+select * from q1
+UNION ALL
+select * from q1
+--
+QueryStatement [0-84] [WITH q1 AS...* from q1]
+  Query [0-84] [WITH q1 AS...* from q1]
+    WithClause [0-40] [WITH q1 AS...select 6)]
+      WithClauseEntry [5-40] [q1 AS (select...select 6)]
+        AliasedQuery [5-40] [q1 AS (select...select 6)]
+          Identifier(q1) [5-7] [q1]
+          Query [11-40] [(select 5 UNION ALL select 6)]
+            SetOperation(UNION ALL) [12-39] [select 5 UNION ALL select 6]
+              SetOperationMetadataList [21-30] [UNION ALL]
+                SetOperationMetadata [21-30] [UNION ALL]
+                  SetOperationType [21-26] [UNION]
+                  SetOperationAllOrDistinct [27-30] [ALL]
+              Select [12-20] [select 5]
+                SelectList [19-20] [5]
+                  SelectColumn [19-20] [5]
+                    IntLiteral(5) [19-20] [5]
+              Select [31-39] [select 6]
+                SelectList [38-39] [6]
+                  SelectColumn [38-39] [6]
+                    IntLiteral(6) [38-39] [6]
+    SetOperation(UNION ALL) [41-84] [select * from...* from q1]
+      SetOperationMetadataList [58-67] [UNION ALL]
+        SetOperationMetadata [58-67] [UNION ALL]
+          SetOperationType [58-63] [UNION]
+          SetOperationAllOrDistinct [64-67] [ALL]
+      Select [41-57] [select * from q1]
+        SelectList [48-49] [*]
+          SelectColumn [48-49] [*]
+            Star(*) [48-49] [*]
+        FromClause [50-57] [from q1]
+          TablePathExpression [55-57] [q1]
+            PathExpression [55-57] [q1]
+              Identifier(q1) [55-57] [q1]
+      Select [68-84] [select * from q1]
+        SelectList [75-76] [*]
+          SelectColumn [75-76] [*]
+            Star(*) [75-76] [*]
+        FromClause [77-84] [from q1]
+          TablePathExpression [82-84] [q1]
+            PathExpression [82-84] [q1]
+              Identifier(q1) [82-84] [q1]
+--
+WITH
+  q1 AS (
+    SELECT
+      5
+    UNION ALL
+    SELECT
+      6
+  )
+SELECT
+  *
+FROM
+  q1
+UNION ALL
+SELECT
+  *
+FROM
+  q1
+==
+
+# No WITH inside the elements of a UNION ALL.
+select * from q1
+UNION ALL
+WITH q1 as (select * from q3) select * from q1
+--
+ERROR: Syntax error: Expected "(" or keyword SELECT or keyword TABLE but got keyword WITH [at 3:1]
+WITH q1 as (select * from q3) select * from q1
+^
+==
+
+# WITH inside the elements of a UNION ALL; allowed with parentheses.
+select * from q1
+UNION ALL
+(WITH q1 as (select * from q3) select * from q1)
+--
+QueryStatement [0-75] [select * from...* from q1)]
+  Query [0-75] [select * from...* from q1)]
+    SetOperation(UNION ALL) [0-75] [select * from...* from q1)]
+      SetOperationMetadataList [17-26] [UNION ALL]
+        SetOperationMetadata [17-26] [UNION ALL]
+          SetOperationType [17-22] [UNION]
+          SetOperationAllOrDistinct [23-26] [ALL]
+      Select [0-16] [select * from q1]
+        SelectList [7-8] [*]
+          SelectColumn [7-8] [*]
+            Star(*) [7-8] [*]
+        FromClause [9-16] [from q1]
+          TablePathExpression [14-16] [q1]
+            PathExpression [14-16] [q1]
+              Identifier(q1) [14-16] [q1]
+      Query [28-74] [WITH q1 as...* from q1]
+        WithClause [28-57] [WITH q1 as (select * from q3)]
+          WithClauseEntry [33-57] [q1 as (select * from q3)]
+            AliasedQuery [33-57] [q1 as (select * from q3)]
+              Identifier(q1) [33-35] [q1]
+              Query [39-57] [(select * from q3)]
+                Select [40-56] [select * from q3]
+                  SelectList [47-48] [*]
+                    SelectColumn [47-48] [*]
+                      Star(*) [47-48] [*]
+                  FromClause [49-56] [from q3]
+                    TablePathExpression [54-56] [q3]
+                      PathExpression [54-56] [q3]
+                        Identifier(q3) [54-56] [q3]
+        Select [58-74] [select * from q1]
+          SelectList [65-66] [*]
+            SelectColumn [65-66] [*]
+              Star(*) [65-66] [*]
+          FromClause [67-74] [from q1]
+            TablePathExpression [72-74] [q1]
+              PathExpression [72-74] [q1]
+                Identifier(q1) [72-74] [q1]
+--
+SELECT
+  *
+FROM
+  q1
+UNION ALL(WITH
+  q1 AS (
+    SELECT
+      *
+    FROM
+      q3
+  )
+SELECT
+  *
+FROM
+  q1
+)
+==
+
+# WITH allowed inside WITH.
+with q1 as (with q2 as (select 5) select * from q2) select * from q1
+--
+QueryStatement [0-68] [with q1 as...* from q1]
+  Query [0-68] [with q1 as...* from q1]
+    WithClause [0-51] [with q1 as...* from q2)]
+      WithClauseEntry [5-51] [q1 as (with...* from q2)]
+        AliasedQuery [5-51] [q1 as (with...* from q2)]
+          Identifier(q1) [5-7] [q1]
+          Query [11-51] [(with q2 as...* from q2)]
+            WithClause [12-33] [with q2 as (select 5)]
+              WithClauseEntry [17-33] [q2 as (select 5)]
+                AliasedQuery [17-33] [q2 as (select 5)]
+                  Identifier(q2) [17-19] [q2]
+                  Query [23-33] [(select 5)]
+                    Select [24-32] [select 5]
+                      SelectList [31-32] [5]
+                        SelectColumn [31-32] [5]
+                          IntLiteral(5) [31-32] [5]
+            Select [34-50] [select * from q2]
+              SelectList [41-42] [*]
+                SelectColumn [41-42] [*]
+                  Star(*) [41-42] [*]
+              FromClause [43-50] [from q2]
+                TablePathExpression [48-50] [q2]
+                  PathExpression [48-50] [q2]
+                    Identifier(q2) [48-50] [q2]
+    Select [52-68] [select * from q1]
+      SelectList [59-60] [*]
+        SelectColumn [59-60] [*]
+          Star(*) [59-60] [*]
+      FromClause [61-68] [from q1]
+        TablePathExpression [66-68] [q1]
+          PathExpression [66-68] [q1]
+            Identifier(q1) [66-68] [q1]
+--
+WITH
+  q1 AS (
+    WITH
+      q2 AS (
+        SELECT
+          5
+      )
+    SELECT
+      *
+    FROM
+      q2
+  )
+SELECT
+  *
+FROM
+  q1
+==
+
+# WITH allowed in subqueries.
+# NOTE: This case used to crash without the STOP_ON_FIRST_ERROR option,
+# but that is no longer relevant now that this parses successfully.
+select 1
+from foo
+where 5 = (with x as (select 3) select * from x)
+--
+QueryStatement [0-66] [select 1 from...* from x)]
+  Query [0-66] [select 1 from...* from x)]
+    Select [0-66] [select 1 from...* from x)]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+      FromClause [9-17] [from foo]
+        TablePathExpression [14-17] [foo]
+          PathExpression [14-17] [foo]
+            Identifier(foo) [14-17] [foo]
+      WhereClause [18-66] [where 5 =...* from x)]
+        BinaryExpression(=) [24-66] [5 = (with...* from x)]
+          IntLiteral(5) [24-25] [5]
+          ExpressionSubquery [28-66] [(with x as...* from x)]
+            Query [29-65] [with x as...select * from x]
+              WithClause [29-49] [with x as (select 3)]
+                WithClauseEntry [34-49] [x as (select 3)]
+                  AliasedQuery [34-49] [x as (select 3)]
+                    Identifier(x) [34-35] [x]
+                    Query [39-49] [(select 3)]
+                      Select [40-48] [select 3]
+                        SelectList [47-48] [3]
+                          SelectColumn [47-48] [3]
+                            IntLiteral(3) [47-48] [3]
+              Select [50-65] [select * from x]
+                SelectList [57-58] [*]
+                  SelectColumn [57-58] [*]
+                    Star(*) [57-58] [*]
+                FromClause [59-65] [from x]
+                  TablePathExpression [64-65] [x]
+                    PathExpression [64-65] [x]
+                      Identifier(x) [64-65] [x]
+--
+SELECT
+  1
+FROM
+  foo
+WHERE
+  5 = (WITH
+      x AS (
+        SELECT
+          3
+      )
+    SELECT
+      *
+    FROM
+      x
+  )
+==
+
+# Query starting with "(With" (b/70510110)
+( WITH d AS ( SELECT 1 as x ) SELECT d.x as y FROM d )
+--
+QueryStatement [0-54] [( WITH d AS...y FROM d )]
+  Query [2-52] [WITH d AS...as y FROM d]
+    WithClause [2-29] [WITH d AS ( SELECT 1 as x )]
+      WithClauseEntry [7-29] [d AS ( SELECT 1 as x )]
+        AliasedQuery [7-29] [d AS ( SELECT 1 as x )]
+          Identifier(d) [7-8] [d]
+          Query [12-29] [( SELECT 1 as x )]
+            Select [14-27] [SELECT 1 as x]
+              SelectList [21-27] [1 as x]
+                SelectColumn [21-27] [1 as x]
+                  IntLiteral(1) [21-22] [1]
+                  Alias [23-27] [as x]
+                    Identifier(x) [26-27] [x]
+    Select [30-52] [SELECT d.x as y FROM d]
+      SelectList [37-45] [d.x as y]
+        SelectColumn [37-45] [d.x as y]
+          PathExpression [37-40] [d.x]
+            Identifier(d) [37-38] [d]
+            Identifier(x) [39-40] [x]
+          Alias [41-45] [as y]
+            Identifier(y) [44-45] [y]
+      FromClause [46-52] [FROM d]
+        TablePathExpression [51-52] [d]
+          PathExpression [51-52] [d]
+            Identifier(d) [51-52] [d]
+--
+(WITH
+  d AS (
+    SELECT
+      1 AS x
+  )
+SELECT
+  d.x AS y
+FROM
+  d
+)
+==
+
+# The query following WITH cannot have WITH.
+WITH q1 as (select 1 x)
+WITH q2 as (select 2 y)
+select * from q2
+--
+ERROR: Syntax error: Expected keyword DEPTH but got identifier "q2" [at 2:6]
+WITH q2 as (select 2 y)
+     ^
+
+==
+
+# NOTE: even when the AS alias is unspecified, there would be column with
+# default `depth` alias visible, just like UNNEST() WITH OFFSET with no alias.
+with recursive test AS (
+  select 1 as n
+  union all
+  select n+1
+  from test
+) with depth {{|as depth}} {{|max 10|between ? and @p|between 'a' and 'b'}}
+select n from test
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-111] [with recursive...from test]
+  Query [0-111] [with recursive...from test]
+    WithClause (recursive) [0-90] [with recursive...with depth]
+      WithClauseEntry [15-90] [test AS (...with depth]
+        AliasedQuery [15-90] [test AS (...with depth]
+          Identifier(test) [15-19] [test]
+          Query [23-79] [(   select...from test )]
+            SetOperation(UNION ALL) [27-77] [select 1 as...from test]
+              SetOperationMetadataList [43-52] [union all]
+                SetOperationMetadata [43-52] [union all]
+                  SetOperationType [43-48] [union]
+                  SetOperationAllOrDistinct [49-52] [all]
+              Select [27-40] [select 1 as n]
+                SelectList [34-40] [1 as n]
+                  SelectColumn [34-40] [1 as n]
+                    IntLiteral(1) [34-35] [1]
+                    Alias [36-40] [as n]
+                      Identifier(n) [39-40] [n]
+              Select [55-77] [select n+1   from test]
+                SelectList [62-65] [n+1]
+                  SelectColumn [62-65] [n+1]
+                    BinaryExpression(+) [62-65] [n+1]
+                      PathExpression [62-63] [n]
+                        Identifier(n) [62-63] [n]
+                      IntLiteral(1) [64-65] [1]
+                FromClause [68-77] [from test]
+                  TablePathExpression [73-77] [test]
+                    PathExpression [73-77] [test]
+                      Identifier(test) [73-77] [test]
+          AliasedQueryModifiers [80-90] [with depth]
+            RecursionDepthModifier [80-90] [with depth]
+              IntOrUnbounded [90-90] []
+              IntOrUnbounded [90-90] []
+    Select [93-111] [select n from test]
+      SelectList [100-101] [n]
+        SelectColumn [100-101] [n]
+          PathExpression [100-101] [n]
+            Identifier(n) [100-101] [n]
+      FromClause [102-111] [from test]
+        TablePathExpression [107-111] [test]
+          PathExpression [107-111] [test]
+            Identifier(test) [107-111] [test]
+--
+WITH RECURSIVE
+  test AS (
+    SELECT
+      1 AS n
+    UNION ALL
+    SELECT
+      n + 1
+    FROM
+      test
+  ) WITH DEPTH BETWEEN UNBOUNDED AND UNBOUNDED
+SELECT
+  n
+FROM
+  test
+--
+ALTERNATION GROUP: max 10
+--
+QueryStatement [0-117] [with recursive...from test]
+  Query [0-117] [with recursive...from test]
+    WithClause (recursive) [0-98] [with recursive...depth  max 10]
+      WithClauseEntry [15-98] [test AS (...depth  max 10]
+        AliasedQuery [15-98] [test AS (...depth  max 10]
+          Identifier(test) [15-19] [test]
+          Query [23-79] [(   select...from test )]
+            SetOperation(UNION ALL) [27-77] [select 1 as...from test]
+              SetOperationMetadataList [43-52] [union all]
+                SetOperationMetadata [43-52] [union all]
+                  SetOperationType [43-48] [union]
+                  SetOperationAllOrDistinct [49-52] [all]
+              Select [27-40] [select 1 as n]
+                SelectList [34-40] [1 as n]
+                  SelectColumn [34-40] [1 as n]
+                    IntLiteral(1) [34-35] [1]
+                    Alias [36-40] [as n]
+                      Identifier(n) [39-40] [n]
+              Select [55-77] [select n+1   from test]
+                SelectList [62-65] [n+1]
+                  SelectColumn [62-65] [n+1]
+                    BinaryExpression(+) [62-65] [n+1]
+                      PathExpression [62-63] [n]
+                        Identifier(n) [62-63] [n]
+                      IntLiteral(1) [64-65] [1]
+                FromClause [68-77] [from test]
+                  TablePathExpression [73-77] [test]
+                    PathExpression [73-77] [test]
+                      Identifier(test) [73-77] [test]
+          AliasedQueryModifiers [80-98] [with depth  max 10]
+            RecursionDepthModifier [80-98] [with depth  max 10]
+              IntOrUnbounded [90-90] []
+              IntOrUnbounded [96-98] [10]
+                IntLiteral(10) [96-98] [10]
+    Select [99-117] [select n from test]
+      SelectList [106-107] [n]
+        SelectColumn [106-107] [n]
+          PathExpression [106-107] [n]
+            Identifier(n) [106-107] [n]
+      FromClause [108-117] [from test]
+        TablePathExpression [113-117] [test]
+          PathExpression [113-117] [test]
+            Identifier(test) [113-117] [test]
+--
+WITH RECURSIVE
+  test AS (
+    SELECT
+      1 AS n
+    UNION ALL
+    SELECT
+      n + 1
+    FROM
+      test
+  ) WITH DEPTH BETWEEN UNBOUNDED AND 10
+SELECT
+  n
+FROM
+  test
+--
+ALTERNATION GROUP: between ? and @p
+--
+QueryStatement [0-127] [with recursive...from test]
+  Query [0-127] [with recursive...from test]
+    WithClause (recursive) [0-108] [with recursive...ween ? and @p]
+      WithClauseEntry [15-108] [test AS (...between ? and @p]
+        AliasedQuery [15-108] [test AS (...between ? and @p]
+          Identifier(test) [15-19] [test]
+          Query [23-79] [(   select...from test )]
+            SetOperation(UNION ALL) [27-77] [select 1 as...from test]
+              SetOperationMetadataList [43-52] [union all]
+                SetOperationMetadata [43-52] [union all]
+                  SetOperationType [43-48] [union]
+                  SetOperationAllOrDistinct [49-52] [all]
+              Select [27-40] [select 1 as n]
+                SelectList [34-40] [1 as n]
+                  SelectColumn [34-40] [1 as n]
+                    IntLiteral(1) [34-35] [1]
+                    Alias [36-40] [as n]
+                      Identifier(n) [39-40] [n]
+              Select [55-77] [select n+1   from test]
+                SelectList [62-65] [n+1]
+                  SelectColumn [62-65] [n+1]
+                    BinaryExpression(+) [62-65] [n+1]
+                      PathExpression [62-63] [n]
+                        Identifier(n) [62-63] [n]
+                      IntLiteral(1) [64-65] [1]
+                FromClause [68-77] [from test]
+                  TablePathExpression [73-77] [test]
+                    PathExpression [73-77] [test]
+                      Identifier(test) [73-77] [test]
+          AliasedQueryModifiers [80-108] [with depth  between ? and @p]
+            RecursionDepthModifier [80-108] [with depth  between ? and @p]
+              IntOrUnbounded [100-101] [?]
+                ParameterExpr(1) [100-101] [?]
+              IntOrUnbounded [106-108] [@p]
+                ParameterExpr [106-108] [@p]
+                  Identifier(p) [107-108] [p]
+    Select [109-127] [select n from test]
+      SelectList [116-117] [n]
+        SelectColumn [116-117] [n]
+          PathExpression [116-117] [n]
+            Identifier(n) [116-117] [n]
+      FromClause [118-127] [from test]
+        TablePathExpression [123-127] [test]
+          PathExpression [123-127] [test]
+            Identifier(test) [123-127] [test]
+--
+WITH RECURSIVE
+  test AS (
+    SELECT
+      1 AS n
+    UNION ALL
+    SELECT
+      n + 1
+    FROM
+      test
+  ) WITH DEPTH BETWEEN ? AND @p
+SELECT
+  n
+FROM
+  test
+--
+ALTERNATION GROUP: between 'a' and 'b'
+--
+ERROR: Syntax error: Unexpected string literal 'a' [at 6:23]
+) with depth  between 'a' and 'b'
+                      ^
+--
+ALTERNATION GROUP: as depth,
+--
+QueryStatement [0-119] [with recursive...from test]
+  Query [0-119] [with recursive...from test]
+    WithClause (recursive) [0-99] [with recursive...epth as depth]
+      WithClauseEntry [15-99] [test AS (...depth as depth]
+        AliasedQuery [15-99] [test AS (...depth as depth]
+          Identifier(test) [15-19] [test]
+          Query [23-79] [(   select...from test )]
+            SetOperation(UNION ALL) [27-77] [select 1 as...from test]
+              SetOperationMetadataList [43-52] [union all]
+                SetOperationMetadata [43-52] [union all]
+                  SetOperationType [43-48] [union]
+                  SetOperationAllOrDistinct [49-52] [all]
+              Select [27-40] [select 1 as n]
+                SelectList [34-40] [1 as n]
+                  SelectColumn [34-40] [1 as n]
+                    IntLiteral(1) [34-35] [1]
+                    Alias [36-40] [as n]
+                      Identifier(n) [39-40] [n]
+              Select [55-77] [select n+1   from test]
+                SelectList [62-65] [n+1]
+                  SelectColumn [62-65] [n+1]
+                    BinaryExpression(+) [62-65] [n+1]
+                      PathExpression [62-63] [n]
+                        Identifier(n) [62-63] [n]
+                      IntLiteral(1) [64-65] [1]
+                FromClause [68-77] [from test]
+                  TablePathExpression [73-77] [test]
+                    PathExpression [73-77] [test]
+                      Identifier(test) [73-77] [test]
+          AliasedQueryModifiers [80-99] [with depth as depth]
+            RecursionDepthModifier [80-99] [with depth as depth]
+              Alias [91-99] [as depth]
+                Identifier(depth) [94-99] [depth]
+              IntOrUnbounded [99-99] []
+              IntOrUnbounded [99-99] []
+    Select [101-119] [select n from test]
+      SelectList [108-109] [n]
+        SelectColumn [108-109] [n]
+          PathExpression [108-109] [n]
+            Identifier(n) [108-109] [n]
+      FromClause [110-119] [from test]
+        TablePathExpression [115-119] [test]
+          PathExpression [115-119] [test]
+            Identifier(test) [115-119] [test]
+--
+WITH RECURSIVE
+  test AS (
+    SELECT
+      1 AS n
+    UNION ALL
+    SELECT
+      n + 1
+    FROM
+      test
+  ) WITH DEPTH AS depth BETWEEN UNBOUNDED AND UNBOUNDED
+SELECT
+  n
+FROM
+  test
+--
+ALTERNATION GROUP: as depth,max 10
+--
+QueryStatement [0-125] [with recursive...from test]
+  Query [0-125] [with recursive...from test]
+    WithClause (recursive) [0-106] [with recursive...depth max 10]
+      WithClauseEntry [15-106] [test AS (...depth max 10]
+        AliasedQuery [15-106] [test AS (...depth max 10]
+          Identifier(test) [15-19] [test]
+          Query [23-79] [(   select...from test )]
+            SetOperation(UNION ALL) [27-77] [select 1 as...from test]
+              SetOperationMetadataList [43-52] [union all]
+                SetOperationMetadata [43-52] [union all]
+                  SetOperationType [43-48] [union]
+                  SetOperationAllOrDistinct [49-52] [all]
+              Select [27-40] [select 1 as n]
+                SelectList [34-40] [1 as n]
+                  SelectColumn [34-40] [1 as n]
+                    IntLiteral(1) [34-35] [1]
+                    Alias [36-40] [as n]
+                      Identifier(n) [39-40] [n]
+              Select [55-77] [select n+1   from test]
+                SelectList [62-65] [n+1]
+                  SelectColumn [62-65] [n+1]
+                    BinaryExpression(+) [62-65] [n+1]
+                      PathExpression [62-63] [n]
+                        Identifier(n) [62-63] [n]
+                      IntLiteral(1) [64-65] [1]
+                FromClause [68-77] [from test]
+                  TablePathExpression [73-77] [test]
+                    PathExpression [73-77] [test]
+                      Identifier(test) [73-77] [test]
+          AliasedQueryModifiers [80-106] [with depth as depth max 10]
+            RecursionDepthModifier [80-106] [with depth as depth max 10]
+              Alias [91-99] [as depth]
+                Identifier(depth) [94-99] [depth]
+              IntOrUnbounded [99-99] []
+              IntOrUnbounded [104-106] [10]
+                IntLiteral(10) [104-106] [10]
+    Select [107-125] [select n from test]
+      SelectList [114-115] [n]
+        SelectColumn [114-115] [n]
+          PathExpression [114-115] [n]
+            Identifier(n) [114-115] [n]
+      FromClause [116-125] [from test]
+        TablePathExpression [121-125] [test]
+          PathExpression [121-125] [test]
+            Identifier(test) [121-125] [test]
+--
+WITH RECURSIVE
+  test AS (
+    SELECT
+      1 AS n
+    UNION ALL
+    SELECT
+      n + 1
+    FROM
+      test
+  ) WITH DEPTH AS depth BETWEEN UNBOUNDED AND 10
+SELECT
+  n
+FROM
+  test
+--
+ALTERNATION GROUP: as depth,between ? and @p
+
+--
+QueryStatement [0-135] [with recursive...from test]
+  Query [0-135] [with recursive...from test]
+    WithClause (recursive) [0-116] [with recursive...ween ? and @p]
+      WithClauseEntry [15-116] [test AS (...between ? and @p]
+        AliasedQuery [15-116] [test AS (...between ? and @p]
+          Identifier(test) [15-19] [test]
+          Query [23-79] [(   select...from test )]
+            SetOperation(UNION ALL) [27-77] [select 1 as...from test]
+              SetOperationMetadataList [43-52] [union all]
+                SetOperationMetadata [43-52] [union all]
+                  SetOperationType [43-48] [union]
+                  SetOperationAllOrDistinct [49-52] [all]
+              Select [27-40] [select 1 as n]
+                SelectList [34-40] [1 as n]
+                  SelectColumn [34-40] [1 as n]
+                    IntLiteral(1) [34-35] [1]
+                    Alias [36-40] [as n]
+                      Identifier(n) [39-40] [n]
+              Select [55-77] [select n+1   from test]
+                SelectList [62-65] [n+1]
+                  SelectColumn [62-65] [n+1]
+                    BinaryExpression(+) [62-65] [n+1]
+                      PathExpression [62-63] [n]
+                        Identifier(n) [62-63] [n]
+                      IntLiteral(1) [64-65] [1]
+                FromClause [68-77] [from test]
+                  TablePathExpression [73-77] [test]
+                    PathExpression [73-77] [test]
+                      Identifier(test) [73-77] [test]
+          AliasedQueryModifiers [80-116] [with depth...between ? and @p]
+            RecursionDepthModifier [80-116] [with depth...between ? and @p]
+              Alias [91-99] [as depth]
+                Identifier(depth) [94-99] [depth]
+              IntOrUnbounded [108-109] [?]
+                ParameterExpr(1) [108-109] [?]
+              IntOrUnbounded [114-116] [@p]
+                ParameterExpr [114-116] [@p]
+                  Identifier(p) [115-116] [p]
+    Select [117-135] [select n from test]
+      SelectList [124-125] [n]
+        SelectColumn [124-125] [n]
+          PathExpression [124-125] [n]
+            Identifier(n) [124-125] [n]
+      FromClause [126-135] [from test]
+        TablePathExpression [131-135] [test]
+          PathExpression [131-135] [test]
+            Identifier(test) [131-135] [test]
+--
+WITH RECURSIVE
+  test AS (
+    SELECT
+      1 AS n
+    UNION ALL
+    SELECT
+      n + 1
+    FROM
+      test
+  ) WITH DEPTH AS depth BETWEEN ? AND @p
+SELECT
+  n
+FROM
+  test
+--
+ALTERNATION GROUP: as depth,between 'a' and 'b'
+--
+ERROR: Syntax error: Unexpected string literal 'a' [at 6:31]
+) with depth as depth between 'a' and 'b'
+                              ^
+==
+
+# Graph queries in WITH statements aren't supported.
+WITH t1 AS (
+  GRAPH aml
+  RETURN 1 as one
+)
+SELECT * FROM t1
+--
+ERROR: Syntax error: Unexpected keyword GRAPH [at 2:3]
+  GRAPH aml
+  ^

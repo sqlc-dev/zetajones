@@ -1,0 +1,313 @@
+export data as select 1;
+--
+ExportDataStatement [0-23] [export data as select 1]
+  Query [15-23] [select 1]
+    Select [15-23] [select 1]
+      SelectList [22-23] [1]
+        SelectColumn [22-23] [1]
+          IntLiteral(1) [22-23] [1]
+--
+EXPORT DATA AS
+SELECT
+  1
+==
+
+export data options() as select 1;
+--
+ExportDataStatement [0-33] [export data...as select 1]
+  OptionsList [19-21] [()]
+  Query [25-33] [select 1]
+    Select [25-33] [select 1]
+      SelectList [32-33] [1]
+        SelectColumn [32-33] [1]
+          IntLiteral(1) [32-33] [1]
+--
+EXPORT DATA OPTIONS() AS
+SELECT
+  1
+==
+
+# External table can't have a name.
+export data with_name as select 1;
+--
+ERROR: Syntax error: Expected keyword AS but got identifier "with_name" [at 1:13]
+export data with_name as select 1;
+            ^
+==
+
+# with must be combined with connection only
+export data with as select 1;
+--
+ERROR: Syntax error: Expected keyword CONNECTION but got keyword AS [at 1:18]
+export data with as select 1;
+                 ^
+==
+
+export data with connection as select 1;
+--
+ERROR: Syntax error: Unexpected keyword AS [at 1:29]
+export data with connection as select 1;
+                            ^
+==
+
+export data with connection default options(x=5) as select 1;
+--
+ExportDataStatement [0-60] [export data...as select 1]
+  WithConnectionClause [12-35] [with connection default]
+    ConnectionClause [17-35] [connection default]
+      DefaultLiteral [28-35] [default]
+  OptionsList [43-48] [(x=5)]
+    OptionsEntry [44-47] [x=5]
+      Identifier(x) [44-45] [x]
+      IntLiteral(5) [46-47] [5]
+  Query [52-60] [select 1]
+    Select [52-60] [select 1]
+      SelectList [59-60] [1]
+        SelectColumn [59-60] [1]
+          IntLiteral(1) [59-60] [1]
+--
+EXPORT DATA WITH CONNECTION DEFAULT OPTIONS(x = 5) AS
+SELECT
+  1
+==
+
+
+export data with connection connection_id options(x=5) as select 1;
+--
+ExportDataStatement [0-66] [export data...as select 1]
+  WithConnectionClause [12-41] [with connection connection_id]
+    ConnectionClause [17-41] [connection connection_id]
+      PathExpression [28-41] [connection_id]
+        Identifier(connection_id) [28-41] [connection_id]
+  OptionsList [49-54] [(x=5)]
+    OptionsEntry [50-53] [x=5]
+      Identifier(x) [50-51] [x]
+      IntLiteral(5) [52-53] [5]
+  Query [58-66] [select 1]
+    Select [58-66] [select 1]
+      SelectList [65-66] [1]
+        SelectColumn [65-66] [1]
+          IntLiteral(1) [65-66] [1]
+--
+EXPORT DATA WITH CONNECTION connection_id OPTIONS(x = 5) AS
+SELECT
+  1
+==
+
+export data with connection connection options(x=5) as select 1;
+--
+ExportDataStatement [0-63] [export data...as select 1]
+  WithConnectionClause [12-38] [with connection connection]
+    ConnectionClause [17-38] [connection connection]
+      PathExpression [28-38] [connection]
+        Identifier(connection) [28-38] [connection]
+  OptionsList [46-51] [(x=5)]
+    OptionsEntry [47-50] [x=5]
+      Identifier(x) [47-48] [x]
+      IntLiteral(5) [49-50] [5]
+  Query [55-63] [select 1]
+    Select [55-63] [select 1]
+      SelectList [62-63] [1]
+        SelectColumn [62-63] [1]
+          IntLiteral(1) [62-63] [1]
+--
+EXPORT DATA WITH CONNECTION connection OPTIONS(x = 5) AS
+SELECT
+  1
+==
+
+export data with connection a.b.c options(x=5) as select 1;
+--
+ExportDataStatement [0-58] [export data...as select 1]
+  WithConnectionClause [12-33] [with connection a.b.c]
+    ConnectionClause [17-33] [connection a.b.c]
+      PathExpression [28-33] [a.b.c]
+        Identifier(a) [28-29] [a]
+        Identifier(b) [30-31] [b]
+        Identifier(c) [32-33] [c]
+  OptionsList [41-46] [(x=5)]
+    OptionsEntry [42-45] [x=5]
+      Identifier(x) [42-43] [x]
+      IntLiteral(5) [44-45] [5]
+  Query [50-58] [select 1]
+    Select [50-58] [select 1]
+      SelectList [57-58] [1]
+        SelectColumn [57-58] [1]
+          IntLiteral(1) [57-58] [1]
+--
+EXPORT DATA WITH CONNECTION a.b.c OPTIONS(x = 5) AS
+SELECT
+  1
+==
+
+export data options (x=5) as select 1;
+--
+ExportDataStatement [0-37] [export data...as select 1]
+  OptionsList [20-25] [(x=5)]
+    OptionsEntry [21-24] [x=5]
+      Identifier(x) [21-22] [x]
+      IntLiteral(5) [23-24] [5]
+  Query [29-37] [select 1]
+    Select [29-37] [select 1]
+      SelectList [36-37] [1]
+        SelectColumn [36-37] [1]
+          IntLiteral(1) [36-37] [1]
+--
+EXPORT DATA OPTIONS(x = 5) AS
+SELECT
+  1
+==
+
+export data options(a=b, c='d') as (select 1)
+--
+ExportDataStatement [0-45] [export data...(select 1)]
+  OptionsList [19-31] [(a=b, c='d')]
+    OptionsEntry [20-23] [a=b]
+      Identifier(a) [20-21] [a]
+      PathExpression [22-23] [b]
+        Identifier(b) [22-23] [b]
+    OptionsEntry [25-30] [c='d']
+      Identifier(c) [25-26] [c]
+      StringLiteral [27-30] ['d']
+        StringLiteralComponent('d') [27-30] ['d']
+  Query [36-44] [select 1]
+    Select [36-44] [select 1]
+      SelectList [43-44] [1]
+        SelectColumn [43-44] [1]
+          IntLiteral(1) [43-44] [1]
+--
+EXPORT DATA OPTIONS(a = b, c = 'd') AS
+(
+SELECT
+  1
+)
+==
+
+export data options (a=b, c=d) as
+with q as (select 1), q2 as (select * from q)
+select * from q2
+--
+ExportDataStatement [0-96] [export data...* from q2]
+  OptionsList [20-30] [(a=b, c=d)]
+    OptionsEntry [21-24] [a=b]
+      Identifier(a) [21-22] [a]
+      PathExpression [23-24] [b]
+        Identifier(b) [23-24] [b]
+    OptionsEntry [26-29] [c=d]
+      Identifier(c) [26-27] [c]
+      PathExpression [28-29] [d]
+        Identifier(d) [28-29] [d]
+  Query [34-96] [with q as...* from q2]
+    WithClause [34-79] [with q as...* from q)]
+      WithClauseEntry [39-54] [q as (select 1)]
+        AliasedQuery [39-54] [q as (select 1)]
+          Identifier(q) [39-40] [q]
+          Query [44-54] [(select 1)]
+            Select [45-53] [select 1]
+              SelectList [52-53] [1]
+                SelectColumn [52-53] [1]
+                  IntLiteral(1) [52-53] [1]
+      WithClauseEntry [56-79] [q2 as (select * from q)]
+        AliasedQuery [56-79] [q2 as (select * from q)]
+          Identifier(q2) [56-58] [q2]
+          Query [62-79] [(select * from q)]
+            Select [63-78] [select * from q]
+              SelectList [70-71] [*]
+                SelectColumn [70-71] [*]
+                  Star(*) [70-71] [*]
+              FromClause [72-78] [from q]
+                TablePathExpression [77-78] [q]
+                  PathExpression [77-78] [q]
+                    Identifier(q) [77-78] [q]
+    Select [80-96] [select * from q2]
+      SelectList [87-88] [*]
+        SelectColumn [87-88] [*]
+          Star(*) [87-88] [*]
+      FromClause [89-96] [from q2]
+        TablePathExpression [94-96] [q2]
+          PathExpression [94-96] [q2]
+            Identifier(q2) [94-96] [q2]
+--
+EXPORT DATA OPTIONS(a = b, c = d) AS
+WITH
+  q AS (
+    SELECT
+      1
+  ),
+  q2 AS (
+    SELECT
+      *
+    FROM
+      q
+  )
+SELECT
+  *
+FROM
+  q2
+==
+
+# EXPORT DATA without an AS query only parses in pipe EXPORT DATA.
+EXPORT DATA
+--
+ERROR: Syntax error: Expected keyword AS but got end of statement [at 1:12]
+EXPORT DATA
+           ^
+==
+
+EXPORT DATA OPTIONS()
+--
+ERROR: Syntax error: Expected keyword AS but got end of statement [at 1:22]
+EXPORT DATA OPTIONS()
+                     ^
+==
+
+EXPORT DATA AS
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:15]
+EXPORT DATA AS
+              ^
+==
+
+EXPORT DATA OPTIONS () AS
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:26]
+EXPORT DATA OPTIONS () AS
+                         ^
+
+==
+
+EXPORT DATA AS
+GRAPH g
+MATCH (a)
+RETURN 1 as x
+--
+ExportDataStatement [0-46] [EXPORT DATA...RETURN 1 as x]
+  Query [15-46] [GRAPH g MATCH...RETURN 1 as x]
+    GqlQuery [15-46] [GRAPH g MATCH...RETURN 1 as x]
+      GraphTableQuery [15-46] [GRAPH g MATCH...RETURN 1 as x]
+        PathExpression [21-22] [g]
+          Identifier(g) [21-22] [g]
+        GqlOperatorList [23-46] [MATCH (a) RETURN 1 as x]
+          GqlOperatorList [23-46] [MATCH (a) RETURN 1 as x]
+            GqlMatch [23-32] [MATCH (a)]
+              GraphPattern [29-32] [(a)]
+                GraphPathPattern [29-32] [(a)]
+                  GraphNodePattern [29-32] [(a)]
+                    GraphElementPatternFiller [30-31] [a]
+                      Identifier(a) [30-31] [a]
+            GqlReturn [33-46] [RETURN 1 as x]
+              Select [40-46] [1 as x]
+                SelectList [40-46] [1 as x]
+                  SelectColumn [40-46] [1 as x]
+                    IntLiteral(1) [40-41] [1]
+                    Alias [42-46] [as x]
+                      Identifier(x) [45-46] [x]
+
+--
+EXPORT DATA AS
+GRAPH g
+MATCH
+  (a)
+RETURN
+  1 AS x
+

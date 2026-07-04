@@ -1,0 +1,316 @@
+# Generalized field access.
+select a.(b), a.b.(c.d), (a+b).(c.d)
+--
+QueryStatement [0-36] [select a.(...a+b).(c.d)]
+  Query [0-36] [select a.(...a+b).(c.d)]
+    Select [0-36] [select a.(...a+b).(c.d)]
+      SelectList [7-36] [a.(b), a.b.(c.d), (a+b).(c.d)]
+        SelectColumn [7-12] [a.(b)]
+          DotGeneralizedField [7-12] [a.(b)]
+            PathExpression [7-8] [a]
+              Identifier(a) [7-8] [a]
+            PathExpression [10-11] [b]
+              Identifier(b) [10-11] [b]
+        SelectColumn [14-23] [a.b.(c.d)]
+          DotGeneralizedField [14-23] [a.b.(c.d)]
+            PathExpression [14-17] [a.b]
+              Identifier(a) [14-15] [a]
+              Identifier(b) [16-17] [b]
+            PathExpression [19-22] [c.d]
+              Identifier(c) [19-20] [c]
+              Identifier(d) [21-22] [d]
+        SelectColumn [25-36] [(a+b).(c.d)]
+          DotGeneralizedField [25-36] [(a+b).(c.d)]
+            BinaryExpression(+) [26-29] [a+b]
+              PathExpression [26-27] [a]
+                Identifier(a) [26-27] [a]
+              PathExpression [28-29] [b]
+                Identifier(b) [28-29] [b]
+            PathExpression [32-35] [c.d]
+              Identifier(c) [32-33] [c]
+              Identifier(d) [34-35] [d]
+--
+SELECT
+  a.(b),
+  a.b.(c.d),
+  (a + b).(c.d)
+==
+
+select a.(b.c).d
+--
+QueryStatement [0-16] [select a.(b.c).d]
+  Query [0-16] [select a.(b.c).d]
+    Select [0-16] [select a.(b.c).d]
+      SelectList [7-16] [a.(b.c).d]
+        SelectColumn [7-16] [a.(b.c).d]
+          DotIdentifier [7-16] [a.(b.c).d]
+            DotGeneralizedField [7-14] [a.(b.c)]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [10-13] [b.c]
+                Identifier(b) [10-11] [b]
+                Identifier(c) [12-13] [c]
+            Identifier(d) [15-16] [d]
+--
+SELECT
+  a.(b.c).d
+==
+
+# Same thing with parentheses.
+select ((a).(b.c)).d
+--
+QueryStatement [0-20] [select ((a).(b.c)).d]
+  Query [0-20] [select ((a).(b.c)).d]
+    Select [0-20] [select ((a).(b.c)).d]
+      SelectList [7-20] [((a).(b.c)).d]
+        SelectColumn [7-20] [((a).(b.c)).d]
+          DotIdentifier [7-20] [((a).(b.c)).d]
+            DotGeneralizedField [8-17] [(a).(b.c)]
+              PathExpression [9-10] [a]
+                Identifier(a) [9-10] [a]
+              PathExpression [13-16] [b.c]
+                Identifier(b) [13-14] [b]
+                Identifier(c) [15-16] [c]
+            Identifier(d) [19-20] [d]
+--
+SELECT
+  ((a).(b.c)).d
+==
+
+# Same test as previous, but with 'x' as a prefix to the path
+# expression.  Note that the trailing bits of a path expression
+# do not allow the same parenthesis behavior as the first part
+# of the path expression.  In particular, nested parentheses
+# are only allowed as the first part of the path.  The subsequent
+# path names do not allow nested parentheses.
+select x.((a).(b.c)).d
+--
+ERROR: Syntax error: Unexpected "(" [at 1:11]
+select x.((a).(b.c)).d
+          ^
+==
+
+select (a).(b).(c.d).(e.f)
+--
+QueryStatement [0-26] [select (a).(b).(c.d).(e.f)]
+  Query [0-26] [select (a).(b).(c.d).(e.f)]
+    Select [0-26] [select (a).(b).(c.d).(e.f)]
+      SelectList [7-26] [(a).(b).(c.d).(e.f)]
+        SelectColumn [7-26] [(a).(b).(c.d).(e.f)]
+          DotGeneralizedField [7-26] [(a).(b).(c.d).(e.f)]
+            DotGeneralizedField [7-20] [(a).(b).(c.d)]
+              DotGeneralizedField [7-14] [(a).(b)]
+                PathExpression [8-9] [a]
+                  Identifier(a) [8-9] [a]
+                PathExpression [12-13] [b]
+                  Identifier(b) [12-13] [b]
+              PathExpression [16-19] [c.d]
+                Identifier(c) [16-17] [c]
+                Identifier(d) [18-19] [d]
+            PathExpression [22-25] [e.f]
+              Identifier(e) [22-23] [e]
+              Identifier(f) [24-25] [f]
+--
+SELECT
+  (a).(b).(c.d).(e.f)
+==
+
+# Same test as previous, but with 'e' parenthesized.
+select (a).(b).(c.d).((e).f)
+--
+ERROR: Syntax error: Unexpected "(" [at 1:23]
+select (a).(b).(c.d).((e).f)
+                      ^
+==
+
+# Same test as previous, but with 'f' parenthesized.
+select (a).(b).(c.d).(e.(f))
+--
+ERROR: Syntax error: Unexpected "(" [at 1:25]
+select (a).(b).(c.d).(e.(f))
+                        ^
+==
+
+select a.()
+--
+ERROR: Syntax error: Unexpected ")" [at 1:11]
+select a.()
+          ^
+==
+
+select a.(b+c)
+--
+ERROR: Syntax error: Expected ")" or "." but got "+" [at 1:12]
+select a.(b+c)
+           ^
+==
+
+select a.(b.(c))
+--
+ERROR: Syntax error: Unexpected "(" [at 1:13]
+select a.(b.(c))
+            ^
+==
+
+select a.(b).(c)
+--
+QueryStatement [0-16] [select a.(b).(c)]
+  Query [0-16] [select a.(b).(c)]
+    Select [0-16] [select a.(b).(c)]
+      SelectList [7-16] [a.(b).(c)]
+        SelectColumn [7-16] [a.(b).(c)]
+          DotGeneralizedField [7-16] [a.(b).(c)]
+            DotGeneralizedField [7-12] [a.(b)]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [10-11] [b]
+                Identifier(b) [10-11] [b]
+            PathExpression [14-15] [c]
+              Identifier(c) [14-15] [c]
+--
+SELECT
+  a.(b).(c)
+==
+
+select a.(b).(c).d
+--
+QueryStatement [0-18] [select a.(b).(c).d]
+  Query [0-18] [select a.(b).(c).d]
+    Select [0-18] [select a.(b).(c).d]
+      SelectList [7-18] [a.(b).(c).d]
+        SelectColumn [7-18] [a.(b).(c).d]
+          DotIdentifier [7-18] [a.(b).(c).d]
+            DotGeneralizedField [7-16] [a.(b).(c)]
+              DotGeneralizedField [7-12] [a.(b)]
+                PathExpression [7-8] [a]
+                  Identifier(a) [7-8] [a]
+                PathExpression [10-11] [b]
+                  Identifier(b) [10-11] [b]
+              PathExpression [14-15] [c]
+                Identifier(c) [14-15] [c]
+            Identifier(d) [17-18] [d]
+--
+SELECT
+  a.(b).(c).d
+==
+
+select a[1].(b).(c)[d]
+--
+QueryStatement [0-22] [select a[1].(b).(c)[d]]
+  Query [0-22] [select a[1].(b).(c)[d]]
+    Select [0-22] [select a[1].(b).(c)[d]]
+      SelectList [7-22] [a[1].(b).(c)[d]]
+        SelectColumn [7-22] [a[1].(b).(c)[d]]
+          ArrayElement [7-22] [a[1].(b).(c)[d]]
+            DotGeneralizedField [7-19] [a[1].(b).(c)]
+              DotGeneralizedField [7-15] [a[1].(b)]
+                ArrayElement [7-11] [a[1]]
+                  PathExpression [7-8] [a]
+                    Identifier(a) [7-8] [a]
+                  Location [8-9] [[]
+                  IntLiteral(1) [9-10] [1]
+                PathExpression [13-14] [b]
+                  Identifier(b) [13-14] [b]
+              PathExpression [17-18] [c]
+                Identifier(c) [17-18] [c]
+            Location [19-20] [[]
+            PathExpression [20-21] [d]
+              Identifier(d) [20-21] [d]
+--
+SELECT
+  a[1].(b).(c)[d]
+==
+
+select a.(b)[1]
+--
+QueryStatement [0-15] [select a.(b)[1]]
+  Query [0-15] [select a.(b)[1]]
+    Select [0-15] [select a.(b)[1]]
+      SelectList [7-15] [a.(b)[1]]
+        SelectColumn [7-15] [a.(b)[1]]
+          ArrayElement [7-15] [a.(b)[1]]
+            DotGeneralizedField [7-12] [a.(b)]
+              PathExpression [7-8] [a]
+                Identifier(a) [7-8] [a]
+              PathExpression [10-11] [b]
+                Identifier(b) [10-11] [b]
+            Location [12-13] [[]
+            IntLiteral(1) [13-14] [1]
+--
+SELECT
+  a.(b)[1]
+==
+
+select a.(
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:11]
+select a.(
+          ^
+==
+
+select a.(b
+--
+ERROR: Syntax error: Expected ")" or "." but got end of statement [at 1:12]
+select a.(b
+           ^
+==
+
+select a.(b.
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:13]
+select a.(b.
+            ^
+==
+
+select a.(b.c
+--
+ERROR: Syntax error: Expected ")" or "." but got end of statement [at 1:14]
+select a.(b.c
+             ^
+==
+
+select 1
+from a.b.(c.d).e
+--
+ERROR: Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>) [at 2:10]
+from a.b.(c.d).e
+         ^
+==
+
+select 1
+from a.b.(c)
+--
+ERROR: Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>) [at 2:10]
+from a.b.(c)
+         ^
+==
+
+select 1
+from unnest(a.b).(c)
+--
+ERROR: Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>) [at 2:18]
+from unnest(a.b).(c)
+                 ^
+==
+
+# Regression test for b/331836328; int and float in Lhs need to maintain parens.
+select (1).(x), (1.).(x)
+--
+QueryStatement [0-24] [select (1).(x), (1.).(x)]
+  Query [0-24] [select (1).(x), (1.).(x)]
+    Select [0-24] [select (1).(x), (1.).(x)]
+      SelectList [7-24] [(1).(x), (1.).(x)]
+        SelectColumn [7-14] [(1).(x)]
+          DotGeneralizedField [7-14] [(1).(x)]
+            IntLiteral(1) [8-9] [1]
+            PathExpression [12-13] [x]
+              Identifier(x) [12-13] [x]
+        SelectColumn [16-24] [(1.).(x)]
+          DotGeneralizedField [16-24] [(1.).(x)]
+            FloatLiteral(1.) [17-19] [1.]
+            PathExpression [22-23] [x]
+              Identifier(x) [22-23] [x]
+--
+SELECT
+  (1).(x),
+  (1.).(x)

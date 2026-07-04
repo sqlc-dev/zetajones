@@ -1,0 +1,178 @@
+START TRANSACTION
+--
+BeginStatement [0-17] [START TRANSACTION]
+--
+BEGIN TRANSACTION
+==
+
+Begin Transaction
+--
+BeginStatement [0-17] [Begin Transaction]
+--
+BEGIN TRANSACTION
+==
+
+begin
+--
+
+BeginStatement [0-5] [begin]
+--
+BEGIN TRANSACTION
+==
+
+begin transaction read only
+--
+
+BeginStatement [0-27] [begin transaction read only]
+  TransactionModeList [18-27] [read only]
+    TransactionReadWriteMode [18-27] [read only]
+--
+BEGIN TRANSACTION READ ONLY
+==
+
+BEGIN TRANSACTION ISOLATION LEVEL read uncommited
+--
+BeginStatement [0-49] [BEGIN TRANSACTION...uncommited]
+  TransactionModeList [18-49] [ISOLATION...uncommited]
+    TransactionIsolationLevel [18-49] [ISOLATION...uncommited]
+      Identifier(read) [34-38] [read]
+      Identifier(uncommited) [39-49] [uncommited]
+--
+BEGIN TRANSACTION ISOLATION LEVEL read uncommited
+==
+
+
+start transaction READ WRITE, ISOLATION LEVEL READ COMMITED
+--
+BeginStatement [0-59] [start transaction...D COMMITED]
+  TransactionModeList [18-59] [READ WRITE...READ COMMITED]
+    TransactionReadWriteMode [18-28] [READ WRITE]
+    TransactionIsolationLevel [30-59] [ISOLATION LEVEL READ COMMITED]
+      Identifier(READ) [46-50] [READ]
+      Identifier(COMMITED) [51-59] [COMMITED]
+--
+BEGIN TRANSACTION READ WRITE, ISOLATION LEVEL READ COMMITED
+==
+
+BEGIN isolation level READ repeatable
+--
+BeginStatement [0-37] [BEGIN isolation...repeatable]
+  TransactionModeList [6-37] [isolation...repeatable]
+    TransactionIsolationLevel [6-37] [isolation...repeatable]
+      Identifier(READ) [22-26] [READ]
+      Identifier(repeatable) [27-37] [repeatable]
+--
+BEGIN TRANSACTION ISOLATION LEVEL READ repeatable
+==
+
+BEGIN transaction Isolation Level Serializable
+--
+BeginStatement [0-46] [BEGIN transaction...rializable]
+  TransactionModeList [18-46] [Isolation Level Serializable]
+    TransactionIsolationLevel [18-46] [Isolation Level Serializable]
+      Identifier(Serializable) [34-46] [Serializable]
+--
+BEGIN TRANSACTION ISOLATION LEVEL Serializable
+==
+
+# Arbitrary isolation levels are allowed.
+BEGIN TRANSACTION ISOLATION LEVEL FOO bar
+--
+BeginStatement [0-41] [BEGIN TRANSACTION...EL FOO bar]
+  TransactionModeList [18-41] [ISOLATION LEVEL FOO bar]
+    TransactionIsolationLevel [18-41] [ISOLATION LEVEL FOO bar]
+      Identifier(FOO) [34-37] [FOO]
+      Identifier(bar) [38-41] [bar]
+--
+BEGIN TRANSACTION ISOLATION LEVEL FOO bar
+==
+
+# Isolation level cannot have more than two identifiers.
+BEGIN TRANSACTION ISOLATION LEVEL One Two Three
+--
+ERROR: Syntax error: Expected end of input but got identifier "Three" [at 1:43]
+BEGIN TRANSACTION ISOLATION LEVEL One Two Three
+                                          ^
+==
+
+BEGIN ISOLATION
+--
+ERROR: Syntax error: Expected keyword LEVEL but got end of statement [at 1:16]
+BEGIN ISOLATION
+               ^
+==
+
+SET TRANSACTION READ ONLY
+--
+SetTransactionStatement [0-25] [SET TRANSACTION READ ONLY]
+  TransactionModeList [16-25] [READ ONLY]
+    TransactionReadWriteMode [16-25] [READ ONLY]
+--
+SET TRANSACTION READ ONLY
+==
+
+SET TRANSACTION READ WRITE, ISOLATION LEVEL foo
+--
+SetTransactionStatement [0-47] [SET TRANSACTION...LEVEL foo]
+  TransactionModeList [16-47] [READ WRITE...LEVEL foo]
+    TransactionReadWriteMode [16-26] [READ WRITE]
+    TransactionIsolationLevel [28-47] [ISOLATION LEVEL foo]
+      Identifier(foo) [44-47] [foo]
+--
+SET TRANSACTION READ WRITE, ISOLATION LEVEL foo
+==
+
+SET TRANSACTION
+--
+ERROR: Syntax error: Expected "," or "=" but got end of statement [at 1:16]
+SET TRANSACTION
+               ^
+==
+
+SET TRANSACTION IdentifierHere
+--
+ERROR: Syntax error: Expected "," or "=" but got identifier "IdentifierHere" [at 1:17]
+SET TRANSACTION IdentifierHere
+                ^
+==
+
+COMMIT
+--
+CommitStatement [0-6] [COMMIT]
+--
+COMMIT
+==
+
+commit transaction
+--
+CommitStatement [0-18] [commit transaction]
+--
+COMMIT
+==
+
+COMMIT WORK
+--
+ERROR: Syntax error: Expected end of input but got identifier "WORK" [at 1:8]
+COMMIT WORK
+       ^
+==
+
+ROLLBACK
+--
+RollbackStatement [0-8] [ROLLBACK]
+--
+ROLLBACK
+==
+
+Rollback Transaction
+--
+RollbackStatement [0-20] [Rollback Transaction]
+--
+ROLLBACK
+==
+
+rollback work
+--
+ERROR: Syntax error: Expected end of input but got identifier "work" [at 1:10]
+rollback work
+         ^

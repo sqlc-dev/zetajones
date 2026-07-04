@@ -1,0 +1,69 @@
+[default language_features=MAXIMUM,+WITH_GROUP_ROWS]
+
+[language_features=MAXIMUM]
+# Group rows not supported.
+FROM Transactions
+|> AGGREGATE ARRAY(WITH group_rows() AS GROUP ROWS
+                   FROM group_rows()
+                   |> SELECT customer_id
+                   |> DISTINCT)
+   GROUP BY State
+--
+ERROR: GROUP ROWS is not supported. [at 3:41]
+|> AGGREGATE ARRAY(WITH group_rows() AS GROUP ROWS
+                                        ^
+==
+
+# Use group rows within subquery.
+FROM Transactions
+|> AGGREGATE ARRAY(WITH group_rows() AS GROUP ROWS
+                   FROM group_rows()
+                   |> SELECT customer_id
+                   |> DISTINCT)
+   GROUP BY State
+--
+QueryStatement [0-196] [FROM Transactions...P BY State]
+  Query [0-196] [FROM Transactions...P BY State]
+    FromQuery [0-17] [FROM Transactions]
+      FromClause [0-17] [FROM Transactions]
+        TablePathExpression [5-17] [Transactions]
+          PathExpression [5-17] [Transactions]
+            Identifier(Transactions) [5-17] [Transactions]
+    PipeAggregate [18-196] [|> AGGREGATE...GROUP BY State]
+      Select [21-196] [AGGREGATE...GROUP BY State]
+        SelectList [31-178] [ARRAY(WITH...DISTINCT)]
+          SelectColumn [31-178] [ARRAY(WITH...DISTINCT)]
+            ExpressionSubquery(modifier=ARRAY) [31-178] [ARRAY(WITH...DISTINCT)]
+              Query [37-177] [WITH group_rows...> DISTINCT]
+                WithClause [37-68] [WITH group_rows...GROUP ROWS]
+                  WithClauseEntry [42-68] [group_rows() AS GROUP ROWS]
+                    AliasedGroupRows [42-68] [group_rows() AS GROUP ROWS]
+                      Identifier(group_rows) [42-52] [group_rows]
+                FromQuery [88-105] [FROM group_rows()]
+                  FromClause [88-105] [FROM group_rows()]
+                    TVF [93-105] [group_rows()]
+                      PathExpression [93-103] [group_rows]
+                        Identifier(group_rows) [93-103] [group_rows]
+                PipeSelect [125-146] [|> SELECT customer_id]
+                  Select [128-146] [SELECT customer_id]
+                    SelectList [135-146] [customer_id]
+                      SelectColumn [135-146] [customer_id]
+                        PathExpression [135-146] [customer_id]
+                          Identifier(customer_id) [135-146] [customer_id]
+                PipeDistinct [166-177] [|> DISTINCT]
+        GroupBy [182-196] [GROUP BY State]
+          GroupingItem [191-196] [State]
+            PathExpression [191-196] [State]
+              Identifier(State) [191-196] [State]
+--
+FROM
+  Transactions
+|> AGGREGATE
+     ARRAY(WITH
+         group_rows() AS GROUP ROWS
+       FROM
+         group_rows()
+       |> SELECT
+            customer_id
+       |> DISTINCT)
+   GROUP BY State

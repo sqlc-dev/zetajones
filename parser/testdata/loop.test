@@ -1,0 +1,1373 @@
+[default mode=script]
+[default language_features=NONE,+REPEAT,+FOR_IN]
+[default node_kind=WhileStatement]
+LOOP
+END LOOP
+--
+Script [0-13] [LOOP END LOOP]
+  StatementList [0-13] [LOOP END LOOP]
+    WhileStatement [0-13] [LOOP END LOOP]
+      StatementList [4-4] []
+--
+LOOP
+END LOOP ;
+==
+
+LOOP
+  SELECT 5;
+END LOOP
+--
+Script [0-25] [LOOP   SELECT 5; END LOOP]
+  StatementList [0-25] [LOOP   SELECT 5; END LOOP]
+    WhileStatement [0-25] [LOOP   SELECT 5; END LOOP]
+      StatementList [7-16] [SELECT 5;]
+        QueryStatement [7-15] [SELECT 5]
+          Query [7-15] [SELECT 5]
+            Select [7-15] [SELECT 5]
+              SelectList [14-15] [5]
+                SelectColumn [14-15] [5]
+                  IntLiteral(5) [14-15] [5]
+--
+LOOP
+  SELECT
+    5
+  ;
+END LOOP ;
+==
+
+LOOP
+  SELECT 8;
+  SELECT 9;
+END LOOP;
+--
+Script [0-38] [LOOP   SELECT...END LOOP;]
+  StatementList [0-38] [LOOP   SELECT...END LOOP;]
+    WhileStatement [0-37] [LOOP   SELECT...; END LOOP]
+      StatementList [7-28] [SELECT 8;   SELECT 9;]
+        QueryStatement [7-15] [SELECT 8]
+          Query [7-15] [SELECT 8]
+            Select [7-15] [SELECT 8]
+              SelectList [14-15] [8]
+                SelectColumn [14-15] [8]
+                  IntLiteral(8) [14-15] [8]
+        QueryStatement [19-27] [SELECT 9]
+          Query [19-27] [SELECT 9]
+            Select [19-27] [SELECT 9]
+              SelectList [26-27] [9]
+                SelectColumn [26-27] [9]
+                  IntLiteral(9) [26-27] [9]
+--
+LOOP
+  SELECT
+    8
+  ;
+  SELECT
+    9
+  ;
+END LOOP ;
+==
+
+LOOP
+  SELECT 5;
+  LOOP
+    SELECT 6;
+  END LOOP;
+END LOOP;
+--
+Script [0-59] [LOOP   SELECT...END LOOP;]
+  StatementList [0-59] [LOOP   SELECT...END LOOP;]
+    WhileStatement [0-58] [LOOP   SELECT...; END LOOP]
+      StatementList [7-49] [SELECT 5;...END LOOP;]
+        QueryStatement [7-15] [SELECT 5]
+          Query [7-15] [SELECT 5]
+            Select [7-15] [SELECT 5]
+              SelectList [14-15] [5]
+                SelectColumn [14-15] [5]
+                  IntLiteral(5) [14-15] [5]
+        WhileStatement [19-48] [LOOP     SELECT 6;   END LOOP]
+          StatementList [28-37] [SELECT 6;]
+            QueryStatement [28-36] [SELECT 6]
+              Query [28-36] [SELECT 6]
+                Select [28-36] [SELECT 6]
+                  SelectList [35-36] [6]
+                    SelectColumn [35-36] [6]
+                      IntLiteral(6) [35-36] [6]
+--
+LOOP
+  SELECT
+    5
+  ;
+  LOOP
+    SELECT
+      6
+    ;
+  END LOOP ;
+END LOOP ;
+==
+
+WHILE LOOP DO LOOP END LOOP; END WHILE
+--
+Script [0-38] [WHILE LOOP...END WHILE]
+  StatementList [0-38] [WHILE LOOP...END WHILE]
+    WhileStatement [0-38] [WHILE LOOP...END WHILE]
+      PathExpression [6-10] [LOOP]
+        Identifier(LOOP) [6-10] [LOOP]
+      StatementList [14-28] [LOOP END LOOP;]
+        WhileStatement [14-27] [LOOP END LOOP]
+          StatementList [18-18] []
+--
+WHILE LOOP DO
+  LOOP
+  END LOOP ;
+END WHILE ;
+==
+
+LOOP WHILE LOOP DO LOOP END LOOP; END WHILE; END LOOP
+--
+Script [0-53] [LOOP WHILE...; END LOOP]
+  StatementList [0-53] [LOOP WHILE...; END LOOP]
+    WhileStatement [0-53] [LOOP WHILE...; END LOOP]
+      StatementList [5-44] [WHILE LOOP...END WHILE;]
+        WhileStatement [5-43] [WHILE LOOP...END WHILE]
+          PathExpression [11-15] [LOOP]
+            Identifier(LOOP) [11-15] [LOOP]
+          StatementList [19-33] [LOOP END LOOP;]
+            WhileStatement [19-32] [LOOP END LOOP]
+              StatementList [23-23] []
+--
+LOOP
+  WHILE LOOP DO
+    LOOP
+    END LOOP ;
+  END WHILE ;
+END LOOP ;
+==
+
+WHILE WHILE DO END WHILE;
+--
+Script [0-25] [WHILE WHILE DO END WHILE;]
+  StatementList [0-25] [WHILE WHILE DO END WHILE;]
+    WhileStatement [0-24] [WHILE WHILE DO END WHILE]
+      PathExpression [6-11] [WHILE]
+        Identifier(WHILE) [6-11] [WHILE]
+      StatementList [14-14] []
+--
+WHILE WHILE DO
+END WHILE ;
+==
+
+WHILE DO DO END WHILE;
+--
+Script [0-22] [WHILE DO DO END WHILE;]
+  StatementList [0-22] [WHILE DO DO END WHILE;]
+    WhileStatement [0-21] [WHILE DO DO END WHILE]
+      PathExpression [6-8] [DO]
+        Identifier(DO) [6-8] [DO]
+      StatementList [11-11] []
+--
+WHILE DO DO
+END WHILE ;
+==
+
+# Error (missing 'LOOP' keyword)
+LOOP
+END;
+--
+ERROR: Syntax error: Expected keyword LOOP but got ";" [at 2:4]
+END;
+   ^
+==
+
+# Error (wrong 'end' keyword)
+LOOP
+END WHILE;
+--
+ERROR: Syntax error: Expected keyword LOOP but got keyword WHILE [at 2:5]
+END WHILE;
+    ^
+==
+
+# Error (no 'end loop')
+LOOP
+--
+ERROR: Syntax error: Unexpected end of script [at 1:5]
+LOOP
+    ^
+==
+
+# Error (loop statement terminates before 'end loop')
+LOOP;
+END LOOP;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:5]
+LOOP;
+    ^
+==
+
+WHILE TRUE DO
+END WHILE
+--
+Script [0-23] [WHILE TRUE DO END WHILE]
+  StatementList [0-23] [WHILE TRUE DO END WHILE]
+    WhileStatement [0-23] [WHILE TRUE DO END WHILE]
+      BooleanLiteral(TRUE) [6-10] [TRUE]
+      StatementList [13-13] []
+--
+WHILE TRUE DO
+END WHILE ;
+==
+
+WHILE TRUE DO
+  SELECT 5;
+  SELECT 6;
+END WHILE
+--
+Script [0-47] [WHILE TRUE...END WHILE]
+  StatementList [0-47] [WHILE TRUE...END WHILE]
+    WhileStatement [0-47] [WHILE TRUE...END WHILE]
+      BooleanLiteral(TRUE) [6-10] [TRUE]
+      StatementList [16-37] [SELECT 5;   SELECT 6;]
+        QueryStatement [16-24] [SELECT 5]
+          Query [16-24] [SELECT 5]
+            Select [16-24] [SELECT 5]
+              SelectList [23-24] [5]
+                SelectColumn [23-24] [5]
+                  IntLiteral(5) [23-24] [5]
+        QueryStatement [28-36] [SELECT 6]
+          Query [28-36] [SELECT 6]
+            Select [28-36] [SELECT 6]
+              SelectList [35-36] [6]
+                SelectColumn [35-36] [6]
+                  IntLiteral(6) [35-36] [6]
+--
+WHILE TRUE DO
+  SELECT
+    5
+  ;
+  SELECT
+    6
+  ;
+END WHILE ;
+==
+
+# Nested loops
+LOOP
+  WHILE x >= 3 DO
+    WHILE y >= 4 DO
+      LOOP
+        SELECT x, y;
+      END LOOP;
+    END WHILE;
+  END WHILE;
+END LOOP;
+--
+Script [0-128] [LOOP   WHILE...END LOOP;]
+  StatementList [0-128] [LOOP   WHILE...END LOOP;]
+    WhileStatement [0-127] [LOOP   WHILE...; END LOOP]
+      StatementList [7-118] [WHILE x >=...END WHILE;]
+        WhileStatement [7-117] [WHILE x >=...END WHILE]
+          BinaryExpression(>=) [13-19] [x >= 3]
+            PathExpression [13-14] [x]
+              Identifier(x) [13-14] [x]
+            IntLiteral(3) [18-19] [3]
+          StatementList [27-105] [WHILE y >=...END WHILE;]
+            WhileStatement [27-104] [WHILE y >=...END WHILE]
+              BinaryExpression(>=) [33-39] [y >= 4]
+                PathExpression [33-34] [y]
+                  Identifier(y) [33-34] [y]
+                IntLiteral(4) [38-39] [4]
+              StatementList [49-90] [LOOP...END LOOP;]
+                WhileStatement [49-89] [LOOP...END LOOP]
+                  StatementList [62-74] [SELECT x, y;]
+                    QueryStatement [62-73] [SELECT x, y]
+                      Query [62-73] [SELECT x, y]
+                        Select [62-73] [SELECT x, y]
+                          SelectList [69-73] [x, y]
+                            SelectColumn [69-70] [x]
+                              PathExpression [69-70] [x]
+                                Identifier(x) [69-70] [x]
+                            SelectColumn [72-73] [y]
+                              PathExpression [72-73] [y]
+                                Identifier(y) [72-73] [y]
+--
+LOOP
+  WHILE x >= 3 DO
+    WHILE y >= 4 DO
+      LOOP
+        SELECT
+          x,
+          y
+        ;
+      END LOOP ;
+    END WHILE ;
+  END WHILE ;
+END LOOP ;
+==
+
+WHILE x = 3 DO
+  LOOP
+  END LOOP;
+END WHILE;
+--
+Script [0-44] [WHILE x =...END WHILE;]
+  StatementList [0-44] [WHILE x =...END WHILE;]
+    WhileStatement [0-43] [WHILE x =...END WHILE]
+      BinaryExpression(=) [6-11] [x = 3]
+        PathExpression [6-7] [x]
+          Identifier(x) [6-7] [x]
+        IntLiteral(3) [10-11] [3]
+      StatementList [17-33] [LOOP   END LOOP;]
+        WhileStatement [17-32] [LOOP   END LOOP]
+          StatementList [21-21] []
+--
+WHILE x = 3 DO
+  LOOP
+  END LOOP ;
+END WHILE ;
+==
+
+LOOP
+  WHILE x = 3 DO
+    LOOP
+    END LOOP;
+  END WHILE;
+END LOOP;
+--
+Script [0-67] [LOOP   WHILE...END LOOP;]
+  StatementList [0-67] [LOOP   WHILE...END LOOP;]
+    WhileStatement [0-66] [LOOP   WHILE...; END LOOP]
+      StatementList [7-57] [WHILE x =...END WHILE;]
+        WhileStatement [7-56] [WHILE x =...END WHILE]
+          BinaryExpression(=) [13-18] [x = 3]
+            PathExpression [13-14] [x]
+              Identifier(x) [13-14] [x]
+            IntLiteral(3) [17-18] [3]
+          StatementList [26-44] [LOOP     END LOOP;]
+            WhileStatement [26-43] [LOOP     END LOOP]
+              StatementList [30-30] []
+--
+LOOP
+  WHILE x = 3 DO
+    LOOP
+    END LOOP ;
+  END WHILE ;
+END LOOP ;
+==
+
+# Error: Loop/End loop is not an expression
+WHILE LOOP END LOOP END WHILE;
+--
+ERROR: Syntax error: Expected keyword DO but got keyword END [at 1:12]
+WHILE LOOP END LOOP END WHILE;
+           ^
+==
+
+# Missing both condition and end directive
+WHILE;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:6]
+WHILE;
+     ^
+==
+
+# Missing condition
+WHILE DO
+END WHILE;
+--
+ERROR: Syntax error: Expected keyword DO but got keyword END [at 2:1]
+END WHILE;
+^
+==
+
+# Incorrect end keyword
+WHILE x = 3 DO
+END LOOP;
+--
+ERROR: Syntax error: Expected keyword WHILE but got keyword LOOP [at 2:5]
+END LOOP;
+    ^
+==
+
+# Incorrect extra semi-colon after condition
+WHILE x = 3; DO
+END WHILE;
+--
+ERROR: Syntax error: Expected keyword DO but got ";" [at 1:12]
+WHILE x = 3; DO
+           ^
+==
+
+# Unclosed while inside of a loop.
+LOOP
+  WHILE x = 3 DO
+END LOOP;
+--
+ERROR: Syntax error: Expected keyword WHILE but got keyword LOOP [at 3:5]
+END LOOP;
+    ^
+==
+
+# Missing 'DO'
+WHILE x = 3
+  SELECT 5;
+END WHILE;
+--
+ERROR: Syntax error: Expected keyword DO but got keyword SELECT [at 2:3]
+  SELECT 5;
+  ^
+==
+
+[node_kind=RepeatStatement]
+REPEAT
+UNTIL TRUE
+END REPEAT
+--
+Script [0-28] [REPEAT UNTIL TRUE END REPEAT]
+  StatementList [0-28] [REPEAT UNTIL TRUE END REPEAT]
+    RepeatStatement [0-28] [REPEAT UNTIL TRUE END REPEAT]
+      StatementList [6-6] []
+      UntilClause [7-17] [UNTIL TRUE]
+        BooleanLiteral(TRUE) [13-17] [TRUE]
+--
+REPEAT
+UNTIL TRUE
+END REPEAT ;
+==
+
+[node_kind=RepeatStatement]
+REPEAT
+  SELECT 3;
+  SELECT 5;
+UNTIL TRUE
+END REPEAT
+--
+Script [0-52] [REPEAT   SELECT...END REPEAT]
+  StatementList [0-52] [REPEAT   SELECT...END REPEAT]
+    RepeatStatement [0-52] [REPEAT   SELECT...END REPEAT]
+      StatementList [9-30] [SELECT 3;   SELECT 5;]
+        QueryStatement [9-17] [SELECT 3]
+          Query [9-17] [SELECT 3]
+            Select [9-17] [SELECT 3]
+              SelectList [16-17] [3]
+                SelectColumn [16-17] [3]
+                  IntLiteral(3) [16-17] [3]
+        QueryStatement [21-29] [SELECT 5]
+          Query [21-29] [SELECT 5]
+            Select [21-29] [SELECT 5]
+              SelectList [28-29] [5]
+                SelectColumn [28-29] [5]
+                  IntLiteral(5) [28-29] [5]
+      UntilClause [31-41] [UNTIL TRUE]
+        BooleanLiteral(TRUE) [37-41] [TRUE]
+--
+REPEAT
+  SELECT
+    3
+  ;
+  SELECT
+    5
+  ;
+UNTIL TRUE
+END REPEAT ;
+==
+
+[node_kind=RepeatStatement]
+REPEAT
+  REPEAT
+    SELECT x;
+  UNTIL x <= 3
+  END REPEAT;
+UNTIL TRUE
+END REPEAT;
+--
+Script [0-81] [REPEAT   REPEAT...END REPEAT;]
+  StatementList [0-81] [REPEAT   REPEAT...END REPEAT;]
+    RepeatStatement [0-80] [REPEAT   REPEAT...END REPEAT]
+      StatementList [9-58] [REPEAT...END REPEAT;]
+        RepeatStatement [9-57] [REPEAT...END REPEAT]
+          StatementList [20-29] [SELECT x;]
+            QueryStatement [20-28] [SELECT x]
+              Query [20-28] [SELECT x]
+                Select [20-28] [SELECT x]
+                  SelectList [27-28] [x]
+                    SelectColumn [27-28] [x]
+                      PathExpression [27-28] [x]
+                        Identifier(x) [27-28] [x]
+          UntilClause [32-44] [UNTIL x <= 3]
+            BinaryExpression(<=) [38-44] [x <= 3]
+              PathExpression [38-39] [x]
+                Identifier(x) [38-39] [x]
+              IntLiteral(3) [43-44] [3]
+      UntilClause [59-69] [UNTIL TRUE]
+        BooleanLiteral(TRUE) [65-69] [TRUE]
+--
+REPEAT
+  REPEAT
+    SELECT
+      x
+    ;
+  UNTIL x <= 3
+  END REPEAT ;
+UNTIL TRUE
+END REPEAT ;
+==
+
+LOOP
+  REPEAT
+    SELECT 5;
+    SELECT 6;
+  UNTIL FALSE
+  END REPEAT;
+END LOOP;
+--
+Script [0-79] [LOOP   REPEAT...END LOOP;]
+  StatementList [0-79] [LOOP   REPEAT...END LOOP;]
+    WhileStatement [0-78] [LOOP   REPEAT...; END LOOP]
+      StatementList [7-69] [REPEAT...END REPEAT;]
+        RepeatStatement [7-68] [REPEAT...END REPEAT]
+          StatementList [18-41] [SELECT 5;     SELECT 6;]
+            QueryStatement [18-26] [SELECT 5]
+              Query [18-26] [SELECT 5]
+                Select [18-26] [SELECT 5]
+                  SelectList [25-26] [5]
+                    SelectColumn [25-26] [5]
+                      IntLiteral(5) [25-26] [5]
+            QueryStatement [32-40] [SELECT 6]
+              Query [32-40] [SELECT 6]
+                Select [32-40] [SELECT 6]
+                  SelectList [39-40] [6]
+                    SelectColumn [39-40] [6]
+                      IntLiteral(6) [39-40] [6]
+          UntilClause [44-55] [UNTIL FALSE]
+            BooleanLiteral(FALSE) [50-55] [FALSE]
+--
+LOOP
+  REPEAT
+    SELECT
+      5
+    ;
+    SELECT
+      6
+    ;
+  UNTIL FALSE
+  END REPEAT ;
+END LOOP ;
+==
+
+[node_kind=RepeatStatement]
+REPEAT
+  LOOP
+    WHILE x <= 3 DO
+      SELECT x;
+    END WHILE;
+  END LOOP;
+UNTIL FALSE
+END REPEAT;
+--
+Script [0-100] [REPEAT   LOOP...END REPEAT;]
+  StatementList [0-100] [REPEAT   LOOP...END REPEAT;]
+    RepeatStatement [0-99] [REPEAT   LOOP...END REPEAT]
+      StatementList [9-76] [LOOP     WHILE...END LOOP;]
+        WhileStatement [9-75] [LOOP     WHILE...END LOOP]
+          StatementList [18-64] [WHILE x <=...END WHILE;]
+            WhileStatement [18-63] [WHILE x <=...END WHILE]
+              BinaryExpression(<=) [24-30] [x <= 3]
+                PathExpression [24-25] [x]
+                  Identifier(x) [24-25] [x]
+                IntLiteral(3) [29-30] [3]
+              StatementList [40-49] [SELECT x;]
+                QueryStatement [40-48] [SELECT x]
+                  Query [40-48] [SELECT x]
+                    Select [40-48] [SELECT x]
+                      SelectList [47-48] [x]
+                        SelectColumn [47-48] [x]
+                          PathExpression [47-48] [x]
+                            Identifier(x) [47-48] [x]
+      UntilClause [77-88] [UNTIL FALSE]
+        BooleanLiteral(FALSE) [83-88] [FALSE]
+--
+REPEAT
+  LOOP
+    WHILE x <= 3 DO
+      SELECT
+        x
+      ;
+    END WHILE ;
+  END LOOP ;
+UNTIL FALSE
+END REPEAT ;
+==
+
+[node_kind=QueryStatement]
+SELECT Key AS REPEAT FROM KeyValue AS UNTIL;
+--
+Script [0-44] [SELECT Key...AS UNTIL;]
+  StatementList [0-44] [SELECT Key...AS UNTIL;]
+    QueryStatement [0-43] [SELECT Key...KeyValue AS UNTIL]
+      Query [0-43] [SELECT Key...KeyValue AS UNTIL]
+        Select [0-43] [SELECT Key...KeyValue AS UNTIL]
+          SelectList [7-20] [Key AS REPEAT]
+            SelectColumn [7-20] [Key AS REPEAT]
+              PathExpression [7-10] [Key]
+                Identifier(Key) [7-10] [Key]
+              Alias [11-20] [AS REPEAT]
+                Identifier(REPEAT) [14-20] [REPEAT]
+          FromClause [21-43] [FROM KeyValue AS UNTIL]
+            TablePathExpression [26-43] [KeyValue AS UNTIL]
+              PathExpression [26-34] [KeyValue]
+                Identifier(KeyValue) [26-34] [KeyValue]
+              Alias [35-43] [AS UNTIL]
+                Identifier(UNTIL) [38-43] [UNTIL]
+--
+SELECT
+  Key AS REPEAT
+FROM
+  KeyValue AS UNTIL
+;
+==
+
+[node_kind=RepeatStatement]
+repeat select x; select y; until false end repeat;
+--
+Script [0-50] [repeat select...end repeat;]
+  StatementList [0-50] [repeat select...end repeat;]
+    RepeatStatement [0-49] [repeat select...end repeat]
+      StatementList [7-26] [select x; select y;]
+        QueryStatement [7-15] [select x]
+          Query [7-15] [select x]
+            Select [7-15] [select x]
+              SelectList [14-15] [x]
+                SelectColumn [14-15] [x]
+                  PathExpression [14-15] [x]
+                    Identifier(x) [14-15] [x]
+        QueryStatement [17-25] [select y]
+          Query [17-25] [select y]
+            Select [17-25] [select y]
+              SelectList [24-25] [y]
+                SelectColumn [24-25] [y]
+                  PathExpression [24-25] [y]
+                    Identifier(y) [24-25] [y]
+      UntilClause [27-38] [until false]
+        BooleanLiteral(false) [33-38] [false]
+--
+REPEAT
+  SELECT
+    x
+  ;
+  SELECT
+    y
+  ;
+UNTIL false
+END REPEAT ;
+==
+
+# Missing condition
+[node_kind=RepeatStatement]
+REPEAT
+UNTIL
+END REPEAT;
+--
+ERROR: Syntax error: Unexpected keyword END [at 3:1]
+END REPEAT;
+^
+==
+
+# Incorrect extra semi-colon after condition
+[node_kind=RepeatStatement]
+REPEAT
+UNTIL TRUE;
+END REPEAT;
+--
+ERROR: Syntax error: Expected keyword END but got ";" [at 2:11]
+UNTIL TRUE;
+          ^
+==
+
+# Incorrect end.
+[node_kind=RepeatStatement]
+REPEAT
+  SELECT 1;
+UNTIL TRUE
+END LOOP;
+--
+ERROR: Syntax error: Expected keyword REPEAT but got keyword LOOP [at 4:5]
+END LOOP;
+    ^
+==
+
+# Unclosed loop inside of Repeat.
+[node_kind=RepeatStatement]
+REPEAT
+LOOP
+  SELECT 1;
+UNTIL TRUE
+END REPEAT;
+--
+ERROR: Syntax error: Expected keyword END but got keyword UNTIL [at 4:1]
+UNTIL TRUE
+^
+==
+
+# Missing UNTIL.
+[node_kind=RepeatStatement]
+REPEAT
+  SELECT 1;
+END REPEAT;
+--
+ERROR: Syntax error: Expected keyword UNTIL but got keyword END [at 3:1]
+END REPEAT;
+^
+==
+
+# REPEAT feature disabled
+[language_features=NONE]
+[node_kind=RepeatStatement]
+REPEAT
+  SELECT 3;
+UNTIL TRUE
+END REPEAT
+--
+ERROR: REPEAT is not supported [at 1:1]
+REPEAT
+^
+==
+
+# FOR...IN with empty body
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1)
+DO
+END FOR;
+--
+Script [0-31] [FOR x IN (...DO END FOR;]
+  StatementList [0-31] [FOR x IN (...DO END FOR;]
+    ForInStatement [0-30] [FOR x IN (SELECT 1) DO END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-18] [SELECT 1]
+        Select [10-18] [SELECT 1]
+          SelectList [17-18] [1]
+            SelectColumn [17-18] [1]
+              IntLiteral(1) [17-18] [1]
+      StatementList [22-22] []
+--
+FOR x IN (
+SELECT
+  1
+)
+DO
+END FOR ;
+==
+
+# FOR...IN with single line in body
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1)
+DO
+  SELECT x;
+END FOR;
+--
+Script [0-43] [FOR x IN (...; END FOR;]
+  StatementList [0-43] [FOR x IN (...; END FOR;]
+    ForInStatement [0-42] [FOR x IN (...x; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-18] [SELECT 1]
+        Select [10-18] [SELECT 1]
+          SelectList [17-18] [1]
+            SelectColumn [17-18] [1]
+              IntLiteral(1) [17-18] [1]
+      StatementList [25-34] [SELECT x;]
+        QueryStatement [25-33] [SELECT x]
+          Query [25-33] [SELECT x]
+            Select [25-33] [SELECT x]
+              SelectList [32-33] [x]
+                SelectColumn [32-33] [x]
+                  PathExpression [32-33] [x]
+                    Identifier(x) [32-33] [x]
+--
+FOR x IN (
+SELECT
+  1
+)
+DO
+  SELECT
+    x
+  ;
+END FOR ;
+==
+
+# FOR...IN with multiple lines in body
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1, 2, 3)
+DO
+  SELECT x;
+  SELECT y;
+  SELECT 1;
+END FOR;
+--
+Script [0-73] [FOR x IN (...; END FOR;]
+  StatementList [0-73] [FOR x IN (...; END FOR;]
+    ForInStatement [0-72] [FOR x IN (...1; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-24] [SELECT 1, 2, 3]
+        Select [10-24] [SELECT 1, 2, 3]
+          SelectList [17-24] [1, 2, 3]
+            SelectColumn [17-18] [1]
+              IntLiteral(1) [17-18] [1]
+            SelectColumn [20-21] [2]
+              IntLiteral(2) [20-21] [2]
+            SelectColumn [23-24] [3]
+              IntLiteral(3) [23-24] [3]
+      StatementList [31-64] [SELECT x;...SELECT 1;]
+        QueryStatement [31-39] [SELECT x]
+          Query [31-39] [SELECT x]
+            Select [31-39] [SELECT x]
+              SelectList [38-39] [x]
+                SelectColumn [38-39] [x]
+                  PathExpression [38-39] [x]
+                    Identifier(x) [38-39] [x]
+        QueryStatement [43-51] [SELECT y]
+          Query [43-51] [SELECT y]
+            Select [43-51] [SELECT y]
+              SelectList [50-51] [y]
+                SelectColumn [50-51] [y]
+                  PathExpression [50-51] [y]
+                    Identifier(y) [50-51] [y]
+        QueryStatement [55-63] [SELECT 1]
+          Query [55-63] [SELECT 1]
+            Select [55-63] [SELECT 1]
+              SelectList [62-63] [1]
+                SelectColumn [62-63] [1]
+                  IntLiteral(1) [62-63] [1]
+--
+FOR x IN (
+SELECT
+  1,
+  2,
+  3
+)
+DO
+  SELECT
+    x
+  ;
+  SELECT
+    y
+  ;
+  SELECT
+    1
+  ;
+END FOR ;
+==
+
+# FOR...IN with FROM in query
+[node_kind=ForInStatement]
+FOR x IN (SELECT col1, col2 FROM tables.table1)
+DO
+  SELECT x;
+END FOR;
+--
+Script [0-71] [FOR x IN (...; END FOR;]
+  StatementList [0-71] [FOR x IN (...; END FOR;]
+    ForInStatement [0-70] [FOR x IN (...x; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-46] [SELECT col1...tables.table1]
+        Select [10-46] [SELECT col1...tables.table1]
+          SelectList [17-27] [col1, col2]
+            SelectColumn [17-21] [col1]
+              PathExpression [17-21] [col1]
+                Identifier(col1) [17-21] [col1]
+            SelectColumn [23-27] [col2]
+              PathExpression [23-27] [col2]
+                Identifier(col2) [23-27] [col2]
+          FromClause [28-46] [FROM tables.table1]
+            TablePathExpression [33-46] [tables.table1]
+              PathExpression [33-46] [tables.table1]
+                Identifier(tables) [33-39] [tables]
+                Identifier(table1) [40-46] [table1]
+      StatementList [53-62] [SELECT x;]
+        QueryStatement [53-61] [SELECT x]
+          Query [53-61] [SELECT x]
+            Select [53-61] [SELECT x]
+              SelectList [60-61] [x]
+                SelectColumn [60-61] [x]
+                  PathExpression [60-61] [x]
+                    Identifier(x) [60-61] [x]
+--
+FOR x IN (
+SELECT
+  col1,
+  col2
+FROM
+  tables.table1
+)
+DO
+  SELECT
+    x
+  ;
+END FOR ;
+==
+
+# FOR...IN with WITH in query
+[node_kind=ForInStatement]
+FOR x IN (WITH dogs AS (SELECT * FROM animals.dogs) SELECT name, breed FROM dogs)
+DO
+  SELECT x.name;
+  SELECT x.breed;
+END FOR;
+--
+Script [0-128] [FOR x IN (...; END FOR;]
+  StatementList [0-128] [FOR x IN (...; END FOR;]
+    ForInStatement [0-127] [FOR x IN (...breed; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-80] [WITH dogs...FROM dogs]
+        WithClause [10-51] [WITH dogs...animals.dogs)]
+          WithClauseEntry [15-51] [dogs AS (SELECT...nimals.dogs)]
+            AliasedQuery [15-51] [dogs AS (SELECT...nimals.dogs)]
+              Identifier(dogs) [15-19] [dogs]
+              Query [23-51] [(SELECT * FROM animals.dogs)]
+                Select [24-50] [SELECT * FROM animals.dogs]
+                  SelectList [31-32] [*]
+                    SelectColumn [31-32] [*]
+                      Star(*) [31-32] [*]
+                  FromClause [33-50] [FROM animals.dogs]
+                    TablePathExpression [38-50] [animals.dogs]
+                      PathExpression [38-50] [animals.dogs]
+                        Identifier(animals) [38-45] [animals]
+                        Identifier(dogs) [46-50] [dogs]
+        Select [52-80] [SELECT name, breed FROM dogs]
+          SelectList [59-70] [name, breed]
+            SelectColumn [59-63] [name]
+              PathExpression [59-63] [name]
+                Identifier(name) [59-63] [name]
+            SelectColumn [65-70] [breed]
+              PathExpression [65-70] [breed]
+                Identifier(breed) [65-70] [breed]
+          FromClause [71-80] [FROM dogs]
+            TablePathExpression [76-80] [dogs]
+              PathExpression [76-80] [dogs]
+                Identifier(dogs) [76-80] [dogs]
+      StatementList [87-119] [SELECT x.name...ELECT x.breed;]
+        QueryStatement [87-100] [SELECT x.name]
+          Query [87-100] [SELECT x.name]
+            Select [87-100] [SELECT x.name]
+              SelectList [94-100] [x.name]
+                SelectColumn [94-100] [x.name]
+                  PathExpression [94-100] [x.name]
+                    Identifier(x) [94-95] [x]
+                    Identifier(name) [96-100] [name]
+        QueryStatement [104-118] [SELECT x.breed]
+          Query [104-118] [SELECT x.breed]
+            Select [104-118] [SELECT x.breed]
+              SelectList [111-118] [x.breed]
+                SelectColumn [111-118] [x.breed]
+                  PathExpression [111-118] [x.breed]
+                    Identifier(x) [111-112] [x]
+                    Identifier(breed) [113-118] [breed]
+--
+FOR x IN (WITH
+  dogs AS (
+    SELECT
+      *
+    FROM
+      animals.dogs
+  )
+SELECT
+  name,
+  breed
+FROM
+  dogs
+)
+DO
+  SELECT
+    x.name
+  ;
+  SELECT
+    x.breed
+  ;
+END FOR ;
+==
+
+# FOR...IN with PIVOT in query
+[node_kind=ForInStatement]
+FOR x IN (SELECT * FROM t PIVOT(SUM(a), SUM(b) FOR b IN (0, 1)))
+DO
+  SELECT x;
+END FOR;
+--
+Script [0-88] [FOR x IN (...; END FOR;]
+  StatementList [0-88] [FOR x IN (...; END FOR;]
+    ForInStatement [0-87] [FOR x IN (...x; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-63] [SELECT * FROM...IN (0, 1))]
+        Select [10-63] [SELECT * FROM...IN (0, 1))]
+          SelectList [17-18] [*]
+            SelectColumn [17-18] [*]
+              Star(*) [17-18] [*]
+          FromClause [19-63] [FROM t PIVOT...IN (0, 1))]
+            TablePathExpression [24-63] [t PIVOT(SUM...IN (0, 1))]
+              PathExpression [24-25] [t]
+                Identifier(t) [24-25] [t]
+              PivotClause [26-63] [PIVOT(SUM(...IN (0, 1))]
+                PivotExpressionList [32-46] [SUM(a), SUM(b)]
+                  PivotExpression [32-38] [SUM(a)]
+                    FunctionCall [32-38] [SUM(a)]
+                      PathExpression [32-35] [SUM]
+                        Identifier(SUM) [32-35] [SUM]
+                      PathExpression [36-37] [a]
+                        Identifier(a) [36-37] [a]
+                  PivotExpression [40-46] [SUM(b)]
+                    FunctionCall [40-46] [SUM(b)]
+                      PathExpression [40-43] [SUM]
+                        Identifier(SUM) [40-43] [SUM]
+                      PathExpression [44-45] [b]
+                        Identifier(b) [44-45] [b]
+                PathExpression [51-52] [b]
+                  Identifier(b) [51-52] [b]
+                PivotValueList [57-61] [0, 1]
+                  PivotValue [57-58] [0]
+                    IntLiteral(0) [57-58] [0]
+                  PivotValue [60-61] [1]
+                    IntLiteral(1) [60-61] [1]
+      StatementList [70-79] [SELECT x;]
+        QueryStatement [70-78] [SELECT x]
+          Query [70-78] [SELECT x]
+            Select [70-78] [SELECT x]
+              SelectList [77-78] [x]
+                SelectColumn [77-78] [x]
+                  PathExpression [77-78] [x]
+                    Identifier(x) [77-78] [x]
+--
+FOR x IN (
+SELECT
+  *
+FROM
+  t PIVOT(SUM(a), SUM(b) FOR b IN (0, 1))
+)
+DO
+  SELECT
+    x
+  ;
+END FOR ;
+==
+
+# FOR...IN with TABLESAMPLE in query
+[node_kind=ForInStatement]
+FOR x IN (SELECT uId FROM Users TABLESAMPLE RESERVOIR (100 ROWS) REPEATABLE(10))
+DO
+  SELECT x;
+END FOR;
+--
+Script [0-104] [FOR x IN (...; END FOR;]
+  StatementList [0-104] [FOR x IN (...; END FOR;]
+    ForInStatement [0-103] [FOR x IN (...x; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-79] [SELECT uId...REPEATABLE(10)]
+        Select [10-79] [SELECT uId...REPEATABLE(10)]
+          SelectList [17-20] [uId]
+            SelectColumn [17-20] [uId]
+              PathExpression [17-20] [uId]
+                Identifier(uId) [17-20] [uId]
+          FromClause [21-79] [FROM Users...REPEATABLE(10)]
+            TablePathExpression [26-79] [Users TABLESAMPLE...ATABLE(10)]
+              PathExpression [26-31] [Users]
+                Identifier(Users) [26-31] [Users]
+              SampleClause [32-79] [TABLESAMPLE...REPEATABLE(10)]
+                Identifier(RESERVOIR) [44-53] [RESERVOIR]
+                SampleSize [55-63] [100 ROWS]
+                  IntLiteral(100) [55-58] [100]
+                SampleSuffix [65-79] [REPEATABLE(10)]
+                  RepeatableClause [65-79] [REPEATABLE(10)]
+                    IntLiteral(10) [76-78] [10]
+      StatementList [86-95] [SELECT x;]
+        QueryStatement [86-94] [SELECT x]
+          Query [86-94] [SELECT x]
+            Select [86-94] [SELECT x]
+              SelectList [93-94] [x]
+                SelectColumn [93-94] [x]
+                  PathExpression [93-94] [x]
+                    Identifier(x) [93-94] [x]
+--
+FOR x IN (
+SELECT
+  uId
+FROM
+  Users TABLESAMPLE RESERVOIR(100 ROWS) REPEATABLE (10)
+)
+DO
+  SELECT
+    x
+  ;
+END FOR ;
+==
+
+# Nested FOR...IN
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1, 2, 3)
+DO
+  FOR y IN (SELECT 4, 5)
+  DO
+    SELECT x;
+    SELECT y;
+  END FOR;
+END FOR;
+--
+Script [0-106] [FOR x IN (...; END FOR;]
+  StatementList [0-106] [FOR x IN (...; END FOR;]
+    ForInStatement [0-105] [FOR x IN (...FOR; END FOR]
+      Identifier(x) [4-5] [x]
+      Query [10-24] [SELECT 1, 2, 3]
+        Select [10-24] [SELECT 1, 2, 3]
+          SelectList [17-24] [1, 2, 3]
+            SelectColumn [17-18] [1]
+              IntLiteral(1) [17-18] [1]
+            SelectColumn [20-21] [2]
+              IntLiteral(2) [20-21] [2]
+            SelectColumn [23-24] [3]
+              IntLiteral(3) [23-24] [3]
+      StatementList [31-97] [FOR y IN (...END FOR;]
+        ForInStatement [31-96] [FOR y IN (...END FOR]
+          Identifier(y) [35-36] [y]
+          Query [41-52] [SELECT 4, 5]
+            Select [41-52] [SELECT 4, 5]
+              SelectList [48-52] [4, 5]
+                SelectColumn [48-49] [4]
+                  IntLiteral(4) [48-49] [4]
+                SelectColumn [51-52] [5]
+                  IntLiteral(5) [51-52] [5]
+          StatementList [63-86] [SELECT x;     SELECT y;]
+            QueryStatement [63-71] [SELECT x]
+              Query [63-71] [SELECT x]
+                Select [63-71] [SELECT x]
+                  SelectList [70-71] [x]
+                    SelectColumn [70-71] [x]
+                      PathExpression [70-71] [x]
+                        Identifier(x) [70-71] [x]
+            QueryStatement [77-85] [SELECT y]
+              Query [77-85] [SELECT y]
+                Select [77-85] [SELECT y]
+                  SelectList [84-85] [y]
+                    SelectColumn [84-85] [y]
+                      PathExpression [84-85] [y]
+                        Identifier(y) [84-85] [y]
+--
+FOR x IN (
+SELECT
+  1,
+  2,
+  3
+)
+DO
+  FOR y IN (
+  SELECT
+    4,
+    5
+  )
+  DO
+    SELECT
+      x
+    ;
+    SELECT
+      y
+    ;
+  END FOR ;
+END FOR ;
+==
+
+# FOR...IN inside LOOP
+LOOP
+  FOR y IN (SELECT 1, 2)
+  DO
+    SELECT y;
+  END FOR;
+END LOOP;
+--
+Script [0-69] [LOOP   FOR...END LOOP;]
+  StatementList [0-69] [LOOP   FOR...END LOOP;]
+    WhileStatement [0-68] [LOOP   FOR...; END LOOP]
+      StatementList [7-59] [FOR y IN (...END FOR;]
+        ForInStatement [7-58] [FOR y IN (...END FOR]
+          Identifier(y) [11-12] [y]
+          Query [17-28] [SELECT 1, 2]
+            Select [17-28] [SELECT 1, 2]
+              SelectList [24-28] [1, 2]
+                SelectColumn [24-25] [1]
+                  IntLiteral(1) [24-25] [1]
+                SelectColumn [27-28] [2]
+                  IntLiteral(2) [27-28] [2]
+          StatementList [39-48] [SELECT y;]
+            QueryStatement [39-47] [SELECT y]
+              Query [39-47] [SELECT y]
+                Select [39-47] [SELECT y]
+                  SelectList [46-47] [y]
+                    SelectColumn [46-47] [y]
+                      PathExpression [46-47] [y]
+                        Identifier(y) [46-47] [y]
+--
+LOOP
+  FOR y IN (
+  SELECT
+    1,
+    2
+  )
+  DO
+    SELECT
+      y
+    ;
+  END FOR ;
+END LOOP ;
+==
+
+# REPEAT inside FOR inside WHILE
+WHILE TRUE DO
+  FOR y IN (SELECT 1, 2)
+  DO
+    REPEAT
+      SELECT 3, 4;
+    UNTIL FALSE
+    END REPEAT;
+  END FOR;
+END WHILE;
+--
+Script [0-127] [WHILE TRUE...END WHILE;]
+  StatementList [0-127] [WHILE TRUE...END WHILE;]
+    WhileStatement [0-126] [WHILE TRUE...END WHILE]
+      BooleanLiteral(TRUE) [6-10] [TRUE]
+      StatementList [16-116] [FOR y IN (...END FOR;]
+        ForInStatement [16-115] [FOR y IN (...END FOR]
+          Identifier(y) [20-21] [y]
+          Query [26-37] [SELECT 1, 2]
+            Select [26-37] [SELECT 1, 2]
+              SelectList [33-37] [1, 2]
+                SelectColumn [33-34] [1]
+                  IntLiteral(1) [33-34] [1]
+                SelectColumn [36-37] [2]
+                  IntLiteral(2) [36-37] [2]
+          StatementList [48-105] [REPEAT...END REPEAT;]
+            RepeatStatement [48-104] [REPEAT...END REPEAT]
+              StatementList [61-73] [SELECT 3, 4;]
+                QueryStatement [61-72] [SELECT 3, 4]
+                  Query [61-72] [SELECT 3, 4]
+                    Select [61-72] [SELECT 3, 4]
+                      SelectList [68-72] [3, 4]
+                        SelectColumn [68-69] [3]
+                          IntLiteral(3) [68-69] [3]
+                        SelectColumn [71-72] [4]
+                          IntLiteral(4) [71-72] [4]
+              UntilClause [78-89] [UNTIL FALSE]
+                BooleanLiteral(FALSE) [84-89] [FALSE]
+--
+WHILE TRUE DO
+  FOR y IN (
+  SELECT
+    1,
+    2
+  )
+  DO
+    REPEAT
+      SELECT
+        3,
+        4
+      ;
+    UNTIL FALSE
+    END REPEAT ;
+  END FOR ;
+END WHILE ;
+==
+
+# FOR...IN in lowercase
+[node_kind=ForInStatement]
+for x in (select 1) do select x; select 2; end for;
+--
+Script [0-51] [for x in (...; end for;]
+  StatementList [0-51] [for x in (...; end for;]
+    ForInStatement [0-50] [for x in (...2; end for]
+      Identifier(x) [4-5] [x]
+      Query [10-18] [select 1]
+        Select [10-18] [select 1]
+          SelectList [17-18] [1]
+            SelectColumn [17-18] [1]
+              IntLiteral(1) [17-18] [1]
+      StatementList [23-42] [select x; select 2;]
+        QueryStatement [23-31] [select x]
+          Query [23-31] [select x]
+            Select [23-31] [select x]
+              SelectList [30-31] [x]
+                SelectColumn [30-31] [x]
+                  PathExpression [30-31] [x]
+                    Identifier(x) [30-31] [x]
+        QueryStatement [33-41] [select 2]
+          Query [33-41] [select 2]
+            Select [33-41] [select 2]
+              SelectList [40-41] [2]
+                SelectColumn [40-41] [2]
+                  IntLiteral(2) [40-41] [2]
+--
+FOR x IN (
+SELECT
+  1
+)
+DO
+  SELECT
+    x
+  ;
+  SELECT
+    2
+  ;
+END FOR ;
+==
+
+# FOR...IN disabled
+[language_features=NONE]
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1)
+DO
+  SELECT x;
+END FOR;
+--
+ERROR: FOR...IN is not supported [at 1:1]
+FOR x IN (SELECT 1)
+^
+==
+
+# Incorrect semicolon after DO
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1)
+DO;
+  SELECT x;
+END FOR;
+--
+ERROR: Syntax error: Unexpected ";" [at 2:3]
+DO;
+  ^
+==
+
+# Incorrect semicolon after query
+[node_kind=ForInStatement]
+FOR x IN (SELECT 1;)
+DO
+  SELECT x;
+END FOR;
+--
+ERROR: Syntax error: Expected ")" but got ";" [at 1:19]
+FOR x IN (SELECT 1;)
+                  ^
+==
+
+# Missing query
+[node_kind=ForInStatement]
+FOR x IN ()
+DO
+  SELECT x;
+END FOR;
+--
+ERROR: Syntax error: Unexpected ")" [at 1:11]
+FOR x IN ()
+          ^
+==
+
+# Non-query loop query
+[node_kind=ForInStatement]
+FOR x IN (INSERT INTO t(z) VALUES (2))
+DO
+END FOR;
+--
+ERROR: Syntax error: Unexpected keyword INSERT [at 1:11]
+FOR x IN (INSERT INTO t(z) VALUES (2))
+          ^

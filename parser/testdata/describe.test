@@ -1,0 +1,296 @@
+describe ;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:10]
+describe ;
+         ^
+==
+
+desc;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:5]
+desc;
+    ^
+==
+
+{{describe|desc}} foo bar baz;
+--
+ALTERNATION GROUP: describe
+--
+ERROR: Syntax error: Expected end of input but got identifier "baz" [at 1:18]
+describe foo bar baz;
+                 ^
+--
+ALTERNATION GROUP: desc
+--
+ERROR: Syntax error: Expected end of input but got identifier "baz" [at 1:14]
+desc foo bar baz;
+             ^
+==
+
+describe foo;
+--
+DescribeStatement [0-12] [describe foo]
+  PathExpression [9-12] [foo]
+    Identifier(foo) [9-12] [foo]
+--
+DESCRIBE foo
+==
+
+{{describe|desc}} namespace.foo;
+--
+ALTERNATION GROUP: describe
+--
+DescribeStatement [0-22] [describe namespace.foo]
+  PathExpression [9-22] [namespace.foo]
+    Identifier(namespace) [9-18] [namespace]
+    Identifier(foo) [19-22] [foo]
+--
+DESCRIBE namespace.foo
+--
+ALTERNATION GROUP: desc
+--
+DescribeStatement [0-18] [desc namespace.foo]
+  PathExpression [5-18] [namespace.foo]
+    Identifier(namespace) [5-14] [namespace]
+    Identifier(foo) [15-18] [foo]
+--
+DESCRIBE namespace.foo
+==
+
+{{describe|desc}} INDEX myindex;
+--
+
+ALTERNATION GROUP: describe
+--
+DescribeStatement [0-22] [describe INDEX myindex]
+  Identifier(INDEX) [9-14] [INDEX]
+  PathExpression [15-22] [myindex]
+    Identifier(myindex) [15-22] [myindex]
+--
+DESCRIBE INDEX myindex
+--
+ALTERNATION GROUP: desc
+--
+DescribeStatement [0-18] [desc INDEX myindex]
+  Identifier(INDEX) [5-10] [INDEX]
+  PathExpression [11-18] [myindex]
+    Identifier(myindex) [11-18] [myindex]
+--
+DESCRIBE INDEX myindex
+==
+
+describe INDEX mynamespace.myindex;
+--
+DescribeStatement [0-34] [describe INDEX...space.myindex]
+  Identifier(INDEX) [9-14] [INDEX]
+  PathExpression [15-34] [mynamespace.myindex]
+    Identifier(mynamespace) [15-26] [mynamespace]
+    Identifier(myindex) [27-34] [myindex]
+--
+DESCRIBE INDEX mynamespace.myindex
+==
+
+describe FUNCTION myfunction;
+--
+DescribeStatement [0-28] [describe FUNCTION myfunction]
+  Identifier(`FUNCTION`) [9-17] [FUNCTION]
+  PathExpression [18-28] [myfunction]
+    Identifier(myfunction) [18-28] [myfunction]
+--
+DESCRIBE `FUNCTION` myfunction
+==
+
+describe FUNCTION mynamespace.myfunction;
+--
+DescribeStatement [0-40] [describe FUNCTION...myfunction]
+  Identifier(`FUNCTION`) [9-17] [FUNCTION]
+  PathExpression [18-40] [mynamespace.myfunction]
+    Identifier(mynamespace) [18-29] [mynamespace]
+    Identifier(myfunction) [30-40] [myfunction]
+--
+DESCRIBE `FUNCTION` mynamespace.myfunction
+==
+
+describe TVF mytvf;
+--
+DescribeStatement [0-18] [describe TVF mytvf]
+  Identifier(TVF) [9-12] [TVF]
+  PathExpression [13-18] [mytvf]
+    Identifier(mytvf) [13-18] [mytvf]
+--
+DESCRIBE TVF mytvf
+==
+
+describe TVF mynamespace.mytvf;
+--
+DescribeStatement [0-30] [describe TVF mynamespace.mytvf]
+  Identifier(TVF) [9-12] [TVF]
+  PathExpression [13-30] [mynamespace.mytvf]
+    Identifier(mynamespace) [13-24] [mynamespace]
+    Identifier(mytvf) [25-30] [mytvf]
+--
+DESCRIBE TVF mynamespace.mytvf
+==
+
+describe TYPE mytype;
+--
+DescribeStatement [0-20] [describe TYPE mytype]
+  Identifier(TYPE) [9-13] [TYPE]
+  PathExpression [14-20] [mytype]
+    Identifier(mytype) [14-20] [mytype]
+--
+DESCRIBE TYPE mytype
+==
+
+describe TYPE mynamespace.mytype;
+--
+
+DescribeStatement [0-32] [describe TYPE...mespace.mytype]
+  Identifier(TYPE) [9-13] [TYPE]
+  PathExpression [14-32] [mynamespace.mytype]
+    Identifier(mynamespace) [14-25] [mynamespace]
+    Identifier(mytype) [26-32] [mytype]
+--
+DESCRIBE TYPE mynamespace.mytype
+==
+
+describe foo.bar foo.bar;
+--
+
+ERROR: Syntax error: Expected end of input but got identifier "foo" [at 1:18]
+describe foo.bar foo.bar;
+                 ^
+==
+
+describe foo.bar baz;
+--
+ERROR: Syntax error: Expected end of input but got identifier "baz" [at 1:18]
+describe foo.bar baz;
+                 ^
+==
+
+{{describe|desc}} foo FROM namespace;
+--
+ALTERNATION GROUP: describe
+--
+DescribeStatement [0-27] [describe foo FROM namespace]
+  PathExpression [9-12] [foo]
+    Identifier(foo) [9-12] [foo]
+  PathExpression [18-27] [namespace]
+    Identifier(namespace) [18-27] [namespace]
+--
+DESCRIBE foo FROM namespace
+--
+ALTERNATION GROUP: desc
+--
+DescribeStatement [0-23] [desc foo FROM namespace]
+  PathExpression [5-8] [foo]
+    Identifier(foo) [5-8] [foo]
+  PathExpression [14-23] [namespace]
+    Identifier(namespace) [14-23] [namespace]
+--
+DESCRIBE foo FROM namespace
+==
+
+{{describe|desc}} COLUMN foo FROM T.suffix;
+--
+ALTERNATION GROUP: describe
+--
+DescribeStatement [0-33] [describe COLUMN...ROM T.suffix]
+  Identifier(COLUMN) [9-15] [COLUMN]
+  PathExpression [16-19] [foo]
+    Identifier(foo) [16-19] [foo]
+  PathExpression [25-33] [T.suffix]
+    Identifier(T) [25-26] [T]
+    Identifier(suffix) [27-33] [suffix]
+--
+DESCRIBE COLUMN foo FROM T.suffix
+--
+ALTERNATION GROUP: desc
+--
+DescribeStatement [0-29] [desc COLUMN foo FROM T.suffix]
+  Identifier(COLUMN) [5-11] [COLUMN]
+  PathExpression [12-15] [foo]
+    Identifier(foo) [12-15] [foo]
+  PathExpression [21-29] [T.suffix]
+    Identifier(T) [21-22] [T]
+    Identifier(suffix) [23-29] [suffix]
+--
+DESCRIBE COLUMN foo FROM T.suffix
+==
+
+{{describe|desc}} TYPE prefixed.name FROM Catalog.`With`.Dots;
+--
+ALTERNATION GROUP: describe
+--
+DescribeStatement [0-52] [describe TYPE...With`.Dots]
+  Identifier(TYPE) [9-13] [TYPE]
+  PathExpression [14-27] [prefixed.name]
+    Identifier(prefixed) [14-22] [prefixed]
+    Identifier(name) [23-27] [name]
+  PathExpression [33-52] [Catalog.`With`.Dots]
+    Identifier(Catalog) [33-40] [Catalog]
+    Identifier(`With`) [41-47] [`With`]
+    Identifier(Dots) [48-52] [Dots]
+--
+DESCRIBE TYPE prefixed.name FROM Catalog.`With`.Dots
+--
+ALTERNATION GROUP: desc
+--
+DescribeStatement [0-48] [desc TYPE...With`.Dots]
+  Identifier(TYPE) [5-9] [TYPE]
+  PathExpression [10-23] [prefixed.name]
+    Identifier(prefixed) [10-18] [prefixed]
+    Identifier(name) [19-23] [name]
+  PathExpression [29-48] [Catalog.`With`.Dots]
+    Identifier(Catalog) [29-36] [Catalog]
+    Identifier(`With`) [37-43] [`With`]
+    Identifier(Dots) [44-48] [Dots]
+--
+DESCRIBE TYPE prefixed.name FROM Catalog.`With`.Dots
+==
+
+describe foo.bar FROM ;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:23]
+describe foo.bar FROM ;
+                      ^
+==
+
+[language_features=NONE,{{|+ALLOW_DASHES_IN_TABLE_NAME}}]
+DESCRIBE my-project.dataset.table;
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Table name contains '-' character. The dashed identifier part of the table name needs to be quoted: `my-project` [at 1:10]
+DESCRIBE my-project.dataset.table;
+         ^
+--
+ALTERNATION GROUP: +ALLOW_DASHES_IN_TABLE_NAME
+--
+DescribeStatement [0-33] [DESCRIBE my...dataset.table]
+  PathExpression [9-33] [my-project.dataset.table]
+    Identifier(`my-project`) [9-19] [my-project]
+    Identifier(dataset) [20-27] [dataset]
+    Identifier(table) [28-33] [table]
+--
+DESCRIBE `my-project`.dataset.table
+==
+
+[language_features=NONE,+ALLOW_DASHES_IN_TABLE_NAME{{|,+ALLOW_SLASH_PATHS}}]
+DESCRIBE /span/db/my-mdb-grp:my_db.Table
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Table name contains '/' character. The slashed identifier part of the table name needs to be quoted: `/span/db/my-mdb-grp:my_db` [at 1:10]
+DESCRIBE /span/db/my-mdb-grp:my_db.Table
+         ^
+--
+ALTERNATION GROUP: ,+ALLOW_SLASH_PATHS
+--
+DescribeStatement [0-40] [DESCRIBE /...my_db.Table]
+  PathExpression [9-40] [/span/db/my...my_db.Table]
+    Identifier(`/span/db/my-mdb-grp:my_db`) [9-34] [/span/db/my-mdb-grp:my_db]
+    Identifier(Table) [35-40] [Table]
+--
+DESCRIBE `/span/db/my-mdb-grp:my_db`.Table

@@ -1,0 +1,243 @@
+create row policy on t1 to 'foo@google.com' using(c1 = 'foo');
+--
+CreateRowAccessPolicyStatement [0-61] [create row...c1 = 'foo')]
+  PathExpression [21-23] [t1]
+    Identifier(t1) [21-23] [t1]
+  GrantToClause [24-43] [to 'foo@google.com']
+    GranteeList [27-43] ['foo@google.com']
+      StringLiteral [27-43] ['foo@google.com']
+        StringLiteralComponent('foo@google.com') [27-43] ['foo@google.com']
+  FilterUsingClause [44-61] [using(c1 = 'foo')]
+    BinaryExpression(=) [50-60] [c1 = 'foo']
+      PathExpression [50-52] [c1]
+        Identifier(c1) [50-52] [c1]
+      StringLiteral [55-60] ['foo']
+        StringLiteralComponent('foo') [55-60] ['foo']
+--
+CREATE ROW POLICY ON t1 TO 'foo@google.com' USING (c1 = 'foo')
+==
+
+create row policy p1 on t1 to 'mdbuser/bar' using(c2 = 'foo');
+--
+CreateRowAccessPolicyStatement [0-61] [create row...c2 = 'foo')]
+  PathExpression [24-26] [t1]
+    Identifier(t1) [24-26] [t1]
+  GrantToClause [27-43] [to 'mdbuser/bar']
+    GranteeList [30-43] ['mdbuser/bar']
+      StringLiteral [30-43] ['mdbuser/bar']
+        StringLiteralComponent('mdbuser/bar') [30-43] ['mdbuser/bar']
+  FilterUsingClause [44-61] [using(c2 = 'foo')]
+    BinaryExpression(=) [50-60] [c2 = 'foo']
+      PathExpression [50-52] [c2]
+        Identifier(c2) [50-52] [c2]
+      StringLiteral [55-60] ['foo']
+        StringLiteralComponent('foo') [55-60] ['foo']
+  PathExpression [18-20] [p1]
+    Identifier(p1) [18-20] [p1]
+--
+CREATE ROW POLICY p1 ON t1 TO 'mdbuser/bar' USING (c2 = 'foo')
+==
+
+create row policy on t1 to 'foo@google.com', 'mdbgroup/bar' using(c1);
+--
+CreateRowAccessPolicyStatement [0-69] [create row...using(c1)]
+  PathExpression [21-23] [t1]
+    Identifier(t1) [21-23] [t1]
+  GrantToClause [24-59] [to 'foo@google...mdbgroup/bar']
+    GranteeList [27-59] ['foo@google...mdbgroup/bar']
+      StringLiteral [27-43] ['foo@google.com']
+        StringLiteralComponent('foo@google.com') [27-43] ['foo@google.com']
+      StringLiteral [45-59] ['mdbgroup/bar']
+        StringLiteralComponent('mdbgroup/bar') [45-59] ['mdbgroup/bar']
+  FilterUsingClause [60-69] [using(c1)]
+    PathExpression [66-68] [c1]
+      Identifier(c1) [66-68] [c1]
+--
+CREATE ROW POLICY ON t1 TO 'foo@google.com', 'mdbgroup/bar' USING (c1)
+==
+
+create row policy on n1.t1 to 'foo@google.com', 'mdbgroup/bar' using(c1);
+--
+CreateRowAccessPolicyStatement [0-72] [create row...using(c1)]
+  PathExpression [21-26] [n1.t1]
+    Identifier(n1) [21-23] [n1]
+    Identifier(t1) [24-26] [t1]
+  GrantToClause [27-62] [to 'foo@google...mdbgroup/bar']
+    GranteeList [30-62] ['foo@google...mdbgroup/bar']
+      StringLiteral [30-46] ['foo@google.com']
+        StringLiteralComponent('foo@google.com') [30-46] ['foo@google.com']
+      StringLiteral [48-62] ['mdbgroup/bar']
+        StringLiteralComponent('mdbgroup/bar') [48-62] ['mdbgroup/bar']
+  FilterUsingClause [63-72] [using(c1)]
+    PathExpression [69-71] [c1]
+      Identifier(c1) [69-71] [c1]
+--
+CREATE ROW POLICY ON n1.t1 TO 'foo@google.com', 'mdbgroup/bar' USING (c1)
+==
+
+create row policy on n1.t1 to 'foo@google.com', 'mdbgroup/bar' using(1);
+--
+CreateRowAccessPolicyStatement [0-71] [create row...' using(1)]
+  PathExpression [21-26] [n1.t1]
+    Identifier(n1) [21-23] [n1]
+    Identifier(t1) [24-26] [t1]
+  GrantToClause [27-62] [to 'foo@google...mdbgroup/bar']
+    GranteeList [30-62] ['foo@google...mdbgroup/bar']
+      StringLiteral [30-46] ['foo@google.com']
+        StringLiteralComponent('foo@google.com') [30-46] ['foo@google.com']
+      StringLiteral [48-62] ['mdbgroup/bar']
+        StringLiteralComponent('mdbgroup/bar') [48-62] ['mdbgroup/bar']
+  FilterUsingClause [63-71] [using(1)]
+    IntLiteral(1) [69-70] [1]
+--
+CREATE ROW POLICY ON n1.t1 TO 'foo@google.com', 'mdbgroup/bar' USING (1)
+==
+
+create row policy on n1.t1 to 'foo@google.com', 'mdbgroup/bar';
+--
+ERROR: Syntax error: Expected keyword FILTER or keyword USING but got ";" [at 1:63]
+create row policy on n1.t1 to 'foo@google.com', 'mdbgroup/bar';
+                                                              ^
+==
+
+create row policy on n1.t1 using(true);
+--
+CreateRowAccessPolicyStatement [0-38] [create row...using(true)]
+  PathExpression [21-26] [n1.t1]
+    Identifier(n1) [21-23] [n1]
+    Identifier(t1) [24-26] [t1]
+  FilterUsingClause [27-38] [using(true)]
+    BooleanLiteral(true) [33-37] [true]
+--
+CREATE ROW POLICY ON n1.t1 USING (true)
+==
+
+create row policy to 'mdbuser/foo' using(true);
+--
+ERROR: Syntax error: Expected keyword ON but got keyword TO [at 1:19]
+create row policy to 'mdbuser/foo' using(true);
+                  ^
+==
+
+create row policy on t1 to foo using(true);
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got identifier "foo" [at 1:28]
+create row policy on t1 to foo using(true);
+                           ^
+==
+
+create policy on t1 to 'foo@google.com' using(true);
+--
+ERROR: Syntax error: Unexpected keyword POLICY [at 1:8]
+create policy on t1 to 'foo@google.com' using(true);
+       ^
+==
+
+# CREATE scope modifiers (TEMP, PUBLIC, PRIVATE) are not allowed for
+# CREATE ROW POLICY.
+create {{temp|temporary|public|private}} row policy on t1
+to 'foo@google.com' using(true);
+--
+ALTERNATION GROUP: temp
+--
+ERROR: Syntax error: Unexpected keyword ROW [at 1:13]
+create temp row policy on t1
+            ^
+--
+ALTERNATION GROUP: temporary
+--
+ERROR: Syntax error: Unexpected keyword ROW [at 1:18]
+create temporary row policy on t1
+                 ^
+--
+ALTERNATION GROUP: public
+--
+ERROR: Syntax error: Unexpected keyword ROW [at 1:15]
+create public row policy on t1
+              ^
+--
+ALTERNATION GROUP: private
+--
+ERROR: Syntax error: Unexpected keyword ROW [at 1:16]
+create private row policy on t1
+               ^
+==
+
+create row policy on t1 @{a=1} to 'foo@google.com' using(true);
+--
+ERROR: Syntax error: Unexpected "@" [at 1:25]
+create row policy on t1 @{a=1} to 'foo@google.com' using(true);
+                        ^
+==
+
+create row policy on t1 to @test_param_string using(true);
+--
+CreateRowAccessPolicyStatement [0-57] [create row...using(true)]
+  PathExpression [21-23] [t1]
+    Identifier(t1) [21-23] [t1]
+  GrantToClause [24-45] [to @test_param_string]
+    GranteeList [27-45] [@test_param_string]
+      ParameterExpr [27-45] [@test_param_string]
+        Identifier(test_param_string) [28-45] [test_param_string]
+  FilterUsingClause [46-57] [using(true)]
+    BooleanLiteral(true) [52-56] [true]
+--
+CREATE ROW POLICY ON t1 TO @test_param_string USING (true)
+==
+
+create row policy on t1 to @@sysvar using(true);
+--
+CreateRowAccessPolicyStatement [0-47] [create row...using(true)]
+  PathExpression [21-23] [t1]
+    Identifier(t1) [21-23] [t1]
+  GrantToClause [24-35] [to @@sysvar]
+    GranteeList [27-35] [@@sysvar]
+      SystemVariableExpr [27-35] [@@sysvar]
+        PathExpression [29-35] [sysvar]
+          Identifier(sysvar) [29-35] [sysvar]
+  FilterUsingClause [36-47] [using(true)]
+    BooleanLiteral(true) [42-46] [true]
+--
+CREATE ROW POLICY ON t1 TO @@sysvar USING (true)
+==
+
+# Grantee list edge cases.
+create row policy on t1 to {{|concat("mdbuser/", "foo")|NULL|""|1}} using(true);
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got keyword USING [at 1:29]
+create row policy on t1 to  using(true);
+                            ^
+--
+ALTERNATION GROUP: concat("mdbuser/", "foo")
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got identifier "concat" [at 1:28]
+create row policy on t1 to concat("mdbuser/", "foo") using(true);
+                           ^
+--
+ALTERNATION GROUP: NULL
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got keyword NULL [at 1:28]
+create row policy on t1 to NULL using(true);
+                           ^
+--
+ALTERNATION GROUP: ""
+--
+CreateRowAccessPolicyStatement [0-41] [create row...using(true)]
+  PathExpression [21-23] [t1]
+    Identifier(t1) [21-23] [t1]
+  GrantToClause [24-29] [to ""]
+    GranteeList [27-29] [""]
+      StringLiteral [27-29] [""]
+        StringLiteralComponent("") [27-29] [""]
+  FilterUsingClause [30-41] [using(true)]
+    BooleanLiteral(true) [36-40] [true]
+--
+CREATE ROW POLICY ON t1 TO "" USING (true)
+--
+ALTERNATION GROUP: 1
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got integer literal "1" [at 1:28]
+create row policy on t1 to 1 using(true);
+                           ^

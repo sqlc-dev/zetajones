@@ -1,0 +1,240 @@
+[default macro_expansion_mode=lenient]
+DEFINE MACRO m1 FROM $group.tbl_$suffix a, r'b;"c'
+--
+DefineMacroStatement [0-50] [DEFINE MACRO...a, r'b;"c']
+  Identifier(m1) [13-15] [m1]
+  MacroBody(FROM $group.tbl_$suffix a, r'b;"c') [16-50] [FROM $group...a, r'b;"c']
+--
+DEFINE MACRO m1 FROM $group.tbl_$suffix a, r'b;"c'
+==
+
+# With semicolon at the end
+DEFINE MACRO m1 FROM $group.tbl_$suffix a, r'b;"c';
+--
+DefineMacroStatement [0-50] [DEFINE MACRO...a, r'b;"c']
+  Identifier(m1) [13-15] [m1]
+  MacroBody(FROM $group.tbl_$suffix a, r'b;"c') [16-50] [FROM $group...a, r'b;"c']
+--
+DEFINE MACRO m1 FROM $group.tbl_$suffix a, r'b;"c'
+==
+
+# Complex case with multiline, comments, and symbols
+DEFINE MACRO m a$1$other$2, "a$3;" -- Ignore the rest of this line
+# hash comment
+$x + /* ;intermediate comment; */ $y
+--
+DefineMacroStatement [0-118] [DEFINE MACRO...comment; */ $y]
+  Identifier(m) [13-14] [m]
+  MacroBody(a$1$other$2, "a$3;" -- Ignore the rest of this line
+\# hash comment
+$x + /* ;intermediate comment; */ $y) [15-118] [a$1$other$...comment; */ $y]
+--
+DEFINE MACRO m a$1$other$2, "a$3;" -- Ignore the rest of this line
+\# hash comment
+$x + /* ;intermediate comment; */ $y
+==
+
+# Invalid tokens are still invalid in macros
+DEFINE MACRO m1 "unfinished literal
+--
+ERROR: Syntax error: Unclosed string literal [at 1:17]
+DEFINE MACRO m1 "unfinished literal
+                ^
+==
+
+# Unfinished comment in macro
+DEFINE MACRO m1 /* unfinished comment
+--
+
+ERROR: Syntax error: Unclosed comment [at 1:17]
+DEFINE MACRO m1 /* unfinished comment
+                ^
+==
+
+# "3m" does not error in macro definitions.
+# Do not test GetParseTokens() because it errors when identifiers follow
+# literals without spaces.
+[macro_expansion_mode=strict]
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 3m
+--
+DefineMacroStatement [0-18] [DEFINE MACRO m1 3m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(3m) [16-18] [3m]
+--
+DEFINE MACRO m1 3m
+==
+
+# "3.3m" is not an error in macro definitions.
+[macro_expansion_mode=strict]
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 3.3m
+--
+DefineMacroStatement [0-20] [DEFINE MACRO m1 3.3m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(3.3m) [16-20] [3.3m]
+--
+DEFINE MACRO m1 3.3m
+==
+
+[macro_expansion_mode=strict]
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 .3m
+--
+DefineMacroStatement [0-19] [DEFINE MACRO m1 .3m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(.3m) [16-19] [.3m]
+--
+DEFINE MACRO m1.3m
+==
+
+[macro_expansion_mode=strict]
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 FULL .3E10m
+--
+DefineMacroStatement [0-27] [DEFINE MACRO m1 FULL .3E10m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(FULL .3E10m) [16-27] [FULL .3E10m]
+--
+DEFINE MACRO m1 FULL .3E10m
+==
+
+[macro_expansion_mode=strict]
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 3E10m
+--
+DefineMacroStatement [0-21] [DEFINE MACRO m1 3E10m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(3E10m) [16-21] [3E10m]
+--
+DEFINE MACRO m1 3E10m
+==
+
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 3m
+--
+DefineMacroStatement [0-18] [DEFINE MACRO m1 3m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(3m) [16-18] [3m]
+--
+DEFINE MACRO m1 3m
+==
+
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 3.3m
+--
+DefineMacroStatement [0-20] [DEFINE MACRO m1 3.3m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(3.3m) [16-20] [3.3m]
+--
+DEFINE MACRO m1 3.3m
+==
+
+DEFINE MACRO m1 .3m
+--
+DefineMacroStatement [0-19] [DEFINE MACRO m1 .3m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(.3m) [16-19] [.3m]
+--
+DEFINE MACRO m1.3m
+==
+
+[no_test_get_parse_tokens]
+DEFINE MACRO m1 3E10m
+--
+DefineMacroStatement [0-21] [DEFINE MACRO m1 3E10m]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(3E10m) [16-21] [3E10m]
+--
+DEFINE MACRO m1 3E10m
+==
+
+# Tokens do now splice, so * and / are acceptable as 2 tokens here
+DEFINE MACRO m1 */
+--
+
+DefineMacroStatement [0-18] [DEFINE MACRO m1 */]
+  Identifier(m1) [13-15] [m1]
+  MacroBody(*/) [16-18] [*/]
+--
+DEFINE MACRO m1 */
+==
+
+# Disabling the flag disallows '$'
+# Would it be nicer to say "Macros are not supported."?  It would be an easy fix
+[language_features=NONE]
+SELECT $1 + $2
+--
+ERROR: Syntax error: Unexpected "$1" [at 1:8]
+SELECT $1 + $2
+       ^
+==
+
+# The macro name cannot be a reserved keyword
+DEFINE macro EXCEPT $subquery;
+--
+DefineMacroStatement [0-29] [DEFINE macro EXCEPT $subquery]
+  Identifier(`EXCEPT`) [13-19] [EXCEPT]
+  MacroBody($subquery) [20-29] [$subquery]
+--
+DEFINE MACRO `EXCEPT` $subquery
+==
+
+# This looks like a bug. The EXCEPT keyword has some special magic in the lexer
+# that accomodates statement kind, but not macros.
+DEFINE macro foo EXCEPT $subquery;
+--
+DefineMacroStatement [0-33] [DEFINE macro...$subquery]
+  Identifier(foo) [13-16] [foo]
+  MacroBody(EXCEPT $subquery) [17-33] [EXCEPT $subquery]
+--
+DEFINE MACRO foo EXCEPT $subquery
+==
+
+# Macro name is empty identifier
+DEFINE MACRO ``;
+--
+ERROR: Syntax error: Invalid empty identifier [at 1:14]
+DEFINE MACRO ``;
+             ^
+==
+
+# Macro name is empty
+DEFINE MACRO ;
+--
+ERROR: Syntax error: Expected macro name but got ";" [at 1:14]
+DEFINE MACRO ;
+             ^
+==
+
+# Macro name is empty identifier, no semicolon
+DEFINE MACRO ``
+--
+ERROR: Syntax error: Invalid empty identifier [at 1:14]
+DEFINE MACRO ``
+             ^
+==
+
+# Macro name is empty, no semicolon
+DEFINE MACRO
+--
+ERROR: Syntax error: Expected macro name but got end of statement [at 1:13]
+DEFINE MACRO
+            ^
+==
+
+# No hints on DEFINE MACRO statements
+@{key=1} DEFINE MACRO m 1;
+--
+ERROR: Hints are not allowed on DEFINE MACRO statements. [at 1:1]
+@{key=1} DEFINE MACRO m 1;
+^
+==
+
+# DEFINE MACRO statements are not supported when expansions are disabled
+[macro_expansion_mode=none]
+DEFINE MACRO macro_name "macro definition"
+--
+ERROR: Syntax error: DEFINE MACRO statements are not supported because macro expansions are disabled [at 1:1]
+DEFINE MACRO macro_name "macro definition"
+^

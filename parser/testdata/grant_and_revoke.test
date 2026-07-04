@@ -1,0 +1,294 @@
+grant select, update on table foo to 'user@google.com'
+--
+GrantStatement [0-54] [grant select...google.com']
+  Privileges [6-20] [select, update]
+    Privilege [6-12] [select]
+      Identifier(`select`) [6-12] [select]
+    Privilege [14-20] [update]
+      Identifier(`update`) [14-20] [update]
+  Identifier(table) [24-29] [table]
+  PathExpression [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  GranteeList [37-54] ['user@google.com']
+    StringLiteral [37-54] ['user@google.com']
+      StringLiteralComponent('user@google.com') [37-54] ['user@google.com']
+--
+GRANT `select`, `update` ON table foo TO 'user@google.com'
+==
+
+grant all privileges on view foo to @user1, @@user2, 'mdbuser/bar1', 'mdbuser/bar2'
+--
+GrantStatement [0-83] [grant all...mdbuser/bar2']
+  Privileges [6-20] [all privileges]
+  Identifier(view) [24-28] [view]
+  PathExpression [29-32] [foo]
+    Identifier(foo) [29-32] [foo]
+  GranteeList [36-83] [@user1, @@...mdbuser/bar2']
+    ParameterExpr [36-42] [@user1]
+      Identifier(user1) [37-42] [user1]
+    SystemVariableExpr [44-51] [@@user2]
+      PathExpression [46-51] [user2]
+        Identifier(user2) [46-51] [user2]
+    StringLiteral [53-67] ['mdbuser/bar1']
+      StringLiteralComponent('mdbuser/bar1') [53-67] ['mdbuser/bar1']
+    StringLiteral [69-83] ['mdbuser/bar2']
+      StringLiteralComponent('mdbuser/bar2') [69-83] ['mdbuser/bar2']
+
+--
+GRANT ALL PRIVILEGES ON view foo TO @user1, @@user2, 'mdbuser/bar1', 'mdbuser/bar2'
+==
+
+grant select on materialized view foo to 'user@google.com'
+--
+GrantStatement [0-58] [grant select...google.com']
+  Privileges [6-12] [select]
+    Privilege [6-12] [select]
+      Identifier(`select`) [6-12] [select]
+  Identifier(materialized) [16-28] [materialized]
+  Identifier(view) [29-33] [view]
+  PathExpression [34-37] [foo]
+    Identifier(foo) [34-37] [foo]
+  GranteeList [41-58] ['user@google.com']
+    StringLiteral [41-58] ['user@google.com']
+      StringLiteralComponent('user@google.com') [41-58] ['user@google.com']
+--
+GRANT `select` ON materialized view foo TO 'user@google.com'
+==
+
+revoke select on materialized view foo from 'user@google.com'
+--
+RevokeStatement [0-61] [revoke select...google.com']
+  Privileges [7-13] [select]
+    Privilege [7-13] [select]
+      Identifier(`select`) [7-13] [select]
+  Identifier(materialized) [17-29] [materialized]
+  Identifier(view) [30-34] [view]
+  PathExpression [35-38] [foo]
+    Identifier(foo) [35-38] [foo]
+  GranteeList [44-61] ['user@google.com']
+    StringLiteral [44-61] ['user@google.com']
+      StringLiteralComponent('user@google.com') [44-61] ['user@google.com']
+--
+REVOKE `select` ON materialized view foo FROM 'user@google.com'
+==
+
+grant all on datascape.foo to 'bar'
+--
+GrantStatement [0-35] [grant all...foo to 'bar']
+  Privileges [6-9] [all]
+  PathExpression [13-26] [datascape.foo]
+    Identifier(datascape) [13-22] [datascape]
+    Identifier(foo) [23-26] [foo]
+  GranteeList [30-35] ['bar']
+    StringLiteral [30-35] ['bar']
+      StringLiteralComponent('bar') [30-35] ['bar']
+--
+GRANT ALL PRIVILEGES ON datascape.foo TO 'bar'
+==
+
+grant select, insert(col1, col2, col3), update(col2) on foo to 'mdbgroup/bar'
+--
+GrantStatement [0-77] [grant select...mdbgroup/bar']
+  Privileges [6-52] [select, insert...update(col2)]
+    Privilege [6-12] [select]
+      Identifier(`select`) [6-12] [select]
+    Privilege [14-38] [insert(col1, col2, col3)]
+      Identifier(insert) [14-20] [insert]
+      PathExpressionList [20-38] [(col1, col2, col3)]
+        PathExpression [21-25] [col1]
+          Identifier(col1) [21-25] [col1]
+        PathExpression [27-31] [col2]
+          Identifier(col2) [27-31] [col2]
+        PathExpression [33-37] [col3]
+          Identifier(col3) [33-37] [col3]
+    Privilege [40-52] [update(col2)]
+      Identifier(`update`) [40-46] [update]
+      PathExpressionList [46-52] [(col2)]
+        PathExpression [47-51] [col2]
+          Identifier(col2) [47-51] [col2]
+  PathExpression [56-59] [foo]
+    Identifier(foo) [56-59] [foo]
+  GranteeList [63-77] ['mdbgroup/bar']
+    StringLiteral [63-77] ['mdbgroup/bar']
+      StringLiteralComponent('mdbgroup/bar') [63-77] ['mdbgroup/bar']
+--
+GRANT `select`, insert(col1, col2, col3), `update`(col2) ON foo TO 'mdbgroup/bar'
+==
+
+grant execute on script datascape.script_foo to 'group@google.com'
+--
+GrantStatement [0-66] [grant execute...google.com']
+  Privileges [6-13] [execute]
+    Privilege [6-13] [execute]
+      Identifier(execute) [6-13] [execute]
+  Identifier(script) [17-23] [script]
+  PathExpression [24-44] [datascape.script_foo]
+    Identifier(datascape) [24-33] [datascape]
+    Identifier(script_foo) [34-44] [script_foo]
+  GranteeList [48-66] ['group@google.com']
+    StringLiteral [48-66] ['group@google.com']
+      StringLiteralComponent('group@google.com') [48-66] ['group@google.com']
+--
+GRANT execute ON script datascape.script_foo TO 'group@google.com'
+==
+
+grant on foo to 'bar'
+--
+ERROR: Syntax error: Unexpected keyword ON [at 1:7]
+grant on foo to 'bar'
+      ^
+==
+
+grant all on to 'bar'
+--
+ERROR: Syntax error: Unexpected keyword TO [at 1:14]
+grant all on to 'bar'
+             ^
+==
+
+grant all on foo to bar
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got identifier "bar" [at 1:21]
+grant all on foo to bar
+                    ^
+==
+
+grant all on foo
+--
+ERROR: Syntax error: Expected "." or keyword TO but got end of statement [at 1:17]
+grant all on foo
+                ^
+==
+
+grant all on foo to
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got end of statement [at 1:20]
+grant all on foo to
+                   ^
+==
+
+grant all on foo to 'bar1', bar2
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got identifier "bar2" [at 1:29]
+grant all on foo to 'bar1', bar2
+                            ^
+==
+
+grant all on foo to 'bar1' bar2
+--
+ERROR: Syntax error: Expected end of input but got identifier "bar2" [at 1:28]
+grant all on foo to 'bar1' bar2
+                           ^
+==
+
+revoke all on foo from 'bar'
+--
+RevokeStatement [0-28] [revoke all on foo from 'bar']
+  Privileges [7-10] [all]
+  PathExpression [14-17] [foo]
+    Identifier(foo) [14-17] [foo]
+  GranteeList [23-28] ['bar']
+    StringLiteral [23-28] ['bar']
+      StringLiteralComponent('bar') [23-28] ['bar']
+--
+REVOKE ALL PRIVILEGES ON foo FROM 'bar'
+==
+
+revoke delete on table foo from 'mdbuser/bar'
+--
+RevokeStatement [0-45] [revoke delete...mdbuser/bar']
+  Privileges [7-13] [delete]
+    Privilege [7-13] [delete]
+      Identifier(delete) [7-13] [delete]
+  Identifier(table) [17-22] [table]
+  PathExpression [23-26] [foo]
+    Identifier(foo) [23-26] [foo]
+  GranteeList [32-45] ['mdbuser/bar']
+    StringLiteral [32-45] ['mdbuser/bar']
+      StringLiteralComponent('mdbuser/bar') [32-45] ['mdbuser/bar']
+--
+REVOKE delete ON table foo FROM 'mdbuser/bar'
+==
+
+revoke all on table table from 'mdbuser/user', @user2, 'user3', @@user4;
+--
+RevokeStatement [0-71] [revoke all...', @@user4]
+  Privileges [7-10] [all]
+  Identifier(table) [14-19] [table]
+  PathExpression [20-25] [table]
+    Identifier(table) [20-25] [table]
+  GranteeList [31-71] ['mdbuser/user...', @@user4]
+    StringLiteral [31-45] ['mdbuser/user']
+      StringLiteralComponent('mdbuser/user') [31-45] ['mdbuser/user']
+    ParameterExpr [47-53] [@user2]
+      Identifier(user2) [48-53] [user2]
+    StringLiteral [55-62] ['user3']
+      StringLiteralComponent('user3') [55-62] ['user3']
+    SystemVariableExpr [64-71] [@@user4]
+      PathExpression [66-71] [user4]
+        Identifier(user4) [66-71] [user4]
+--
+REVOKE ALL PRIVILEGES ON table table FROM 'mdbuser/user', @user2, 'user3', @@user4
+==
+
+revoke delete,update(col2) on view foo from 'mdbgroup/bar'
+--
+RevokeStatement [0-58] [revoke delete...mdbgroup/bar']
+  Privileges [7-26] [delete,update(col2)]
+    Privilege [7-13] [delete]
+      Identifier(delete) [7-13] [delete]
+    Privilege [14-26] [update(col2)]
+      Identifier(`update`) [14-20] [update]
+      PathExpressionList [20-26] [(col2)]
+        PathExpression [21-25] [col2]
+          Identifier(col2) [21-25] [col2]
+  Identifier(view) [30-34] [view]
+  PathExpression [35-38] [foo]
+    Identifier(foo) [35-38] [foo]
+  GranteeList [44-58] ['mdbgroup/bar']
+    StringLiteral [44-58] ['mdbgroup/bar']
+      StringLiteralComponent('mdbgroup/bar') [44-58] ['mdbgroup/bar']
+--
+REVOKE delete, `update`(col2) ON view foo FROM 'mdbgroup/bar'
+==
+
+revoke all on view foo to 'mdbgroup/bar'
+--
+ERROR: Syntax error: Expected "." but got keyword TO [at 1:24]
+revoke all on view foo to 'mdbgroup/bar'
+                       ^
+==
+
+grant all, select on foo to 'bar'
+--
+ERROR: Syntax error: Expected keyword ON but got "," [at 1:10]
+grant all, select on foo to 'bar'
+         ^
+==
+
+revoke select, all on foo from 'bar'
+--
+ERROR: Syntax error: Unexpected keyword ALL [at 1:16]
+revoke select, all on foo from 'bar'
+               ^
+==
+
+grant all(a, b, c) on foo to 'bar'
+--
+ERROR: Syntax error: Expected keyword ON but got "(" [at 1:10]
+grant all(a, b, c) on foo to 'bar'
+         ^
+==
+
+grant all privileges, select on foo to 'bar'
+--
+ERROR: Syntax error: Expected keyword ON but got "," [at 1:21]
+grant all privileges, select on foo to 'bar'
+                    ^
+==
+
+grant select, all privileges on foo to 'bar'
+--
+ERROR: Syntax error: Unexpected keyword ALL [at 1:15]
+grant select, all privileges on foo to 'bar'
+              ^

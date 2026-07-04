@@ -1,0 +1,420 @@
+# Simple anonymization query.
+# TODO: Remove this after parse locations have been manually
+# verified as correct.
+[default no_show_parse_location_text]
+select with anonymization sum() from table;
+--
+QueryStatement [0-42]
+  Query [0-42]
+    Select [0-42]
+      WithModifier [7-25]
+        Identifier(anonymization) [12-25]
+      SelectList [26-31]
+        SelectColumn [26-31]
+          FunctionCall [26-31]
+            PathExpression [26-29]
+              Identifier(sum) [26-29]
+      FromClause [32-42]
+        TablePathExpression [37-42]
+          PathExpression [37-42]
+            Identifier(table) [37-42]
+--
+SELECT WITH anonymization ALL
+  sum()
+FROM
+  table
+==
+
+# Simple anonymization query with explicit options
+select with anonymization options() sum() from table;
+--
+QueryStatement [0-52]
+  Query [0-52]
+    Select [0-52]
+      WithModifier [7-35]
+        Identifier(anonymization) [12-25]
+        OptionsList [33-35]
+      SelectList [36-41]
+        SelectColumn [36-41]
+          FunctionCall [36-41]
+            PathExpression [36-39]
+              Identifier(sum) [36-39]
+      FromClause [42-52]
+        TablePathExpression [47-52]
+          PathExpression [47-52]
+            Identifier(table) [47-52]
+--
+SELECT WITH anonymization OPTIONS() ALL
+  sum()
+FROM
+  table
+==
+
+# Simple anonymization query with explicit options
+select with anonymization options(epsilon = 1) sum() from table;
+--
+QueryStatement [0-63]
+  Query [0-63]
+    Select [0-63]
+      WithModifier [7-46]
+        Identifier(anonymization) [12-25]
+        OptionsList [33-46]
+          OptionsEntry [34-45]
+            Identifier(epsilon) [34-41]
+            IntLiteral(1) [44-45]
+      SelectList [47-52]
+        SelectColumn [47-52]
+          FunctionCall [47-52]
+            PathExpression [47-50]
+              Identifier(sum) [47-50]
+      FromClause [53-63]
+        TablePathExpression [58-63]
+          PathExpression [58-63]
+            Identifier(table) [58-63]
+--
+SELECT WITH anonymization OPTIONS(epsilon = 1) ALL
+  sum()
+FROM
+  table
+==
+
+# Simple anonymization query with explicit options
+select with anonymization options(epsilon = 1, k_threshold = 50) sum()
+from table;
+--
+QueryStatement [0-81]
+  Query [0-81]
+    Select [0-81]
+      WithModifier [7-64]
+        Identifier(anonymization) [12-25]
+        OptionsList [33-64]
+          OptionsEntry [34-45]
+            Identifier(epsilon) [34-41]
+            IntLiteral(1) [44-45]
+          OptionsEntry [47-63]
+            Identifier(k_threshold) [47-58]
+            IntLiteral(50) [61-63]
+      SelectList [65-70]
+        SelectColumn [65-70]
+          FunctionCall [65-70]
+            PathExpression [65-68]
+              Identifier(sum) [65-68]
+      FromClause [71-81]
+        TablePathExpression [76-81]
+          PathExpression [76-81]
+            Identifier(table) [76-81]
+--
+SELECT WITH anonymization OPTIONS(epsilon = 1, k_threshold = 50) ALL
+  sum()
+FROM
+  table
+==
+
+# Anonymization in a subquery.
+select * from (select with anonymization sum() from table);
+--
+QueryStatement [0-58]
+  Query [0-58]
+    Select [0-58]
+      SelectList [7-8]
+        SelectColumn [7-8]
+          Star(*) [7-8]
+      FromClause [9-58]
+        TableSubquery [14-58]
+          Query [15-57]
+            Select [15-57]
+              WithModifier [22-40]
+                Identifier(anonymization) [27-40]
+              SelectList [41-46]
+                SelectColumn [41-46]
+                  FunctionCall [41-46]
+                    PathExpression [41-44]
+                      Identifier(sum) [41-44]
+              FromClause [47-57]
+                TablePathExpression [52-57]
+                  PathExpression [52-57]
+                    Identifier(table) [52-57]
+--
+SELECT
+  *
+FROM
+  (
+    SELECT WITH anonymization ALL
+      sum()
+    FROM
+      table
+  )
+==
+
+# Comprehensive anonymization query.
+select @{hint=1} with anonymization distinct sum()
+from table
+where true
+group by col
+having true
+window name as ();
+--
+QueryStatement [0-115]
+  Query [0-115]
+    Select(distinct=true) [0-115]
+      Hint [7-16]
+        HintEntry [9-15]
+          Identifier(hint) [9-13]
+          IntLiteral(1) [14-15]
+      WithModifier [17-35]
+        Identifier(anonymization) [22-35]
+      SelectList [45-50]
+        SelectColumn [45-50]
+          FunctionCall [45-50]
+            PathExpression [45-48]
+              Identifier(sum) [45-48]
+      FromClause [51-61]
+        TablePathExpression [56-61]
+          PathExpression [56-61]
+            Identifier(table) [56-61]
+      WhereClause [62-72]
+        BooleanLiteral(true) [68-72]
+      GroupBy [73-85]
+        GroupingItem [82-85]
+          PathExpression [82-85]
+            Identifier(col) [82-85]
+      Having [86-97]
+        BooleanLiteral(true) [93-97]
+      WindowClause [98-115]
+        WindowDefinition [105-115]
+          Identifier(name) [105-109]
+          WindowSpecification [113-115]
+--
+SELECT @{ hint = 1 } WITH anonymization DISTINCT
+  sum()
+FROM
+  table
+WHERE
+  true
+GROUP BY col
+HAVING true
+WINDOW name AS ()
+==
+
+# Specify WITH ANONYMIZATION but no FROM clause
+select with anonymization sum();
+--
+QueryStatement [0-31]
+  Query [0-31]
+    Select [0-31]
+      WithModifier [7-25]
+        Identifier(anonymization) [12-25]
+      SelectList [26-31]
+        SelectColumn [26-31]
+          FunctionCall [26-31]
+            PathExpression [26-29]
+              Identifier(sum) [26-29]
+--
+SELECT WITH anonymization ALL
+  sum()
+==
+
+# Trailing comma in otherwise valid query.
+select with anonymization sum(), from table;
+--
+QueryStatement [0-43]
+  Query [0-43]
+    Select [0-43]
+      WithModifier [7-25]
+        Identifier(anonymization) [12-25]
+      SelectList [26-32]
+        SelectColumn [26-31]
+          FunctionCall [26-31]
+            PathExpression [26-29]
+              Identifier(sum) [26-29]
+      FromClause [33-43]
+        TablePathExpression [38-43]
+          PathExpression [38-43]
+            Identifier(table) [38-43]
+--
+SELECT WITH anonymization ALL
+  sum()
+FROM
+  table
+==
+
+# Support anonymization in other statement types.
+create table name as
+select with anonymization sum() from table;
+--
+CreateTableStatement [0-63]
+  PathExpression [13-17]
+    Identifier(name) [13-17]
+  Query [21-63]
+    Select [21-63]
+      WithModifier [28-46]
+        Identifier(anonymization) [33-46]
+      SelectList [47-52]
+        SelectColumn [47-52]
+          FunctionCall [47-52]
+            PathExpression [47-50]
+              Identifier(sum) [47-50]
+      FromClause [53-63]
+        TablePathExpression [58-63]
+          PathExpression [58-63]
+            Identifier(table) [58-63]
+--
+CREATE TABLE name AS
+SELECT WITH anonymization ALL
+  sum()
+FROM
+  table
+==
+
+# Support anonymization in other statement types.
+export data as
+select with anonymization sum() from table;
+--
+ExportDataStatement [0-57]
+  Query [15-57]
+    Select [15-57]
+      WithModifier [22-40]
+        Identifier(anonymization) [27-40]
+      SelectList [41-46]
+        SelectColumn [41-46]
+          FunctionCall [41-46]
+            PathExpression [41-44]
+              Identifier(sum) [41-44]
+      FromClause [47-57]
+        TablePathExpression [52-57]
+          PathExpression [52-57]
+            Identifier(table) [52-57]
+--
+EXPORT DATA AS
+SELECT WITH anonymization ALL
+  sum()
+FROM
+  table
+==
+
+# Support anonymization (another example that anonymization is valid in
+# non-query statements that allow a select clause) in INSERT dml statement.
+insert into t
+select with anonymization sum() from table;
+--
+InsertStatement [0-56]
+  PathExpression [12-13]
+    Identifier(t) [12-13]
+  Query [14-56]
+    Select [14-56]
+      WithModifier [21-39]
+        Identifier(anonymization) [26-39]
+      SelectList [40-45]
+        SelectColumn [40-45]
+          FunctionCall [40-45]
+            PathExpression [40-43]
+              Identifier(sum) [40-43]
+      FromClause [46-56]
+        TablePathExpression [51-56]
+          PathExpression [51-56]
+            Identifier(table) [51-56]
+--
+INSERT INTO t
+SELECT WITH anonymization ALL
+  sum()
+FROM
+  table
+==
+
+# Support ANON_COUNT(*) with extra arguments
+select ANON_COUNT(*, 0, 1);
+--
+QueryStatement [0-26]
+  Query [0-26]
+    Select [0-26]
+      SelectList [7-26]
+        SelectColumn [7-26]
+          FunctionCall [7-26]
+            PathExpression [7-17]
+              Identifier(ANON_COUNT) [7-17]
+            Star(*) [18-19]
+            IntLiteral(0) [21-22]
+            IntLiteral(1) [24-25]
+--
+SELECT
+  ANON_COUNT(*, 0, 1)
+==
+
+# Example where ANONYMIZATION OPTIONS() should eagerly parse OPTIONS()
+SELECT WITH ANONYMIZATION OPTIONS(epsilon=1e20, k_threshold=1, kappa=3)
+  x, ANON_COUNT(*)
+FROM TestTableWithUid
+  CROSS JOIN
+     UNNEST([1,2,3]) as x
+GROUP BY x
+ORDER BY x ASC
+--
+QueryStatement [0-177]
+  Query [0-177]
+    Select [0-162]
+      WithModifier [7-71]
+        Identifier(ANONYMIZATION) [12-25]
+        OptionsList [33-71]
+          OptionsEntry [34-46]
+            Identifier(epsilon) [34-41]
+            FloatLiteral(1e20) [42-46]
+          OptionsEntry [48-61]
+            Identifier(k_threshold) [48-59]
+            IntLiteral(1) [60-61]
+          OptionsEntry [63-70]
+            Identifier(kappa) [63-68]
+            IntLiteral(3) [69-70]
+      SelectList [74-90]
+        SelectColumn [74-75]
+          PathExpression [74-75]
+            Identifier(x) [74-75]
+        SelectColumn [77-90]
+          FunctionCall [77-90]
+            PathExpression [77-87]
+              Identifier(ANON_COUNT) [77-87]
+            Star(*) [88-89]
+      FromClause [91-151]
+        Join(CROSS) [96-151]
+          TablePathExpression [96-112]
+            PathExpression [96-112]
+              Identifier(TestTableWithUid) [96-112]
+          Location [115-125]
+          TablePathExpression [131-151]
+            UnnestExpression [131-146]
+              ExpressionWithOptAlias [138-145]
+                ArrayConstructor [138-145]
+                  IntLiteral(1) [139-140]
+                  IntLiteral(2) [141-142]
+                  IntLiteral(3) [143-144]
+            Alias [147-151]
+              Identifier(x) [150-151]
+      GroupBy [152-162]
+        GroupingItem [161-162]
+          PathExpression [161-162]
+            Identifier(x) [161-162]
+    OrderBy [163-177]
+      OrderingExpression(ASC EXPLICITLY) [172-177]
+        PathExpression [172-173]
+          Identifier(x) [172-173]
+--
+SELECT WITH ANONYMIZATION OPTIONS(epsilon = 1e20, k_threshold = 1, kappa = 3) ALL
+  x,
+  ANON_COUNT(*)
+FROM
+  TestTableWithUid
+  CROSS JOIN
+  UNNEST(ARRAY[1, 2, 3]) AS x
+GROUP BY x
+ORDER BY x ASC
+==
+
+# Example where ANONYMIZATION OPTIONS() might want to leave OPTIONS as a UDF in 
+# the query (see discussion (broken link)). This case 
+# shows how our parser handles this issue.
+SELECT WITH ANONYMIZATION OPTIONS(epsilon=1e20, k_threshold=1, kappa=3)
+  AS x, ANON_COUNT(*)
+FROM TestTableWithUid
+--
+ERROR: Syntax error: Unexpected "," [at 2:7]
+  AS x, ANON_COUNT(*)
+      ^

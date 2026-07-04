@@ -1,0 +1,1064 @@
+select * from T where {{@|@@}}aId = {{@|@@}}bId
+--
+ALTERNATION GROUP: @,@
+--
+QueryStatement [0-33] [select * from...aId = @bId]
+  Query [0-33] [select * from...aId = @bId]
+    Select [0-33] [select * from...aId = @bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-33] [where @aId = @bId]
+        BinaryExpression(=) [22-33] [@aId = @bId]
+          ParameterExpr [22-26] [@aId]
+            Identifier(aId) [23-26] [aId]
+          ParameterExpr [29-33] [@bId]
+            Identifier(bId) [30-33] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @aId = @bId
+--
+ALTERNATION GROUP: @,@@
+--
+QueryStatement [0-34] [select * from...aId = @@bId]
+  Query [0-34] [select * from...aId = @@bId]
+    Select [0-34] [select * from...aId = @@bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-34] [where @aId = @@bId]
+        BinaryExpression(=) [22-34] [@aId = @@bId]
+          ParameterExpr [22-26] [@aId]
+            Identifier(aId) [23-26] [aId]
+          SystemVariableExpr [29-34] [@@bId]
+            PathExpression [31-34] [bId]
+              Identifier(bId) [31-34] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @aId = @@bId
+--
+ALTERNATION GROUP: @@,@
+--
+QueryStatement [0-34] [select * from...aId = @bId]
+  Query [0-34] [select * from...aId = @bId]
+    Select [0-34] [select * from...aId = @bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-34] [where @@aId = @bId]
+        BinaryExpression(=) [22-34] [@@aId = @bId]
+          SystemVariableExpr [22-27] [@@aId]
+            PathExpression [24-27] [aId]
+              Identifier(aId) [24-27] [aId]
+          ParameterExpr [30-34] [@bId]
+            Identifier(bId) [31-34] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @@aId = @bId
+--
+ALTERNATION GROUP: @@,@@
+--
+QueryStatement [0-35] [select * from...aId = @@bId]
+  Query [0-35] [select * from...aId = @@bId]
+    Select [0-35] [select * from...aId = @@bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-35] [where @@aId = @@bId]
+        BinaryExpression(=) [22-35] [@@aId = @@bId]
+          SystemVariableExpr [22-27] [@@aId]
+            PathExpression [24-27] [aId]
+              Identifier(aId) [24-27] [aId]
+          SystemVariableExpr [30-35] [@@bId]
+            PathExpression [32-35] [bId]
+              Identifier(bId) [32-35] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @@aId = @@bId
+==
+
+# This test is here to document current behavior and notice regressions in case
+# some customer has started doing this. We suspect the authors never intended
+# the @ or @@ token to be separated from the variable name by whitespace.
+select * from T where {{@|@@}} aId = {{@|@@}} bId
+--
+ALTERNATION GROUP: @,@
+--
+QueryStatement [0-35] [select * from...aId = @ bId]
+  Query [0-35] [select * from...aId = @ bId]
+    Select [0-35] [select * from...aId = @ bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-35] [where @ aId = @ bId]
+        BinaryExpression(=) [22-35] [@ aId = @ bId]
+          ParameterExpr [22-27] [@ aId]
+            Identifier(aId) [24-27] [aId]
+          ParameterExpr [30-35] [@ bId]
+            Identifier(bId) [32-35] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @aId = @bId
+--
+ALTERNATION GROUP: @,@@
+--
+QueryStatement [0-36] [select * from...aId = @@ bId]
+  Query [0-36] [select * from...aId = @@ bId]
+    Select [0-36] [select * from...aId = @@ bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-36] [where @ aId = @@ bId]
+        BinaryExpression(=) [22-36] [@ aId = @@ bId]
+          ParameterExpr [22-27] [@ aId]
+            Identifier(aId) [24-27] [aId]
+          SystemVariableExpr [30-36] [@@ bId]
+            PathExpression [33-36] [bId]
+              Identifier(bId) [33-36] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @aId = @@bId
+--
+ALTERNATION GROUP: @@,@
+--
+QueryStatement [0-36] [select * from...aId = @ bId]
+  Query [0-36] [select * from...aId = @ bId]
+    Select [0-36] [select * from...aId = @ bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-36] [where @@ aId = @ bId]
+        BinaryExpression(=) [22-36] [@@ aId = @ bId]
+          SystemVariableExpr [22-28] [@@ aId]
+            PathExpression [25-28] [aId]
+              Identifier(aId) [25-28] [aId]
+          ParameterExpr [31-36] [@ bId]
+            Identifier(bId) [33-36] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @@aId = @bId
+--
+ALTERNATION GROUP: @@,@@
+--
+QueryStatement [0-37] [select * from...aId = @@ bId]
+  Query [0-37] [select * from...aId = @@ bId]
+    Select [0-37] [select * from...aId = @@ bId]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-37] [where @@ aId = @@ bId]
+        BinaryExpression(=) [22-37] [@@ aId = @@ bId]
+          SystemVariableExpr [22-28] [@@ aId]
+            PathExpression [25-28] [aId]
+              Identifier(aId) [25-28] [aId]
+          SystemVariableExpr [31-37] [@@ bId]
+            PathExpression [34-37] [bId]
+              Identifier(bId) [34-37] [bId]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  @@aId = @@bId
+==
+
+# This test is here to document current behavior and notice regressions.
+select {{@|@@}} aId {{AS|FROM|3d}} t;
+--
+
+ALTERNATION GROUP: @,AS
+--
+QueryStatement [0-17] [select @ aId AS t]
+  Query [0-17] [select @ aId AS t]
+    Select [0-17] [select @ aId AS t]
+      SelectList [7-17] [@ aId AS t]
+        SelectColumn [7-17] [@ aId AS t]
+          ParameterExpr [7-12] [@ aId]
+            Identifier(aId) [9-12] [aId]
+          Alias [13-17] [AS t]
+            Identifier(t) [16-17] [t]
+--
+SELECT
+  @aId AS t
+--
+ALTERNATION GROUP: @,FROM
+--
+QueryStatement [0-19] [select @ aId FROM t]
+  Query [0-19] [select @ aId FROM t]
+    Select [0-19] [select @ aId FROM t]
+      SelectList [7-12] [@ aId]
+        SelectColumn [7-12] [@ aId]
+          ParameterExpr [7-12] [@ aId]
+            Identifier(aId) [9-12] [aId]
+      FromClause [13-19] [FROM t]
+        TablePathExpression [18-19] [t]
+          PathExpression [18-19] [t]
+            Identifier(t) [18-19] [t]
+--
+SELECT
+  @aId
+FROM
+  t
+--
+ALTERNATION GROUP: @,3d
+--
+ERROR: Syntax error: Expected end of input but got integer literal "3" [at 1:14]
+select @ aId 3d t;
+             ^
+--
+ALTERNATION GROUP: @@,AS
+--
+QueryStatement [0-18] [select @@ aId AS t]
+  Query [0-18] [select @@ aId AS t]
+    Select [0-18] [select @@ aId AS t]
+      SelectList [7-18] [@@ aId AS t]
+        SelectColumn [7-18] [@@ aId AS t]
+          SystemVariableExpr [7-13] [@@ aId]
+            PathExpression [10-13] [aId]
+              Identifier(aId) [10-13] [aId]
+          Alias [14-18] [AS t]
+            Identifier(t) [17-18] [t]
+--
+SELECT
+  @@aId AS t
+--
+ALTERNATION GROUP: @@,FROM
+--
+QueryStatement [0-20] [select @@ aId FROM t]
+  Query [0-20] [select @@ aId FROM t]
+    Select [0-20] [select @@ aId FROM t]
+      SelectList [7-13] [@@ aId]
+        SelectColumn [7-13] [@@ aId]
+          SystemVariableExpr [7-13] [@@ aId]
+            PathExpression [10-13] [aId]
+              Identifier(aId) [10-13] [aId]
+      FromClause [14-20] [FROM t]
+        TablePathExpression [19-20] [t]
+          PathExpression [19-20] [t]
+            Identifier(t) [19-20] [t]
+--
+SELECT
+  @@aId
+FROM
+  t
+--
+ALTERNATION GROUP: @@,3d
+--
+ERROR: Syntax error: Expected end of input but got integer literal "3" [at 1:15]
+select @@ aId 3d t;
+              ^
+==
+
+# This shows an error that is an unfortunate consequence of the allowed
+# whitespace separation following @ or @@
+select * from T where @{{|@}}
+select user_intended_two_statements
+--
+ERROR: Syntax error: Expected end of input but got identifier "user_intended_two_statements" [at 2:8]
+select user_intended_two_statements
+       ^
+==
+
+# These two cases parse differently. I think thats a bug.
+SELECT @@FROM{{|x}}.fieldname.subsequent_field
+--
+ALTERNATION GROUP: <empty>
+--
+QueryStatement [0-40] [SELECT @@FROM...bsequent_field]
+  Query [0-40] [SELECT @@FROM...bsequent_field]
+    Select [0-40] [SELECT @@FROM...bsequent_field]
+      SelectList [7-40] [@@FROM.fieldname...quent_field]
+        SelectColumn [7-40] [@@FROM.fieldname...quent_field]
+          SystemVariableExpr [7-40] [@@FROM.fieldname...quent_field]
+            PathExpression [9-40] [FROM.fieldname...sequent_field]
+              Identifier(`FROM`) [9-13] [FROM]
+              Identifier(fieldname) [14-23] [fieldname]
+              Identifier(subsequent_field) [24-40] [subsequent_field]
+--
+SELECT
+  @@`FROM`.fieldname.subsequent_field
+--
+ALTERNATION GROUP: x
+--
+QueryStatement [0-41] [SELECT @@FROMx...sequent_field]
+  Query [0-41] [SELECT @@FROMx...sequent_field]
+    Select [0-41] [SELECT @@FROMx...sequent_field]
+      SelectList [7-41] [@@FROMx.fieldname...uent_field]
+        SelectColumn [7-41] [@@FROMx.fieldname...uent_field]
+          SystemVariableExpr [7-41] [@@FROMx.fieldname...uent_field]
+            PathExpression [9-41] [FROMx.fieldname...equent_field]
+              Identifier(FROMx) [9-14] [FROMx]
+              Identifier(fieldname) [15-24] [fieldname]
+              Identifier(subsequent_field) [25-41] [subsequent_field]
+--
+SELECT
+  @@FROMx.fieldname.subsequent_field
+==
+
+select {{@|@@}}ValidIds from T
+--
+ALTERNATION GROUP: @
+--
+QueryStatement [0-23] [select @ValidIds from T]
+  Query [0-23] [select @ValidIds from T]
+    Select [0-23] [select @ValidIds from T]
+      SelectList [7-16] [@ValidIds]
+        SelectColumn [7-16] [@ValidIds]
+          ParameterExpr [7-16] [@ValidIds]
+            Identifier(ValidIds) [8-16] [ValidIds]
+      FromClause [17-23] [from T]
+        TablePathExpression [22-23] [T]
+          PathExpression [22-23] [T]
+            Identifier(T) [22-23] [T]
+--
+SELECT
+  @ValidIds
+FROM
+  T
+--
+ALTERNATION GROUP: @@
+--
+QueryStatement [0-24] [select @@ValidIds from T]
+  Query [0-24] [select @@ValidIds from T]
+    Select [0-24] [select @@ValidIds from T]
+      SelectList [7-17] [@@ValidIds]
+        SelectColumn [7-17] [@@ValidIds]
+          SystemVariableExpr [7-17] [@@ValidIds]
+            PathExpression [9-17] [ValidIds]
+              Identifier(ValidIds) [9-17] [ValidIds]
+      FromClause [18-24] [from T]
+        TablePathExpression [23-24] [T]
+          PathExpression [23-24] [T]
+            Identifier(T) [23-24] [T]
+--
+SELECT
+  @@ValidIds
+FROM
+  T
+==
+
+select @`ValidIds` from T
+--
+QueryStatement [0-25] [select @`ValidIds` from T]
+  Query [0-25] [select @`ValidIds` from T]
+    Select [0-25] [select @`ValidIds` from T]
+      SelectList [7-18] [@`ValidIds`]
+        SelectColumn [7-18] [@`ValidIds`]
+          ParameterExpr [7-18] [@`ValidIds`]
+            Identifier(ValidIds) [8-18] [`ValidIds`]
+      FromClause [19-25] [from T]
+        TablePathExpression [24-25] [T]
+          PathExpression [24-25] [T]
+            Identifier(T) [24-25] [T]
+--
+SELECT
+  @ValidIds
+FROM
+  T
+==
+
+select {{@|@@}} ValidIds from T
+--
+ALTERNATION GROUP: @
+--
+QueryStatement [0-24] [select @ ValidIds from T]
+  Query [0-24] [select @ ValidIds from T]
+    Select [0-24] [select @ ValidIds from T]
+      SelectList [7-17] [@ ValidIds]
+        SelectColumn [7-17] [@ ValidIds]
+          ParameterExpr [7-17] [@ ValidIds]
+            Identifier(ValidIds) [9-17] [ValidIds]
+      FromClause [18-24] [from T]
+        TablePathExpression [23-24] [T]
+          PathExpression [23-24] [T]
+            Identifier(T) [23-24] [T]
+--
+SELECT
+  @ValidIds
+FROM
+  T
+--
+ALTERNATION GROUP: @@
+--
+QueryStatement [0-25] [select @@ ValidIds from T]
+  Query [0-25] [select @@ ValidIds from T]
+    Select [0-25] [select @@ ValidIds from T]
+      SelectList [7-18] [@@ ValidIds]
+        SelectColumn [7-18] [@@ ValidIds]
+          SystemVariableExpr [7-18] [@@ ValidIds]
+            PathExpression [10-18] [ValidIds]
+              Identifier(ValidIds) [10-18] [ValidIds]
+      FromClause [19-25] [from T]
+        TablePathExpression [24-25] [T]
+          PathExpression [24-25] [T]
+            Identifier(T) [24-25] [T]
+--
+SELECT
+  @@ValidIds
+FROM
+  T
+==
+
+select @@a AS a from a where @@a IN (@@a) AND @@a + a[@@a] = @@a
+--
+QueryStatement [0-64] [select @@a...@@a] = @@a]
+  Query [0-64] [select @@a...@@a] = @@a]
+    Select [0-64] [select @@a...@@a] = @@a]
+      SelectList [7-15] [@@a AS a]
+        SelectColumn [7-15] [@@a AS a]
+          SystemVariableExpr [7-10] [@@a]
+            PathExpression [9-10] [a]
+              Identifier(a) [9-10] [a]
+          Alias [11-15] [AS a]
+            Identifier(a) [14-15] [a]
+      FromClause [16-22] [from a]
+        TablePathExpression [21-22] [a]
+          PathExpression [21-22] [a]
+            Identifier(a) [21-22] [a]
+      WhereClause [23-64] [where @@a...@@a] = @@a]
+        AndExpr [29-64] [@@a IN (@@...@@a] = @@a]
+          InExpression(IN) [29-41] [@@a IN (@@a)]
+            SystemVariableExpr [29-32] [@@a]
+              PathExpression [31-32] [a]
+                Identifier(a) [31-32] [a]
+            Location [33-35] [IN]
+            InList [37-40] [@@a]
+              SystemVariableExpr [37-40] [@@a]
+                PathExpression [39-40] [a]
+                  Identifier(a) [39-40] [a]
+          BinaryExpression(=) [46-64] [@@a + a[@@a] = @@a]
+            BinaryExpression(+) [46-58] [@@a + a[@@a]]
+              SystemVariableExpr [46-49] [@@a]
+                PathExpression [48-49] [a]
+                  Identifier(a) [48-49] [a]
+              ArrayElement [52-58] [a[@@a]]
+                PathExpression [52-53] [a]
+                  Identifier(a) [52-53] [a]
+                Location [53-54] [[]
+                SystemVariableExpr [54-57] [@@a]
+                  PathExpression [56-57] [a]
+                    Identifier(a) [56-57] [a]
+            SystemVariableExpr [61-64] [@@a]
+              PathExpression [63-64] [a]
+                Identifier(a) [63-64] [a]
+--
+SELECT
+  @@a AS a
+FROM
+  a
+WHERE
+  @@a IN (@@a) AND @@a + a[@@a] = @@a
+==
+
+select @a AS a from a where @a IN (@a) AND @a + a[@a] = @a
+--
+QueryStatement [0-58] [select @a...a[@a] = @a]
+  Query [0-58] [select @a...a[@a] = @a]
+    Select [0-58] [select @a...a[@a] = @a]
+      SelectList [7-14] [@a AS a]
+        SelectColumn [7-14] [@a AS a]
+          ParameterExpr [7-9] [@a]
+            Identifier(a) [8-9] [a]
+          Alias [10-14] [AS a]
+            Identifier(a) [13-14] [a]
+      FromClause [15-21] [from a]
+        TablePathExpression [20-21] [a]
+          PathExpression [20-21] [a]
+            Identifier(a) [20-21] [a]
+      WhereClause [22-58] [where @a IN...a[@a] = @a]
+        AndExpr [28-58] [@a IN (@a) AND @a + a[@a] = @a]
+          InExpression(IN) [28-38] [@a IN (@a)]
+            ParameterExpr [28-30] [@a]
+              Identifier(a) [29-30] [a]
+            Location [31-33] [IN]
+            InList [35-37] [@a]
+              ParameterExpr [35-37] [@a]
+                Identifier(a) [36-37] [a]
+          BinaryExpression(=) [43-58] [@a + a[@a] = @a]
+            BinaryExpression(+) [43-53] [@a + a[@a]]
+              ParameterExpr [43-45] [@a]
+                Identifier(a) [44-45] [a]
+              ArrayElement [48-53] [a[@a]]
+                PathExpression [48-49] [a]
+                  Identifier(a) [48-49] [a]
+                Location [49-50] [[]
+                ParameterExpr [50-52] [@a]
+                  Identifier(a) [51-52] [a]
+            ParameterExpr [56-58] [@a]
+              Identifier(a) [57-58] [a]
+--
+SELECT
+  @a AS a
+FROM
+  a
+WHERE
+  @a IN (@a) AND @a + a[@a] = @a
+==
+
+select * from T where ? = ?
+--
+QueryStatement [0-27] [select * from T where ? = ?]
+  Query [0-27] [select * from T where ? = ?]
+    Select [0-27] [select * from T where ? = ?]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-15] [from T]
+        TablePathExpression [14-15] [T]
+          PathExpression [14-15] [T]
+            Identifier(T) [14-15] [T]
+      WhereClause [16-27] [where ? = ?]
+        BinaryExpression(=) [22-27] [? = ?]
+          ParameterExpr(1) [22-23] [?]
+          ParameterExpr(2) [26-27] [?]
+--
+SELECT
+  *
+FROM
+  T
+WHERE
+  ? = ?
+==
+
+select ?, @val, @@sysvar, * from T where ? = @param or @@sysvar = @param
+--
+QueryStatement [0-72] [select ?,...sysvar = @param]
+  Query [0-72] [select ?,...sysvar = @param]
+    Select [0-72] [select ?,...sysvar = @param]
+      SelectList [7-27] [?, @val, @@sysvar, *]
+        SelectColumn [7-8] [?]
+          ParameterExpr(1) [7-8] [?]
+        SelectColumn [10-14] [@val]
+          ParameterExpr [10-14] [@val]
+            Identifier(val) [11-14] [val]
+        SelectColumn [16-24] [@@sysvar]
+          SystemVariableExpr [16-24] [@@sysvar]
+            PathExpression [18-24] [sysvar]
+              Identifier(sysvar) [18-24] [sysvar]
+        SelectColumn [26-27] [*]
+          Star(*) [26-27] [*]
+      FromClause [28-34] [from T]
+        TablePathExpression [33-34] [T]
+          PathExpression [33-34] [T]
+            Identifier(T) [33-34] [T]
+      WhereClause [35-72] [where ? =...sysvar = @param]
+        OrExpr [41-72] [? = @param...sysvar = @param]
+          BinaryExpression(=) [41-51] [? = @param]
+            ParameterExpr(2) [41-42] [?]
+            ParameterExpr [45-51] [@param]
+              Identifier(param) [46-51] [param]
+          BinaryExpression(=) [55-72] [@@sysvar = @param]
+            SystemVariableExpr [55-63] [@@sysvar]
+              PathExpression [57-63] [sysvar]
+                Identifier(sysvar) [57-63] [sysvar]
+            ParameterExpr [66-72] [@param]
+              Identifier(param) [67-72] [param]
+--
+SELECT
+  ?,
+  @val,
+  @@sysvar,
+  *
+FROM
+  T
+WHERE
+  ? = @param OR @@sysvar = @param
+==
+
+# Query params should not be associated with table names.
+select a from {{@a|?|@@a}};
+--
+ALTERNATION GROUP: @a
+--
+ERROR: Query parameters cannot be used in place of table names [at 1:15]
+select a from @a;
+              ^
+--
+ALTERNATION GROUP: ?
+--
+ERROR: Query parameters cannot be used in place of table names [at 1:15]
+select a from ?;
+              ^
+--
+ALTERNATION GROUP: @@a
+--
+ERROR: System variables cannot be used in place of table names [at 1:15]
+select a from @@a;
+              ^
+==
+
+# Parameter name is an unreserved keyword
+select {{@|@@}}aggregate
+--
+ALTERNATION GROUP: @
+--
+QueryStatement [0-17] [select @aggregate]
+  Query [0-17] [select @aggregate]
+    Select [0-17] [select @aggregate]
+      SelectList [7-17] [@aggregate]
+        SelectColumn [7-17] [@aggregate]
+          ParameterExpr [7-17] [@aggregate]
+            Identifier(aggregate) [8-17] [aggregate]
+--
+SELECT
+  @aggregate
+--
+ALTERNATION GROUP: @@
+--
+QueryStatement [0-18] [select @@aggregate]
+  Query [0-18] [select @@aggregate]
+    Select [0-18] [select @@aggregate]
+      SelectList [7-18] [@@aggregate]
+        SelectColumn [7-18] [@@aggregate]
+          SystemVariableExpr [7-18] [@@aggregate]
+            PathExpression [9-18] [aggregate]
+              Identifier(aggregate) [9-18] [aggregate]
+--
+SELECT
+  @@aggregate
+==
+
+# Parameter name is a reserved keyword
+select {{@|@@}}proto
+--
+ALTERNATION GROUP: @
+--
+QueryStatement [0-13] [select @proto]
+  Query [0-13] [select @proto]
+    Select [0-13] [select @proto]
+      SelectList [7-13] [@proto]
+        SelectColumn [7-13] [@proto]
+          ParameterExpr [7-13] [@proto]
+            Identifier(`proto`) [8-13] [proto]
+--
+SELECT
+  @`proto`
+--
+ALTERNATION GROUP: @@
+--
+QueryStatement [0-14] [select @@proto]
+  Query [0-14] [select @@proto]
+    Select [0-14] [select @@proto]
+      SelectList [7-14] [@@proto]
+        SelectColumn [7-14] [@@proto]
+          SystemVariableExpr [7-14] [@@proto]
+            PathExpression [9-14] [proto]
+              Identifier(`proto`) [9-14] [proto]
+--
+SELECT
+  @@`proto`
+==
+
+# Parameter name is a reserved keyword
+select {{@|@@}}FrOm
+--
+ALTERNATION GROUP: @
+--
+QueryStatement [0-12] [select @FrOm]
+  Query [0-12] [select @FrOm]
+    Select [0-12] [select @FrOm]
+      SelectList [7-12] [@FrOm]
+        SelectColumn [7-12] [@FrOm]
+          ParameterExpr [7-12] [@FrOm]
+            Identifier(`FrOm`) [8-12] [FrOm]
+--
+SELECT
+  @`FrOm`
+--
+ALTERNATION GROUP: @@
+--
+QueryStatement [0-13] [select @@FrOm]
+  Query [0-13] [select @@FrOm]
+    Select [0-13] [select @@FrOm]
+      SelectList [7-13] [@@FrOm]
+        SelectColumn [7-13] [@@FrOm]
+          SystemVariableExpr [7-13] [@@FrOm]
+            PathExpression [9-13] [FrOm]
+              Identifier(`FrOm`) [9-13] [FrOm]
+--
+SELECT
+  @@`FrOm`
+==
+
+# Trailing comma after parameter
+select a, {{@|@@}}b, from T
+--
+ALTERNATION GROUP: @
+--
+QueryStatement [0-20] [select a, @b, from T]
+  Query [0-20] [select a, @b, from T]
+    Select [0-20] [select a, @b, from T]
+      SelectList [7-13] [a, @b,]
+        SelectColumn [7-8] [a]
+          PathExpression [7-8] [a]
+            Identifier(a) [7-8] [a]
+        SelectColumn [10-12] [@b]
+          ParameterExpr [10-12] [@b]
+            Identifier(b) [11-12] [b]
+      FromClause [14-20] [from T]
+        TablePathExpression [19-20] [T]
+          PathExpression [19-20] [T]
+            Identifier(T) [19-20] [T]
+--
+SELECT
+  a,
+  @b
+FROM
+  T
+--
+ALTERNATION GROUP: @@
+--
+QueryStatement [0-21] [select a, @@b, from T]
+  Query [0-21] [select a, @@b, from T]
+    Select [0-21] [select a, @@b, from T]
+      SelectList [7-14] [a, @@b,]
+        SelectColumn [7-8] [a]
+          PathExpression [7-8] [a]
+            Identifier(a) [7-8] [a]
+        SelectColumn [10-13] [@@b]
+          SystemVariableExpr [10-13] [@@b]
+            PathExpression [12-13] [b]
+              Identifier(b) [12-13] [b]
+      FromClause [15-21] [from T]
+        TablePathExpression [20-21] [T]
+          PathExpression [20-21] [T]
+            Identifier(T) [20-21] [T]
+--
+SELECT
+  a,
+  @@b
+FROM
+  T
+
+==
+
+SELECT @{{UNION|INTERSECT|EXCEPT}};
+--
+ALTERNATION GROUP: UNION
+--
+QueryStatement [0-13] [SELECT @UNION]
+  Query [0-13] [SELECT @UNION]
+    Select [0-13] [SELECT @UNION]
+      SelectList [7-13] [@UNION]
+        SelectColumn [7-13] [@UNION]
+          ParameterExpr [7-13] [@UNION]
+            Identifier(`UNION`) [8-13] [UNION]
+--
+SELECT
+  @`UNION`
+--
+ALTERNATION GROUP: INTERSECT
+--
+QueryStatement [0-17] [SELECT @INTERSECT]
+  Query [0-17] [SELECT @INTERSECT]
+    Select [0-17] [SELECT @INTERSECT]
+      SelectList [7-17] [@INTERSECT]
+        SelectColumn [7-17] [@INTERSECT]
+          ParameterExpr [7-17] [@INTERSECT]
+            Identifier(`INTERSECT`) [8-17] [INTERSECT]
+--
+SELECT
+  @`INTERSECT`
+--
+ALTERNATION GROUP: EXCEPT
+--
+QueryStatement [0-14] [SELECT @EXCEPT]
+  Query [0-14] [SELECT @EXCEPT]
+    Select [0-14] [SELECT @EXCEPT]
+      SelectList [7-14] [@EXCEPT]
+        SelectColumn [7-14] [@EXCEPT]
+          ParameterExpr [7-14] [@EXCEPT]
+            Identifier(`EXCEPT`) [8-14] [EXCEPT]
+--
+SELECT
+  @`EXCEPT`
+==
+
+SELECT @1
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:10]
+SELECT @1
+         ^
+==
+
+SELECT @1d
+--
+ERROR: Syntax error: Unexpected "d" [at 1:10]
+SELECT @1d
+         ^
+==
+
+SELECT @FULL
+--
+QueryStatement [0-12] [SELECT @FULL]
+  Query [0-12] [SELECT @FULL]
+    Select [0-12] [SELECT @FULL]
+      SelectList [7-12] [@FULL]
+        SelectColumn [7-12] [@FULL]
+          ParameterExpr [7-12] [@FULL]
+            Identifier(`FULL`) [8-12] [FULL]
+--
+SELECT
+  @`FULL`
+==
+
+SELECT @FULL.LEFT
+--
+QueryStatement [0-17] [SELECT @FULL.LEFT]
+  Query [0-17] [SELECT @FULL.LEFT]
+    Select [0-17] [SELECT @FULL.LEFT]
+      SelectList [7-17] [@FULL.LEFT]
+        SelectColumn [7-17] [@FULL.LEFT]
+          DotIdentifier [7-17] [@FULL.LEFT]
+            ParameterExpr [7-12] [@FULL]
+              Identifier(`FULL`) [8-12] [FULL]
+            Identifier(`LEFT`) [13-17] [LEFT]
+--
+SELECT
+  @`FULL`.`LEFT`
+==
+
+SELECT @FULL.1
+--
+QueryStatement [0-14] [SELECT @FULL.1]
+  Query [0-14] [SELECT @FULL.1]
+    Select [0-14] [SELECT @FULL.1]
+      SelectList [7-14] [@FULL.1]
+        SelectColumn [7-14] [@FULL.1]
+          DotIdentifier [7-14] [@FULL.1]
+            ParameterExpr [7-12] [@FULL]
+              Identifier(`FULL`) [8-12] [FULL]
+            Identifier(`1`) [13-14] [1]
+--
+SELECT
+  @`FULL`.`1`
+==
+
+SELECT @1.1
+--
+ERROR: Syntax error: Expected integer literal but got floating point literal "1.1" [at 1:9]
+SELECT @1.1
+        ^
+==
+
+SELECT @1.1d
+--
+ERROR: Syntax error: Expected integer literal but got floating point literal "1.1" [at 1:9]
+SELECT @1.1d
+        ^
+==
+
+SELECT @.1
+--
+ERROR: Syntax error: Unexpected floating point literal ".1" [at 1:9]
+SELECT @.1
+        ^
+==
+
+SELECT @1.
+--
+ERROR: Syntax error: Expected integer literal but got floating point literal "1." [at 1:9]
+SELECT @1.
+        ^
+==
+
+SELECT @1.a
+--
+ERROR: Syntax error: Expected integer literal but got floating point literal "1." [at 1:9]
+SELECT @1.a
+        ^
+==
+
+SELECT @@1
+--
+ERROR: Syntax error: Unexpected integer literal "1" [at 1:10]
+SELECT @@1
+         ^
+==
+
+SELECT @@1d
+--
+ERROR: Syntax error: Unexpected integer literal "1" [at 1:10]
+SELECT @@1d
+         ^
+==
+
+SELECT @@FULL
+--
+QueryStatement [0-13] [SELECT @@FULL]
+  Query [0-13] [SELECT @@FULL]
+    Select [0-13] [SELECT @@FULL]
+      SelectList [7-13] [@@FULL]
+        SelectColumn [7-13] [@@FULL]
+          SystemVariableExpr [7-13] [@@FULL]
+            PathExpression [9-13] [FULL]
+              Identifier(`FULL`) [9-13] [FULL]
+--
+SELECT
+  @@`FULL`
+==
+
+SELECT @@FULL.LEFT
+--
+QueryStatement [0-18] [SELECT @@FULL.LEFT]
+  Query [0-18] [SELECT @@FULL.LEFT]
+    Select [0-18] [SELECT @@FULL.LEFT]
+      SelectList [7-18] [@@FULL.LEFT]
+        SelectColumn [7-18] [@@FULL.LEFT]
+          SystemVariableExpr [7-18] [@@FULL.LEFT]
+            PathExpression [9-18] [FULL.LEFT]
+              Identifier(`FULL`) [9-13] [FULL]
+              Identifier(`LEFT`) [14-18] [LEFT]
+--
+SELECT
+  @@`FULL`.`LEFT`
+==
+
+SELECT @@FULL.1
+--
+QueryStatement [0-15] [SELECT @@FULL.1]
+  Query [0-15] [SELECT @@FULL.1]
+    Select [0-15] [SELECT @@FULL.1]
+      SelectList [7-15] [@@FULL.1]
+        SelectColumn [7-15] [@@FULL.1]
+          SystemVariableExpr [7-15] [@@FULL.1]
+            PathExpression [9-15] [FULL.1]
+              Identifier(`FULL`) [9-13] [FULL]
+              Identifier(`1`) [14-15] [1]
+--
+SELECT
+  @@`FULL`.`1`
+==
+
+SELECT @@1.1
+--
+ERROR: Syntax error: Unexpected floating point literal "1.1" [at 1:10]
+SELECT @@1.1
+         ^
+==
+
+SELECT @@1.1d
+--
+ERROR: Syntax error: Unexpected floating point literal "1.1" [at 1:10]
+SELECT @@1.1d
+         ^
+==
+
+SELECT @@.1
+--
+ERROR: Syntax error: Unexpected floating point literal ".1" [at 1:10]
+SELECT @@.1
+         ^
+==
+
+SELECT @@1.
+--
+ERROR: Syntax error: Unexpected floating point literal "1." [at 1:10]
+SELECT @@1.
+         ^
+==
+
+SELECT @@1.a
+--
+ERROR: Syntax error: Unexpected floating point literal "1." [at 1:10]
+SELECT @@1.a
+         ^
+==
+
+SELECT @FULL.FULL.FULL.FULL
+--
+QueryStatement [0-27] [SELECT @FULL.FULL.FULL.FULL]
+  Query [0-27] [SELECT @FULL.FULL.FULL.FULL]
+    Select [0-27] [SELECT @FULL.FULL.FULL.FULL]
+      SelectList [7-27] [@FULL.FULL.FULL.FULL]
+        SelectColumn [7-27] [@FULL.FULL.FULL.FULL]
+          DotIdentifier [7-27] [@FULL.FULL.FULL.FULL]
+            DotIdentifier [7-22] [@FULL.FULL.FULL]
+              DotIdentifier [7-17] [@FULL.FULL]
+                ParameterExpr [7-12] [@FULL]
+                  Identifier(`FULL`) [8-12] [FULL]
+                Identifier(`FULL`) [13-17] [FULL]
+              Identifier(`FULL`) [18-22] [FULL]
+            Identifier(`FULL`) [23-27] [FULL]
+--
+SELECT
+  @`FULL`.`FULL`.`FULL`.`FULL`
+==
+
+SELECT @@FULL.FULL.FULL.FULL
+--
+QueryStatement [0-28] [SELECT @@FULL.FULL.FULL.FULL]
+  Query [0-28] [SELECT @@FULL.FULL.FULL.FULL]
+    Select [0-28] [SELECT @@FULL.FULL.FULL.FULL]
+      SelectList [7-28] [@@FULL.FULL.FULL.FULL]
+        SelectColumn [7-28] [@@FULL.FULL.FULL.FULL]
+          SystemVariableExpr [7-28] [@@FULL.FULL.FULL.FULL]
+            PathExpression [9-28] [FULL.FULL.FULL.FULL]
+              Identifier(`FULL`) [9-13] [FULL]
+              Identifier(`FULL`) [14-18] [FULL]
+              Identifier(`FULL`) [19-23] [FULL]
+              Identifier(`FULL`) [24-28] [FULL]
+--
+SELECT
+  @@`FULL`.`FULL`.`FULL`.`FULL`

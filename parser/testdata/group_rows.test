@@ -1,0 +1,286 @@
+[default language_features=MAXIMUM,+WITH_GROUP_ROWS]
+
+[language_features=MAXIMUM]
+# Group rows not supported.
+SELECT (
+  WITH group_rows() AS GROUP ROWS
+  SELECT col
+  FROM group_rows()
+)
+FROM Transactions
+GROUP BY State
+--
+ERROR: GROUP ROWS is not supported. [at 3:24]
+  WITH group_rows() AS GROUP ROWS
+                       ^
+==
+
+# Use group rows within subquery.
+SELECT (
+  WITH group_rows() AS GROUP ROWS
+  SELECT col
+  FROM group_rows()
+)
+FROM Transactions
+GROUP BY State
+--
+QueryStatement [0-110] [SELECT (...GROUP BY State]
+  Query [0-110] [SELECT (...GROUP BY State]
+    Select [0-110] [SELECT (...GROUP BY State]
+      SelectList [7-77] [(   WITH group_ro...p_rows() )]
+        SelectColumn [7-77] [(   WITH group_ro...p_rows() )]
+          ExpressionSubquery [7-77] [(   WITH group_ro...p_rows() )]
+            Query [11-75] [WITH group_rows...group_rows()]
+              WithClause [11-42] [WITH group_rows...GROUP ROWS]
+                WithClauseEntry [16-42] [group_rows() AS GROUP ROWS]
+                  AliasedGroupRows [16-42] [group_rows() AS GROUP ROWS]
+                    Identifier(group_rows) [16-26] [group_rows]
+              Select [45-75] [SELECT col   FROM group_rows()]
+                SelectList [52-55] [col]
+                  SelectColumn [52-55] [col]
+                    PathExpression [52-55] [col]
+                      Identifier(col) [52-55] [col]
+                FromClause [58-75] [FROM group_rows()]
+                  TVF [63-75] [group_rows()]
+                    PathExpression [63-73] [group_rows]
+                      Identifier(group_rows) [63-73] [group_rows]
+      FromClause [78-95] [FROM Transactions]
+        TablePathExpression [83-95] [Transactions]
+          PathExpression [83-95] [Transactions]
+            Identifier(Transactions) [83-95] [Transactions]
+      GroupBy [96-110] [GROUP BY State]
+        GroupingItem [105-110] [State]
+          PathExpression [105-110] [State]
+            Identifier(State) [105-110] [State]
+--
+SELECT
+  (WITH
+      group_rows() AS GROUP ROWS
+    SELECT
+      col
+    FROM
+      group_rows()
+  )
+FROM
+  Transactions
+GROUP BY State
+==
+
+# Use group rows within ARRAY() subquery.
+SELECT ARRAY(
+  WITH group_rows() AS GROUP ROWS
+  SELECT col
+  FROM group_rows()
+)
+FROM Transactions
+GROUP BY State
+--
+QueryStatement [0-115] [SELECT ARRAY...GROUP BY State]
+  Query [0-115] [SELECT ARRAY...GROUP BY State]
+    Select [0-115] [SELECT ARRAY...GROUP BY State]
+      SelectList [7-82] [ARRAY(   WITH...group_rows() )]
+        SelectColumn [7-82] [ARRAY(   WITH...group_rows() )]
+          ExpressionSubquery(modifier=ARRAY) [7-82] [ARRAY(   WITH...group_rows() )]
+            Query [16-80] [WITH group_rows...group_rows()]
+              WithClause [16-47] [WITH group_rows...GROUP ROWS]
+                WithClauseEntry [21-47] [group_rows() AS GROUP ROWS]
+                  AliasedGroupRows [21-47] [group_rows() AS GROUP ROWS]
+                    Identifier(group_rows) [21-31] [group_rows]
+              Select [50-80] [SELECT col   FROM group_rows()]
+                SelectList [57-60] [col]
+                  SelectColumn [57-60] [col]
+                    PathExpression [57-60] [col]
+                      Identifier(col) [57-60] [col]
+                FromClause [63-80] [FROM group_rows()]
+                  TVF [68-80] [group_rows()]
+                    PathExpression [68-78] [group_rows]
+                      Identifier(group_rows) [68-78] [group_rows]
+      FromClause [83-100] [FROM Transactions]
+        TablePathExpression [88-100] [Transactions]
+          PathExpression [88-100] [Transactions]
+            Identifier(Transactions) [88-100] [Transactions]
+      GroupBy [101-115] [GROUP BY State]
+        GroupingItem [110-115] [State]
+          PathExpression [110-115] [State]
+            Identifier(State) [110-115] [State]
+--
+SELECT
+  ARRAY(WITH
+      group_rows() AS GROUP ROWS
+    SELECT
+      col
+    FROM
+      group_rows()
+  )
+FROM
+  Transactions
+GROUP BY State
+==
+
+# Use group rows within EXISTS() subquery.
+SELECT EXISTS(
+  WITH group_rows() AS GROUP ROWS
+  SELECT col
+  FROM group_rows()
+)
+FROM Transactions
+GROUP BY State
+--
+QueryStatement [0-116] [SELECT EXISTS...GROUP BY State]
+  Query [0-116] [SELECT EXISTS...GROUP BY State]
+    Select [0-116] [SELECT EXISTS...GROUP BY State]
+      SelectList [7-83] [EXISTS(...group_rows() )]
+        SelectColumn [7-83] [EXISTS(...group_rows() )]
+          ExpressionSubquery(modifier=EXISTS) [7-83] [EXISTS(...group_rows() )]
+            Query [17-81] [WITH group_rows...group_rows()]
+              WithClause [17-48] [WITH group_rows...GROUP ROWS]
+                WithClauseEntry [22-48] [group_rows() AS GROUP ROWS]
+                  AliasedGroupRows [22-48] [group_rows() AS GROUP ROWS]
+                    Identifier(group_rows) [22-32] [group_rows]
+              Select [51-81] [SELECT col   FROM group_rows()]
+                SelectList [58-61] [col]
+                  SelectColumn [58-61] [col]
+                    PathExpression [58-61] [col]
+                      Identifier(col) [58-61] [col]
+                FromClause [64-81] [FROM group_rows()]
+                  TVF [69-81] [group_rows()]
+                    PathExpression [69-79] [group_rows]
+                      Identifier(group_rows) [69-79] [group_rows]
+      FromClause [84-101] [FROM Transactions]
+        TablePathExpression [89-101] [Transactions]
+          PathExpression [89-101] [Transactions]
+            Identifier(Transactions) [89-101] [Transactions]
+      GroupBy [102-116] [GROUP BY State]
+        GroupingItem [111-116] [State]
+          PathExpression [111-116] [State]
+            Identifier(State) [111-116] [State]
+--
+SELECT
+  EXISTS(WITH
+      group_rows() AS GROUP ROWS
+    SELECT
+      col
+    FROM
+      group_rows()
+  )
+FROM
+  Transactions
+GROUP BY State
+==
+
+# Group Rows with recursive.
+SELECT (
+  WITH RECURSIVE group_rows() AS GROUP ROWS
+  SELECT col
+  FROM group_rows()
+)
+FROM Transactions
+GROUP BY State
+--
+QueryStatement [0-120] [SELECT (...GROUP BY State]
+  Query [0-120] [SELECT (...GROUP BY State]
+    Select [0-120] [SELECT (...GROUP BY State]
+      SelectList [7-87] [(   WITH RECURSIV...p_rows() )]
+        SelectColumn [7-87] [(   WITH RECURSIV...p_rows() )]
+          ExpressionSubquery [7-87] [(   WITH RECURSIV...p_rows() )]
+            Query [11-85] [WITH RECURSIVE...group_rows()]
+              WithClause (recursive) [11-52] [WITH RECURSIVE...GROUP ROWS]
+                WithClauseEntry [26-52] [group_rows() AS GROUP ROWS]
+                  AliasedGroupRows [26-52] [group_rows() AS GROUP ROWS]
+                    Identifier(group_rows) [26-36] [group_rows]
+              Select [55-85] [SELECT col   FROM group_rows()]
+                SelectList [62-65] [col]
+                  SelectColumn [62-65] [col]
+                    PathExpression [62-65] [col]
+                      Identifier(col) [62-65] [col]
+                FromClause [68-85] [FROM group_rows()]
+                  TVF [73-85] [group_rows()]
+                    PathExpression [73-83] [group_rows]
+                      Identifier(group_rows) [73-83] [group_rows]
+      FromClause [88-105] [FROM Transactions]
+        TablePathExpression [93-105] [Transactions]
+          PathExpression [93-105] [Transactions]
+            Identifier(Transactions) [93-105] [Transactions]
+      GroupBy [106-120] [GROUP BY State]
+        GroupingItem [115-120] [State]
+          PathExpression [115-120] [State]
+            Identifier(State) [115-120] [State]
+--
+SELECT
+  (WITH RECURSIVE
+      group_rows() AS GROUP ROWS
+    SELECT
+      col
+    FROM
+      group_rows()
+  )
+FROM
+  Transactions
+GROUP BY State
+==
+
+# Group Rows with other aliased queries.
+SELECT (
+  WITH group_rows() AS GROUP ROWS,
+  t1 AS (SELECT 5 as x)
+  SELECT col
+  FROM group_rows()
+)
+FROM Transactions
+GROUP BY State
+--
+QueryStatement [0-135] [SELECT (...GROUP BY State]
+  Query [0-135] [SELECT (...GROUP BY State]
+    Select [0-135] [SELECT (...GROUP BY State]
+      SelectList [7-102] [(   WITH group_ro...p_rows() )]
+        SelectColumn [7-102] [(   WITH group_ro...p_rows() )]
+          ExpressionSubquery [7-102] [(   WITH group_ro...p_rows() )]
+            Query [11-100] [WITH group_rows...group_rows()]
+              WithClause [11-67] [WITH group_rows...LECT 5 as x)]
+                WithClauseEntry [16-42] [group_rows() AS GROUP ROWS]
+                  AliasedGroupRows [16-42] [group_rows() AS GROUP ROWS]
+                    Identifier(group_rows) [16-26] [group_rows]
+                WithClauseEntry [46-67] [t1 AS (SELECT 5 as x)]
+                  AliasedQuery [46-67] [t1 AS (SELECT 5 as x)]
+                    Identifier(t1) [46-48] [t1]
+                    Query [52-67] [(SELECT 5 as x)]
+                      Select [53-66] [SELECT 5 as x]
+                        SelectList [60-66] [5 as x]
+                          SelectColumn [60-66] [5 as x]
+                            IntLiteral(5) [60-61] [5]
+                            Alias [62-66] [as x]
+                              Identifier(x) [65-66] [x]
+              Select [70-100] [SELECT col   FROM group_rows()]
+                SelectList [77-80] [col]
+                  SelectColumn [77-80] [col]
+                    PathExpression [77-80] [col]
+                      Identifier(col) [77-80] [col]
+                FromClause [83-100] [FROM group_rows()]
+                  TVF [88-100] [group_rows()]
+                    PathExpression [88-98] [group_rows]
+                      Identifier(group_rows) [88-98] [group_rows]
+      FromClause [103-120] [FROM Transactions]
+        TablePathExpression [108-120] [Transactions]
+          PathExpression [108-120] [Transactions]
+            Identifier(Transactions) [108-120] [Transactions]
+      GroupBy [121-135] [GROUP BY State]
+        GroupingItem [130-135] [State]
+          PathExpression [130-135] [State]
+            Identifier(State) [130-135] [State]
+--
+SELECT
+  (WITH
+      group_rows() AS GROUP ROWS,
+      t1 AS (
+        SELECT
+          5 AS x
+      )
+    SELECT
+      col
+    FROM
+      group_rows()
+  )
+FROM
+  Transactions
+GROUP BY State
+==

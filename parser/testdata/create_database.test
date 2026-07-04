@@ -1,0 +1,169 @@
+create database db;
+--
+CreateDatabaseStatement [0-18] [create database db]
+  PathExpression [16-18] [db]
+    Identifier(db) [16-18] [db]
+--
+CREATE DATABASE db
+==
+
+# Database name is a path.
+create database a.b.c.db;
+--
+CreateDatabaseStatement [0-24] [create database a.b.c.db]
+  PathExpression [16-24] [a.b.c.db]
+    Identifier(a) [16-17] [a]
+    Identifier(b) [18-19] [b]
+    Identifier(c) [20-21] [c]
+    Identifier(db) [22-24] [db]
+--
+CREATE DATABASE a.b.c.db
+==
+
+# Create a database named "database".
+create database database;
+--
+CreateDatabaseStatement [0-24] [create database database]
+  PathExpression [16-24] [database]
+    Identifier(database) [16-24] [database]
+--
+CREATE DATABASE database
+==
+
+# Create a database with an option.
+create database db options(db_option=1);
+--
+CreateDatabaseStatement [0-39] [create database...db_option=1)]
+  PathExpression [16-18] [db]
+    Identifier(db) [16-18] [db]
+  OptionsList [26-39] [(db_option=1)]
+    OptionsEntry [27-38] [db_option=1]
+      Identifier(db_option) [27-36] [db_option]
+      IntLiteral(1) [37-38] [1]
+--
+CREATE DATABASE db OPTIONS(db_option = 1)
+==
+
+# Create a database with an option and database name is a path
+create database a.b.c.db options(db_option=1);
+--
+CreateDatabaseStatement [0-45] [create database...db_option=1)]
+  PathExpression [16-24] [a.b.c.db]
+    Identifier(a) [16-17] [a]
+    Identifier(b) [18-19] [b]
+    Identifier(c) [20-21] [c]
+    Identifier(db) [22-24] [db]
+  OptionsList [32-45] [(db_option=1)]
+    OptionsEntry [33-44] [db_option=1]
+      Identifier(db_option) [33-42] [db_option]
+      IntLiteral(1) [43-44] [1]
+--
+CREATE DATABASE a.b.c.db OPTIONS(db_option = 1)
+==
+
+# Create a database with two options.
+create database db options(option_1=1,option_2='2');
+--
+CreateDatabaseStatement [0-51] [create database...ption_2='2')]
+  PathExpression [16-18] [db]
+    Identifier(db) [16-18] [db]
+  OptionsList [26-51] [(option_1=1,option_2='2')]
+    OptionsEntry [27-37] [option_1=1]
+      Identifier(option_1) [27-35] [option_1]
+      IntLiteral(1) [36-37] [1]
+    OptionsEntry [38-50] [option_2='2']
+      Identifier(option_2) [38-46] [option_2]
+      StringLiteral [47-50] ['2']
+        StringLiteralComponent('2') [47-50] ['2']
+--
+CREATE DATABASE db OPTIONS(option_1 = 1, option_2 = '2')
+==
+
+CREATE DATABASE OPTIONS OPTIONS(option_1=1,option_2='2');
+--
+CreateDatabaseStatement [0-56] [CREATE DATABASE...ption_2='2')]
+  PathExpression [16-23] [OPTIONS]
+    Identifier(OPTIONS) [16-23] [OPTIONS]
+  OptionsList [31-56] [(option_1=1,option_2='2')]
+    OptionsEntry [32-42] [option_1=1]
+      Identifier(option_1) [32-40] [option_1]
+      IntLiteral(1) [41-42] [1]
+    OptionsEntry [43-55] [option_2='2']
+      Identifier(option_2) [43-51] [option_2]
+      StringLiteral [52-55] ['2']
+        StringLiteralComponent('2') [52-55] ['2']
+--
+CREATE DATABASE OPTIONS OPTIONS(option_1 = 1, option_2 = '2')
+==
+
+# Missing database name.
+create database;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:16]
+create database;
+               ^
+==
+
+# Note: here OPTIONS is a keyword used as an identifier (trying to create a
+# database named 'options').
+create database options(db_option=1);
+--
+ERROR: Syntax error: Expected end of input but got "(" [at 1:24]
+create database options(db_option=1);
+                       ^
+==
+
+# Invalid option.
+create database db options(db_option);
+--
+ERROR: Syntax error: Expected "=" but got ")" [at 1:37]
+create database db options(db_option);
+                                    ^
+==
+
+# Invalid option.
+create database db options(db_option=);
+--
+ERROR: Syntax error: Unexpected ")" [at 1:38]
+create database db options(db_option=);
+                                     ^
+==
+
+# Could not resolve database options.
+create database db options(1=db_option);
+--
+ERROR: Syntax error: Expected ")" but got integer literal "1" [at 1:28]
+create database db options(1=db_option);
+                           ^
+==
+
+# [OR REPLACE] is not supported.
+create or replace database db;
+--
+ERROR: Syntax error: Unexpected keyword DATABASE [at 1:19]
+create or replace database db;
+                  ^
+==
+
+# [TEMP] is not supported.
+create temp database db;
+--
+ERROR: Syntax error: Unexpected keyword DATABASE [at 1:13]
+create temp database db;
+            ^
+==
+
+# [TEMPORARY] is not supported.
+create temporary database db;
+--
+ERROR: Syntax error: Unexpected keyword DATABASE [at 1:18]
+create temporary database db;
+                 ^
+==
+
+# [IF NOT EXISTS] is not supported.
+create database db if not exists;
+--
+ERROR: Syntax error: Expected end of input but got keyword IF [at 1:20]
+create database db if not exists;
+                   ^

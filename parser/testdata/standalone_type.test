@@ -1,0 +1,1130 @@
+# This file includes tests for standalone types, outside of queries.
+[default mode=type]
+int32
+--
+SimpleType [0-5] [int32]
+  PathExpression [0-5] [int32]
+    Identifier(int32) [0-5] [int32]
+--
+int32
+==
+
+a.b.c
+--
+SimpleType [0-5] [a.b.c]
+  PathExpression [0-5] [a.b.c]
+    Identifier(a) [0-1] [a]
+    Identifier(b) [2-3] [b]
+    Identifier(c) [4-5] [c]
+--
+a.b.c
+==
+
+`a.b.c`
+--
+SimpleType [0-7] [`a.b.c`]
+  PathExpression [0-7] [`a.b.c`]
+    Identifier(`a.b.c`) [0-7] [`a.b.c`]
+--
+`a.b.c`
+==
+
+proto<`a.b.c`>
+--
+ERROR: Syntax error: Unexpected keyword PROTO [at 1:1]
+proto<`a.b.c`>
+^
+==
+
+enum<a.b.c>
+--
+ERROR: Syntax error: Unexpected keyword ENUM [at 1:1]
+enum<a.b.c>
+^
+==
+
+# Parse fails on extra stuff after the type.
+int32 xxx
+--
+ERROR: Syntax error: Expected end of input but got identifier "xxx" [at 1:7]
+int32 xxx
+      ^
+==
+
+struct
+--
+ERROR: Syntax error: Expected "<" but got end of type [at 1:7]
+struct
+      ^
+==
+
+struct<
+--
+ERROR: Syntax error: Expected ">" but got end of type [at 1:8]
+struct<
+       ^
+==
+
+struct<x int32, y string>
+--
+StructType [0-25] [struct<x int32, y string>]
+  StructField [7-14] [x int32]
+    Identifier(x) [7-8] [x]
+    SimpleType [9-14] [int32]
+      PathExpression [9-14] [int32]
+        Identifier(int32) [9-14] [int32]
+  StructField [16-24] [y string]
+    Identifier(y) [16-17] [y]
+    SimpleType [18-24] [string]
+      PathExpression [18-24] [string]
+        Identifier(string) [18-24] [string]
+--
+STRUCT< x int32, y string >
+==
+
+ARRAY< # comment
+int32/* comment
+xxxx
+*/>
+--
+ArrayType [0-41] [ARRAY< # comment...nt xxxx */>]
+  SimpleType [17-22] [int32]
+    PathExpression [17-22] [int32]
+      Identifier(int32) [17-22] [int32]
+--
+ARRAY< int32 >
+==
+
+# Empty struct is allowed.
+struct<>
+--
+StructType [0-8] [struct<>]
+--
+STRUCT< >
+==
+
+proto<>
+--
+ERROR: Syntax error: Unexpected keyword PROTO [at 1:1]
+proto<>
+^
+==
+
+timestamp_micros
+--
+SimpleType [0-16] [timestamp_micros]
+  PathExpression [0-16] [timestamp_micros]
+    Identifier(timestamp_micros) [0-16] [timestamp_micros]
+--
+timestamp_micros
+==
+
+# Parameterized types are only supported in CAST expression, script variable,
+# and DDL. See (broken link) for language spec.
+timestamp(0)
+--
+SimpleType [0-12] [timestamp(0)]
+  PathExpression [0-9] [timestamp]
+    Identifier(timestamp) [0-9] [timestamp]
+  TypeParameterList [9-11] [(0]
+    IntLiteral(0) [10-11] [0]
+--
+timestamp(0)
+==
+
+numeric(MAX, 5)
+--
+SimpleType [0-15] [numeric(MAX, 5)]
+  PathExpression [0-7] [numeric]
+    Identifier(numeric) [0-7] [numeric]
+  TypeParameterList [7-14] [(MAX, 5]
+    MaxLiteral() [8-11] [MAX]
+    IntLiteral(5) [13-14] [5]
+--
+numeric(MAX, 5)
+==
+
+numeric(MAX, MAX)
+--
+SimpleType [0-17] [numeric(MAX, MAX)]
+  PathExpression [0-7] [numeric]
+    Identifier(numeric) [0-7] [numeric]
+  TypeParameterList [7-16] [(MAX, MAX]
+    MaxLiteral() [8-11] [MAX]
+    MaxLiteral() [13-16] [MAX]
+--
+numeric(MAX, MAX)
+==
+
+namespace.typename(1, 2, 3, 4, 5, MAX)
+--
+SimpleType [0-38] [namespace....4, 5, MAX)]
+  PathExpression [0-18] [namespace.typename]
+    Identifier(namespace) [0-9] [namespace]
+    Identifier(typename) [10-18] [typename]
+  TypeParameterList [18-37] [(1, 2, 3, 4, 5, MAX]
+    IntLiteral(1) [19-20] [1]
+    IntLiteral(2) [22-23] [2]
+    IntLiteral(3) [25-26] [3]
+    IntLiteral(4) [28-29] [4]
+    IntLiteral(5) [31-32] [5]
+    MaxLiteral() [34-37] [MAX]
+--
+namespace.typename(1, 2, 3, 4, 5, MAX)
+==
+
+struct<a string(100), b numeric(MAX, 10)>
+--
+StructType [0-41] [struct<a string...(MAX, 10)>]
+  StructField [7-20] [a string(100)]
+    Identifier(a) [7-8] [a]
+    SimpleType [9-20] [string(100)]
+      PathExpression [9-15] [string]
+        Identifier(string) [9-15] [string]
+      TypeParameterList [15-19] [(100]
+        IntLiteral(100) [16-19] [100]
+  StructField [22-40] [b numeric(MAX, 10)]
+    Identifier(b) [22-23] [b]
+    SimpleType [24-40] [numeric(MAX, 10)]
+      PathExpression [24-31] [numeric]
+        Identifier(numeric) [24-31] [numeric]
+      TypeParameterList [31-39] [(MAX, 10]
+        MaxLiteral() [32-35] [MAX]
+        IntLiteral(10) [37-39] [10]
+
+--
+STRUCT< a string(100), b numeric(MAX, 10) >
+==
+
+struct<x int64>(10)
+--
+StructType [0-19] [struct<x int64>(10)]
+  StructField [7-14] [x int64]
+    Identifier(x) [7-8] [x]
+    SimpleType [9-14] [int64]
+      PathExpression [9-14] [int64]
+        Identifier(int64) [9-14] [int64]
+  TypeParameterList [15-18] [(10]
+    IntLiteral(10) [16-18] [10]
+
+--
+STRUCT< x int64 > (10)
+==
+
+array<string>(200)
+--
+ArrayType [0-18] [array<string>(200)]
+  SimpleType [6-12] [string]
+    PathExpression [6-12] [string]
+      Identifier(string) [6-12] [string]
+  TypeParameterList [13-17] [(200]
+    IntLiteral(200) [14-17] [200]
+
+--
+ARRAY< string > (200)
+==
+
+array<string(100)>
+
+--
+ArrayType [0-18] [array<string(100)>]
+  SimpleType [6-17] [string(100)]
+    PathExpression [6-12] [string]
+      Identifier(string) [6-12] [string]
+    TypeParameterList [12-16] [(100]
+      IntLiteral(100) [13-16] [100]
+
+--
+ARRAY< string(100) >
+
+==
+
+struct<a array<string(100)>, b struct<f1 numeric(MAX, 5)>>
+
+--
+StructType [0-58] [struct<a array...(MAX, 5)>>]
+  StructField [7-27] [a array<string(100)>]
+    Identifier(a) [7-8] [a]
+    ArrayType [9-27] [array<string(100)>]
+      SimpleType [15-26] [string(100)]
+        PathExpression [15-21] [string]
+          Identifier(string) [15-21] [string]
+        TypeParameterList [21-25] [(100]
+          IntLiteral(100) [22-25] [100]
+  StructField [29-57] [b struct<f1 numeric(MAX, 5)>]
+    Identifier(b) [29-30] [b]
+    StructType [31-57] [struct<f1 numeric(MAX, 5)>]
+      StructField [38-56] [f1 numeric(MAX, 5)]
+        Identifier(f1) [38-40] [f1]
+        SimpleType [41-56] [numeric(MAX, 5)]
+          PathExpression [41-48] [numeric]
+            Identifier(numeric) [41-48] [numeric]
+          TypeParameterList [48-55] [(MAX, 5]
+            MaxLiteral() [49-52] [MAX]
+            IntLiteral(5) [54-55] [5]
+
+--
+STRUCT< a ARRAY< string(100) >, b STRUCT< f1 numeric(MAX, 5) > >
+
+==
+
+# Float literal parameter
+numeric(1.1)
+--
+SimpleType [0-12] [numeric(1.1)]
+  PathExpression [0-7] [numeric]
+    Identifier(numeric) [0-7] [numeric]
+  TypeParameterList [7-11] [(1.1]
+    FloatLiteral(1.1) [8-11] [1.1]
+--
+numeric(1.1)
+==
+
+# String literal parameter
+numeric("MAX")
+--
+SimpleType [0-14] [numeric("MAX")]
+  PathExpression [0-7] [numeric]
+    Identifier(numeric) [0-7] [numeric]
+  TypeParameterList [7-13] [("MAX"]
+    StringLiteral [8-13] ["MAX"]
+      StringLiteralComponent("MAX") [8-13] ["MAX"]
+--
+numeric("MAX")
+==
+
+# Bytes literal parameter
+string(B"abc")
+--
+SimpleType [0-14] [string(B"abc")]
+  PathExpression [0-6] [string]
+    Identifier(string) [0-6] [string]
+  TypeParameterList [6-13] [(B"abc"]
+    BytesLiteral [7-13] [B"abc"]
+      BytesLiteralComponent(B"abc") [7-13] [B"abc"]
+--
+string(B"abc")
+==
+
+# Boolean literal parameter
+string(TRUE)
+--
+SimpleType [0-12] [string(TRUE)]
+  PathExpression [0-6] [string]
+    Identifier(string) [0-6] [string]
+  TypeParameterList [6-11] [(TRUE]
+    BooleanLiteral(TRUE) [7-11] [TRUE]
+--
+string(TRUE)
+==
+
+# Mix of int and string literal parameters
+money(20, 6, 'USD')
+--
+SimpleType [0-19] [money(20, 6, 'USD')]
+  PathExpression [0-5] [money]
+    Identifier(money) [0-5] [money]
+  TypeParameterList [5-18] [(20, 6, 'USD']
+    IntLiteral(20) [6-8] [20]
+    IntLiteral(6) [10-11] [6]
+    StringLiteral [13-18] ['USD']
+      StringLiteralComponent('USD') [13-18] ['USD']
+--
+money(20, 6, 'USD')
+==
+
+# Invalid parameterized types
+timestamp(0,1,)
+--
+ERROR: Syntax error: Trailing comma in type parameter list is not allowed. [at 1:14]
+timestamp(0,1,)
+             ^
+==
+
+# Type parameter can not be a expression.
+string(10 + 20)
+
+--
+ERROR: Syntax error: Expected ")" or "," but got "+" [at 1:11]
+string(10 + 20)
+          ^
+==
+
+# Type parameter can not be a expression with MAX().
+numeric(MAX(), 10)
+
+--
+ERROR: Syntax error: Expected ")" or "," but got "(" [at 1:12]
+numeric(MAX(), 10)
+           ^
+==
+
+string collate 'ABC'
+--
+SimpleType [0-20] [string collate 'ABC']
+  PathExpression [0-6] [string]
+    Identifier(string) [0-6] [string]
+  Collate [7-20] [collate 'ABC']
+    StringLiteral [15-20] ['ABC']
+      StringLiteralComponent('ABC') [15-20] ['ABC']
+--
+string COLLATE 'ABC'
+==
+
+string(100) collate 'ABC'
+--
+SimpleType [0-25] [string(100) collate 'ABC']
+  PathExpression [0-6] [string]
+    Identifier(string) [0-6] [string]
+  TypeParameterList [6-10] [(100]
+    IntLiteral(100) [7-10] [100]
+  Collate [12-25] [collate 'ABC']
+    StringLiteral [20-25] ['ABC']
+      StringLiteralComponent('ABC') [20-25] ['ABC']
+--
+string(100) COLLATE 'ABC'
+==
+
+struct<a string collate 'ABC'>
+--
+StructType [0-30] [struct<a string collate 'ABC'>]
+  StructField [7-29] [a string collate 'ABC']
+    Identifier(a) [7-8] [a]
+    SimpleType [9-29] [string collate 'ABC']
+      PathExpression [9-15] [string]
+        Identifier(string) [9-15] [string]
+      Collate [16-29] [collate 'ABC']
+        StringLiteral [24-29] ['ABC']
+          StringLiteralComponent('ABC') [24-29] ['ABC']
+--
+STRUCT< a string COLLATE 'ABC' >
+==
+
+struct<a string> collate 'ABC'
+--
+StructType [0-30] [struct<a string> collate 'ABC']
+  StructField [7-15] [a string]
+    Identifier(a) [7-8] [a]
+    SimpleType [9-15] [string]
+      PathExpression [9-15] [string]
+        Identifier(string) [9-15] [string]
+  Collate [17-30] [collate 'ABC']
+    StringLiteral [25-30] ['ABC']
+      StringLiteralComponent('ABC') [25-30] ['ABC']
+--
+STRUCT< a string > COLLATE 'ABC'
+==
+
+struct<a string(100) collate 'ABC'>
+--
+StructType [0-35] [struct<a string...llate 'ABC'>]
+  StructField [7-34] [a string(100) collate 'ABC']
+    Identifier(a) [7-8] [a]
+    SimpleType [9-34] [string(100) collate 'ABC']
+      PathExpression [9-15] [string]
+        Identifier(string) [9-15] [string]
+      TypeParameterList [15-19] [(100]
+        IntLiteral(100) [16-19] [100]
+      Collate [21-34] [collate 'ABC']
+        StringLiteral [29-34] ['ABC']
+          StringLiteralComponent('ABC') [29-34] ['ABC']
+--
+STRUCT< a string(100) COLLATE 'ABC' >
+==
+
+array<string collate 'ABC'>
+--
+ArrayType [0-27] [array<string collate 'ABC'>]
+  SimpleType [6-26] [string collate 'ABC']
+    PathExpression [6-12] [string]
+      Identifier(string) [6-12] [string]
+    Collate [13-26] [collate 'ABC']
+      StringLiteral [21-26] ['ABC']
+        StringLiteralComponent('ABC') [21-26] ['ABC']
+--
+ARRAY< string COLLATE 'ABC' >
+==
+
+array<string> collate 'ABC'
+--
+ArrayType [0-27] [array<string> collate 'ABC']
+  SimpleType [6-12] [string]
+    PathExpression [6-12] [string]
+      Identifier(string) [6-12] [string]
+  Collate [14-27] [collate 'ABC']
+    StringLiteral [22-27] ['ABC']
+      StringLiteralComponent('ABC') [22-27] ['ABC']
+--
+ARRAY< string > COLLATE 'ABC'
+==
+
+array<string(100) collate 'ABC'>
+--
+ArrayType [0-32] [array<string...collate 'ABC'>]
+  SimpleType [6-31] [string(100) collate 'ABC']
+    PathExpression [6-12] [string]
+      Identifier(string) [6-12] [string]
+    TypeParameterList [12-16] [(100]
+      IntLiteral(100) [13-16] [100]
+    Collate [18-31] [collate 'ABC']
+      StringLiteral [26-31] ['ABC']
+        StringLiteralComponent('ABC') [26-31] ['ABC']
+--
+ARRAY< string(100) COLLATE 'ABC' >
+==
+
+array<string(100) collate 'ABC'>(200)
+--
+ArrayType [0-37] [array<string...ABC'>(200)]
+  SimpleType [6-31] [string(100) collate 'ABC']
+    PathExpression [6-12] [string]
+      Identifier(string) [6-12] [string]
+    TypeParameterList [12-16] [(100]
+      IntLiteral(100) [13-16] [100]
+    Collate [18-31] [collate 'ABC']
+      StringLiteral [26-31] ['ABC']
+        StringLiteralComponent('ABC') [26-31] ['ABC']
+  TypeParameterList [32-36] [(200]
+    IntLiteral(200) [33-36] [200]
+--
+ARRAY< string(100) COLLATE 'ABC' > (200)
+
+==
+
+struct<a array<string(100) collate 'ABC'>, b struct<string(50) collate 'CDE'>>
+--
+StructType [0-78] [struct<a array...llate 'CDE'>>]
+  StructField [7-41] [a array<string...ollate 'ABC'>]
+    Identifier(a) [7-8] [a]
+    ArrayType [9-41] [array<string...collate 'ABC'>]
+      SimpleType [15-40] [string(100) collate 'ABC']
+        PathExpression [15-21] [string]
+          Identifier(string) [15-21] [string]
+        TypeParameterList [21-25] [(100]
+          IntLiteral(100) [22-25] [100]
+        Collate [27-40] [collate 'ABC']
+          StringLiteral [35-40] ['ABC']
+            StringLiteralComponent('ABC') [35-40] ['ABC']
+  StructField [43-77] [b struct<string...llate 'CDE'>]
+    Identifier(b) [43-44] [b]
+    StructType [45-77] [struct<string...collate 'CDE'>]
+      StructField [52-76] [string(50) collate 'CDE']
+        SimpleType [52-76] [string(50) collate 'CDE']
+          PathExpression [52-58] [string]
+            Identifier(string) [52-58] [string]
+          TypeParameterList [58-61] [(50]
+            IntLiteral(50) [59-61] [50]
+          Collate [63-76] [collate 'CDE']
+            StringLiteral [71-76] ['CDE']
+              StringLiteralComponent('CDE') [71-76] ['CDE']
+--
+STRUCT< a ARRAY< string(100) COLLATE 'ABC' >, b STRUCT< string(50) COLLATE 'CDE' > >
+==
+
+# Use parameter as collate clause.
+string collate @collation_name
+--
+SimpleType [0-30] [string collate @collation_name]
+  PathExpression [0-6] [string]
+    Identifier(string) [0-6] [string]
+  Collate [7-30] [collate @collation_name]
+    ParameterExpr [15-30] [@collation_name]
+      Identifier(collation_name) [16-30] [collation_name]
+--
+string COLLATE @collation_name
+==
+
+struct<a string collate 'ABC', b string(100) collate @collation_name>
+--
+StructType [0-69] [struct<a string...lation_name>]
+  StructField [7-29] [a string collate 'ABC']
+    Identifier(a) [7-8] [a]
+    SimpleType [9-29] [string collate 'ABC']
+      PathExpression [9-15] [string]
+        Identifier(string) [9-15] [string]
+      Collate [16-29] [collate 'ABC']
+        StringLiteral [24-29] ['ABC']
+          StringLiteralComponent('ABC') [24-29] ['ABC']
+  StructField [31-68] [b string(100...collation_name]
+    Identifier(b) [31-32] [b]
+    SimpleType [33-68] [string(100...collation_name]
+      PathExpression [33-39] [string]
+        Identifier(string) [33-39] [string]
+      TypeParameterList [39-43] [(100]
+        IntLiteral(100) [40-43] [100]
+      Collate [45-68] [collate @collation_name]
+        ParameterExpr [53-68] [@collation_name]
+          Identifier(collation_name) [54-68] [collation_name]
+--
+STRUCT< a string COLLATE 'ABC', b string(100) COLLATE @collation_name >
+==
+
+FUNCTION<()->{{INT64|STRUCT<INT64>}}>
+--
+
+ALTERNATION GROUP: INT64
+--
+FunctionType [0-19] [FUNCTION<()->INT64>]
+  FunctionTypeArgList [9-11] [()]
+  SimpleType [13-18] [INT64]
+    PathExpression [13-18] [INT64]
+      Identifier(INT64) [13-18] [INT64]
+--
+FUNCTION<() -> INT64 >
+--
+ALTERNATION GROUP: STRUCT<INT64>
+--
+FunctionType [0-27] [FUNCTION<()->STRUCT<INT64>>]
+  FunctionTypeArgList [9-11] [()]
+  StructType [13-26] [STRUCT<INT64>]
+    StructField [20-25] [INT64]
+      SimpleType [20-25] [INT64]
+        PathExpression [20-25] [INT64]
+          Identifier(INT64) [20-25] [INT64]
+--
+FUNCTION<() -> STRUCT< INT64 > >
+==
+
+FUNCTION<{{INT64|STRUCT<INT64>}}->INT64>
+--
+
+ALTERNATION GROUP: INT64
+--
+FunctionType [0-22] [FUNCTION<INT64->INT64>]
+  FunctionTypeArgList [9-14] [INT64]
+    SimpleType [9-14] [INT64]
+      PathExpression [9-14] [INT64]
+        Identifier(INT64) [9-14] [INT64]
+  SimpleType [16-21] [INT64]
+    PathExpression [16-21] [INT64]
+      Identifier(INT64) [16-21] [INT64]
+--
+FUNCTION<(INT64) -> INT64 >
+--
+ALTERNATION GROUP: STRUCT<INT64>
+--
+FunctionType [0-30] [FUNCTION<STRUCT<INT64>->INT64>]
+  FunctionTypeArgList [9-22] [STRUCT<INT64>]
+    StructType [9-22] [STRUCT<INT64>]
+      StructField [16-21] [INT64]
+        SimpleType [16-21] [INT64]
+          PathExpression [16-21] [INT64]
+            Identifier(INT64) [16-21] [INT64]
+  SimpleType [24-29] [INT64]
+    PathExpression [24-29] [INT64]
+      Identifier(INT64) [24-29] [INT64]
+--
+FUNCTION<(STRUCT< INT64 >) -> INT64 >
+==
+
+FUNCTION<({{INT64|STRUCT<INT64>}})->INT64>
+--
+
+ALTERNATION GROUP: INT64
+--
+FunctionType [0-24] [FUNCTION<(INT64)->INT64>]
+  FunctionTypeArgList [0-15] [FUNCTION<(INT64]
+    SimpleType [10-15] [INT64]
+      PathExpression [10-15] [INT64]
+        Identifier(INT64) [10-15] [INT64]
+  SimpleType [18-23] [INT64]
+    PathExpression [18-23] [INT64]
+      Identifier(INT64) [18-23] [INT64]
+--
+FUNCTION<(INT64) -> INT64 >
+--
+ALTERNATION GROUP: STRUCT<INT64>
+--
+FunctionType [0-32] [FUNCTION<(...>)->INT64>]
+  FunctionTypeArgList [0-23] [FUNCTION<(STRUCT<INT64>]
+    StructType [10-23] [STRUCT<INT64>]
+      StructField [17-22] [INT64]
+        SimpleType [17-22] [INT64]
+          PathExpression [17-22] [INT64]
+            Identifier(INT64) [17-22] [INT64]
+  SimpleType [26-31] [INT64]
+    PathExpression [26-31] [INT64]
+      Identifier(INT64) [26-31] [INT64]
+--
+FUNCTION<(STRUCT< INT64 >) -> INT64 >
+==
+
+FUNCTION<({{INT64|STRUCT<INT64>}}, {{INT64|STRUCT<INT64>}})->INT64>
+--
+
+ALTERNATION GROUP: INT64,INT64
+--
+FunctionType [0-31] [FUNCTION<(...INT64)->INT64>]
+  FunctionTypeArgList [0-22] [FUNCTION<(INT64, INT64]
+    SimpleType [10-15] [INT64]
+      PathExpression [10-15] [INT64]
+        Identifier(INT64) [10-15] [INT64]
+    SimpleType [17-22] [INT64]
+      PathExpression [17-22] [INT64]
+        Identifier(INT64) [17-22] [INT64]
+  SimpleType [25-30] [INT64]
+    PathExpression [25-30] [INT64]
+      Identifier(INT64) [25-30] [INT64]
+--
+FUNCTION<(INT64, INT64) -> INT64 >
+--
+ALTERNATION GROUP: INT64,STRUCT<INT64>
+--
+FunctionType [0-39] [FUNCTION<(...>)->INT64>]
+  FunctionTypeArgList [0-30] [FUNCTION<(INT64, STRUCT<INT64>]
+    SimpleType [10-15] [INT64]
+      PathExpression [10-15] [INT64]
+        Identifier(INT64) [10-15] [INT64]
+    StructType [17-30] [STRUCT<INT64>]
+      StructField [24-29] [INT64]
+        SimpleType [24-29] [INT64]
+          PathExpression [24-29] [INT64]
+            Identifier(INT64) [24-29] [INT64]
+  SimpleType [33-38] [INT64]
+    PathExpression [33-38] [INT64]
+      Identifier(INT64) [33-38] [INT64]
+--
+FUNCTION<(INT64, STRUCT< INT64 >) -> INT64 >
+--
+ALTERNATION GROUP: STRUCT<INT64>,INT64
+--
+FunctionType [0-39] [FUNCTION<(...INT64)->INT64>]
+  FunctionTypeArgList [0-30] [FUNCTION<(STRUCT<INT64>, INT64]
+    StructType [10-23] [STRUCT<INT64>]
+      StructField [17-22] [INT64]
+        SimpleType [17-22] [INT64]
+          PathExpression [17-22] [INT64]
+            Identifier(INT64) [17-22] [INT64]
+    SimpleType [25-30] [INT64]
+      PathExpression [25-30] [INT64]
+        Identifier(INT64) [25-30] [INT64]
+  SimpleType [33-38] [INT64]
+    PathExpression [33-38] [INT64]
+      Identifier(INT64) [33-38] [INT64]
+--
+FUNCTION<(STRUCT< INT64 >, INT64) -> INT64 >
+--
+ALTERNATION GROUP: STRUCT<INT64>,STRUCT<INT64>
+--
+FunctionType [0-47] [FUNCTION<(...>)->INT64>]
+  FunctionTypeArgList [0-38] [FUNCTION<(...STRUCT<INT64>]
+    StructType [10-23] [STRUCT<INT64>]
+      StructField [17-22] [INT64]
+        SimpleType [17-22] [INT64]
+          PathExpression [17-22] [INT64]
+            Identifier(INT64) [17-22] [INT64]
+    StructType [25-38] [STRUCT<INT64>]
+      StructField [32-37] [INT64]
+        SimpleType [32-37] [INT64]
+          PathExpression [32-37] [INT64]
+            Identifier(INT64) [32-37] [INT64]
+  SimpleType [41-46] [INT64]
+    PathExpression [41-46] [INT64]
+      Identifier(INT64) [41-46] [INT64]
+--
+FUNCTION<(STRUCT< INT64 >, STRUCT< INT64 >) -> INT64 >
+==
+
+# Parser allows this, analyzer will prevent.
+FUNCTION<STRING collate 'abc'->STRING>
+--
+
+FunctionType [0-38] [FUNCTION<STRING...'->STRING>]
+  FunctionTypeArgList [9-29] [STRING collate 'abc']
+    SimpleType [9-29] [STRING collate 'abc']
+      PathExpression [9-15] [STRING]
+        Identifier(STRING) [9-15] [STRING]
+      Collate [16-29] [collate 'abc']
+        StringLiteral [24-29] ['abc']
+          StringLiteralComponent('abc') [24-29] ['abc']
+  SimpleType [31-37] [STRING]
+    PathExpression [31-37] [STRING]
+      Identifier(STRING) [31-37] [STRING]
+--
+FUNCTION<(STRING COLLATE 'abc') -> STRING >
+==
+
+# Parser allows this, analyzer will prevent.
+FUNCTION<STRING(8) collate 'abc'->STRING(8) collate 'abc'>
+--
+
+FunctionType [0-58] [FUNCTION<STRING...llate 'abc'>]
+  FunctionTypeArgList [9-32] [STRING(8) collate 'abc']
+    SimpleType [9-32] [STRING(8) collate 'abc']
+      PathExpression [9-15] [STRING]
+        Identifier(STRING) [9-15] [STRING]
+      TypeParameterList [15-17] [(8]
+        IntLiteral(8) [16-17] [8]
+      Collate [19-32] [collate 'abc']
+        StringLiteral [27-32] ['abc']
+          StringLiteralComponent('abc') [27-32] ['abc']
+  SimpleType [34-57] [STRING(8) collate 'abc']
+    PathExpression [34-40] [STRING]
+      Identifier(STRING) [34-40] [STRING]
+    TypeParameterList [40-42] [(8]
+      IntLiteral(8) [41-42] [8]
+    Collate [44-57] [collate 'abc']
+      StringLiteral [52-57] ['abc']
+        StringLiteralComponent('abc') [52-57] ['abc']
+--
+FUNCTION<(STRING(8) COLLATE 'abc') -> STRING(8) COLLATE 'abc' >
+==
+
+# Parser allows this, analyzer will prevent.
+FUNCTION<(STRING(8) collate 'abc')->STRING(8) collate 'abc'>
+--
+
+FunctionType [0-60] [FUNCTION<(...collate 'abc'>]
+  FunctionTypeArgList [0-33] [FUNCTION<(...collate 'abc']
+    SimpleType [10-33] [STRING(8) collate 'abc']
+      PathExpression [10-16] [STRING]
+        Identifier(STRING) [10-16] [STRING]
+      TypeParameterList [16-18] [(8]
+        IntLiteral(8) [17-18] [8]
+      Collate [20-33] [collate 'abc']
+        StringLiteral [28-33] ['abc']
+          StringLiteralComponent('abc') [28-33] ['abc']
+  SimpleType [36-59] [STRING(8) collate 'abc']
+    PathExpression [36-42] [STRING]
+      Identifier(STRING) [36-42] [STRING]
+    TypeParameterList [42-44] [(8]
+      IntLiteral(8) [43-44] [8]
+    Collate [46-59] [collate 'abc']
+      StringLiteral [54-59] ['abc']
+        StringLiteralComponent('abc') [54-59] ['abc']
+--
+FUNCTION<(STRING(8) COLLATE 'abc') -> STRING(8) COLLATE 'abc' >
+==
+
+FUNCTION<STRING collate 'abc'->STRING>
+--
+
+FunctionType [0-38] [FUNCTION<STRING...'->STRING>]
+  FunctionTypeArgList [9-29] [STRING collate 'abc']
+    SimpleType [9-29] [STRING collate 'abc']
+      PathExpression [9-15] [STRING]
+        Identifier(STRING) [9-15] [STRING]
+      Collate [16-29] [collate 'abc']
+        StringLiteral [24-29] ['abc']
+          StringLiteralComponent('abc') [24-29] ['abc']
+  SimpleType [31-37] [STRING]
+    PathExpression [31-37] [STRING]
+      Identifier(STRING) [31-37] [STRING]
+--
+FUNCTION<(STRING COLLATE 'abc') -> STRING >
+==
+
+FUNCTION<(STRING collate 'abc')->STRING>
+--
+
+FunctionType [0-40] [FUNCTION<(...)->STRING>]
+  FunctionTypeArgList [0-30] [FUNCTION<(STRING collate 'abc']
+    SimpleType [10-30] [STRING collate 'abc']
+      PathExpression [10-16] [STRING]
+        Identifier(STRING) [10-16] [STRING]
+      Collate [17-30] [collate 'abc']
+        StringLiteral [25-30] ['abc']
+          StringLiteralComponent('abc') [25-30] ['abc']
+  SimpleType [33-39] [STRING]
+    PathExpression [33-39] [STRING]
+      Identifier(STRING) [33-39] [STRING]
+
+--
+FUNCTION<(STRING COLLATE 'abc') -> STRING >
+==
+
+# Parser allows these, but the analyzer will toss an error.
+FUNCTION<()->INT64>{{(0)| collate 'c'|(0) collate 'c'}}
+--
+ALTERNATION GROUP: (0)
+--
+FunctionType [0-22] [FUNCTION<()->INT64>(0)]
+  FunctionTypeArgList [9-11] [()]
+  SimpleType [13-18] [INT64]
+    PathExpression [13-18] [INT64]
+      Identifier(INT64) [13-18] [INT64]
+  TypeParameterList [19-21] [(0]
+    IntLiteral(0) [20-21] [0]
+--
+FUNCTION<() -> INT64 > (0)
+--
+ALTERNATION GROUP:  collate 'c'
+--
+FunctionType [0-31] [FUNCTION<(...collate 'c']
+  FunctionTypeArgList [9-11] [()]
+  SimpleType [13-18] [INT64]
+    PathExpression [13-18] [INT64]
+      Identifier(INT64) [13-18] [INT64]
+  Collate [20-31] [collate 'c']
+    StringLiteral [28-31] ['c']
+      StringLiteralComponent('c') [28-31] ['c']
+--
+FUNCTION<() -> INT64 > COLLATE 'c'
+--
+ALTERNATION GROUP: (0) collate 'c'
+--
+FunctionType [0-34] [FUNCTION<(...collate 'c']
+  FunctionTypeArgList [9-11] [()]
+  SimpleType [13-18] [INT64]
+    PathExpression [13-18] [INT64]
+      Identifier(INT64) [13-18] [INT64]
+  TypeParameterList [19-21] [(0]
+    IntLiteral(0) [20-21] [0]
+  Collate [23-34] [collate 'c']
+    StringLiteral [31-34] ['c']
+      StringLiteralComponent('c') [31-34] ['c']
+--
+FUNCTION<() -> INT64 > (0) COLLATE 'c'
+==
+
+
+# Collate clause cannot be an expression.
+string collate concat('abc', 'def')
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got identifier "concat" [at 1:16]
+string collate concat('abc', 'def')
+               ^
+==
+
+# Empty string as input.
+[strip_trailing_newline]
+--
+ERROR: Syntax error: Unexpected end of type [at 1:1]
+
+^
+==
+
+# Empty statement - just comments.
+/* comment */
+--
+ERROR: Syntax error: Unexpected end of type [at 1:14]
+/* comment */
+             ^
+==
+
+# Empty statement - just whitespace.
+
+
+--
+ERROR: Syntax error: Unexpected end of type [at 1:1]
+
+^
+==
+
+BOOL
+--
+SimpleType [0-4] [BOOL]
+  PathExpression [0-4] [BOOL]
+    Identifier(BOOL) [0-4] [BOOL]
+--
+BOOL
+==
+
+STRUCT<{{| }}>
+--
+ALTERNATION GROUP: <empty>
+--
+StructType [0-8] [STRUCT<>]
+--
+STRUCT< >
+--
+ALTERNATION GROUP:  
+--
+StructType [0-9] [STRUCT< >]
+--
+STRUCT< >
+==
+
+ARRAY<{{| }}>
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected "<" but got "<>" [at 1:6]
+ARRAY<>
+     ^
+--
+ALTERNATION GROUP:  
+--
+ERROR: Syntax error: Unexpected ">" [at 1:8]
+ARRAY< >
+       ^
+==
+
+RANGE<{{| }}>
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected "<" but got "<>" [at 1:6]
+RANGE<>
+     ^
+--
+ALTERNATION GROUP:  
+--
+ERROR: Syntax error: Unexpected ">" [at 1:8]
+RANGE< >
+       ^
+==
+
+STRUCT<BOOL>
+--
+StructType [0-12] [STRUCT<BOOL>]
+  StructField [7-11] [BOOL]
+    SimpleType [7-11] [BOOL]
+      PathExpression [7-11] [BOOL]
+        Identifier(BOOL) [7-11] [BOOL]
+--
+STRUCT< BOOL >
+==
+
+STRUCT<a BOOL>
+--
+StructType [0-14] [STRUCT<a BOOL>]
+  StructField [7-13] [a BOOL]
+    Identifier(a) [7-8] [a]
+    SimpleType [9-13] [BOOL]
+      PathExpression [9-13] [BOOL]
+        Identifier(BOOL) [9-13] [BOOL]
+--
+STRUCT< a BOOL >
+==
+
+STRUCT<BOOL, STRING>
+--
+StructType [0-20] [STRUCT<BOOL, STRING>]
+  StructField [7-11] [BOOL]
+    SimpleType [7-11] [BOOL]
+      PathExpression [7-11] [BOOL]
+        Identifier(BOOL) [7-11] [BOOL]
+  StructField [13-19] [STRING]
+    SimpleType [13-19] [STRING]
+      PathExpression [13-19] [STRING]
+        Identifier(STRING) [13-19] [STRING]
+--
+STRUCT< BOOL, STRING >
+==
+
+STRUCT<a BOOL, b STRING>
+--
+StructType [0-24] [STRUCT<a BOOL, b STRING>]
+  StructField [7-13] [a BOOL]
+    Identifier(a) [7-8] [a]
+    SimpleType [9-13] [BOOL]
+      PathExpression [9-13] [BOOL]
+        Identifier(BOOL) [9-13] [BOOL]
+  StructField [15-23] [b STRING]
+    Identifier(b) [15-16] [b]
+    SimpleType [17-23] [STRING]
+      PathExpression [17-23] [STRING]
+        Identifier(STRING) [17-23] [STRING]
+--
+STRUCT< a BOOL, b STRING >
+==
+
+ARRAY<a BOOL, b STRING>
+--
+ERROR: Syntax error: Expected ">" but got identifier "BOOL" [at 1:9]
+ARRAY<a BOOL, b STRING>
+        ^
+==
+
+ARRAY<STRUCT<a BOOL, b STRING>{{| }}>
+--
+ALTERNATION GROUP: <empty>
+--
+ArrayType [0-31] [ARRAY<STRUCT...b STRING>>]
+  StructType [6-30] [STRUCT<a BOOL, b STRING>]
+    StructField [13-19] [a BOOL]
+      Identifier(a) [13-14] [a]
+      SimpleType [15-19] [BOOL]
+        PathExpression [15-19] [BOOL]
+          Identifier(BOOL) [15-19] [BOOL]
+    StructField [21-29] [b STRING]
+      Identifier(b) [21-22] [b]
+      SimpleType [23-29] [STRING]
+        PathExpression [23-29] [STRING]
+          Identifier(STRING) [23-29] [STRING]
+--
+ARRAY< STRUCT< a BOOL, b STRING > >
+--
+ALTERNATION GROUP:  
+--
+ArrayType [0-32] [ARRAY<STRUCT...STRING> >]
+  StructType [6-30] [STRUCT<a BOOL, b STRING>]
+    StructField [13-19] [a BOOL]
+      Identifier(a) [13-14] [a]
+      SimpleType [15-19] [BOOL]
+        PathExpression [15-19] [BOOL]
+          Identifier(BOOL) [15-19] [BOOL]
+    StructField [21-29] [b STRING]
+      Identifier(b) [21-22] [b]
+      SimpleType [23-29] [STRING]
+        PathExpression [23-29] [STRING]
+          Identifier(STRING) [23-29] [STRING]
+--
+ARRAY< STRUCT< a BOOL, b STRING > >
+==
+
+ARRAY<STRUCT<a BOOL, b ARRAY<>{{| }}>{{| }}>
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected "<" but got "<>" [at 1:29]
+ARRAY<STRUCT<a BOOL, b ARRAY<>>>
+                            ^
+--
+ALTERNATION GROUP:  
+--
+ERROR: Syntax error: Expected "<" but got "<>" [at 1:29]
+ARRAY<STRUCT<a BOOL, b ARRAY<>> >
+                            ^
+--
+ALTERNATION GROUP:  ,
+--
+ERROR: Syntax error: Expected "<" but got "<>" [at 1:29]
+ARRAY<STRUCT<a BOOL, b ARRAY<> >>
+                            ^
+--
+ALTERNATION GROUP:  , 
+--
+ERROR: Syntax error: Expected "<" but got "<>" [at 1:29]
+ARRAY<STRUCT<a BOOL, b ARRAY<> > >
+                            ^
+==
+
+ARRAY<TYPEOF(a <> b)>
+--
+ERROR: Syntax error: Unexpected identifier "a" [at 1:14]
+ARRAY<TYPEOF(a <> b)>
+             ^
+==
+
+ARRAY<TYPEOF(a >> b)>
+--
+ERROR: Syntax error: Unexpected identifier "a" [at 1:14]
+ARRAY<TYPEOF(a >> b)>
+             ^
+==
+
+MAP<STRING, MAP<STRING, MAP<STRING, MAP<STRING, BOOL>>>>
+--
+MapType [0-56] [MAP<STRING..., BOOL>>>>]
+  SimpleType [4-10] [STRING]
+    PathExpression [4-10] [STRING]
+      Identifier(STRING) [4-10] [STRING]
+  MapType [12-55] [MAP<STRING...STRING, BOOL>>>]
+    SimpleType [16-22] [STRING]
+      PathExpression [16-22] [STRING]
+        Identifier(STRING) [16-22] [STRING]
+    MapType [24-54] [MAP<STRING, MAP<STRING, BOOL>>]
+      SimpleType [28-34] [STRING]
+        PathExpression [28-34] [STRING]
+          Identifier(STRING) [28-34] [STRING]
+      MapType [36-53] [MAP<STRING, BOOL>]
+        SimpleType [40-46] [STRING]
+          PathExpression [40-46] [STRING]
+            Identifier(STRING) [40-46] [STRING]
+        SimpleType [48-52] [BOOL]
+          PathExpression [48-52] [BOOL]
+            Identifier(BOOL) [48-52] [BOOL]
+--
+MAP< STRING, MAP< STRING, MAP< STRING, MAP< STRING, BOOL > > > >

@@ -1,0 +1,714 @@
+select 1 LIMIT 1;
+--
+QueryStatement [0-16] [select 1 LIMIT 1]
+  Query [0-16] [select 1 LIMIT 1]
+    Select [0-8] [select 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-16] [LIMIT 1]
+      Limit [9-16] [LIMIT 1]
+        IntLiteral(1) [15-16] [1]
+--
+SELECT
+  1
+LIMIT 1
+==
+
+SELECT 1 LIMIT 0;
+--
+QueryStatement [0-16] [SELECT 1 LIMIT 0]
+  Query [0-16] [SELECT 1 LIMIT 0]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-16] [LIMIT 0]
+      Limit [9-16] [LIMIT 0]
+        IntLiteral(0) [15-16] [0]
+--
+SELECT
+  1
+LIMIT 0
+==
+
+SELECT 1 LIMIT 1 OFFSET 0;
+--
+QueryStatement [0-25] [SELECT 1 LIMIT 1 OFFSET 0]
+  Query [0-25] [SELECT 1 LIMIT 1 OFFSET 0]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-25] [LIMIT 1 OFFSET 0]
+      Limit [9-16] [LIMIT 1]
+        IntLiteral(1) [15-16] [1]
+      IntLiteral(0) [24-25] [0]
+--
+SELECT
+  1
+LIMIT 1 OFFSET 0
+==
+
+SELECT 1 LIMIT cast(1 as int32) OFFSET cast(1 as int32);
+--
+QueryStatement [0-55] [SELECT 1 LIMIT...as int32)]
+  Query [0-55] [SELECT 1 LIMIT...as int32)]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-55] [LIMIT cast...as int32)]
+      Limit [9-31] [LIMIT cast(1 as int32)]
+        CastExpression [15-31] [cast(1 as int32)]
+          IntLiteral(1) [20-21] [1]
+          SimpleType [25-30] [int32]
+            PathExpression [25-30] [int32]
+              Identifier(int32) [25-30] [int32]
+      CastExpression [39-55] [cast(1 as int32)]
+        IntLiteral(1) [44-45] [1]
+        SimpleType [49-54] [int32]
+          PathExpression [49-54] [int32]
+            Identifier(int32) [49-54] [int32]
+--
+SELECT
+  1
+LIMIT CAST(1 AS int32) OFFSET CAST(1 AS int32)
+==
+
+SELECT 1 LIMIT cast(@param1 as int32) OFFSET cast(@param1 as string);
+--
+QueryStatement [0-68] [SELECT 1 LIMIT...as string)]
+  Query [0-68] [SELECT 1 LIMIT...as string)]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-68] [LIMIT cast...as string)]
+      Limit [9-37] [LIMIT cast(@param1 as int32)]
+        CastExpression [15-37] [cast(@param1 as int32)]
+          ParameterExpr [20-27] [@param1]
+            Identifier(param1) [21-27] [param1]
+          SimpleType [31-36] [int32]
+            PathExpression [31-36] [int32]
+              Identifier(int32) [31-36] [int32]
+      CastExpression [45-68] [cast(@param1 as string)]
+        ParameterExpr [50-57] [@param1]
+          Identifier(param1) [51-57] [param1]
+        SimpleType [61-67] [string]
+          PathExpression [61-67] [string]
+            Identifier(string) [61-67] [string]
+--
+SELECT
+  1
+LIMIT CAST(@param1 AS int32) OFFSET CAST(@param1 AS string)
+==
+
+SELECT 1 LIMIT cast(@@sysvar1 as int32) OFFSET cast(@@sysvar2 as string);
+--
+QueryStatement [0-72] [SELECT 1 LIMIT...as string)]
+  Query [0-72] [SELECT 1 LIMIT...as string)]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-72] [LIMIT cast...as string)]
+      Limit [9-39] [LIMIT cast(@@sysvar1 as int32)]
+        CastExpression [15-39] [cast(@@sysvar1 as int32)]
+          SystemVariableExpr [20-29] [@@sysvar1]
+            PathExpression [22-29] [sysvar1]
+              Identifier(sysvar1) [22-29] [sysvar1]
+          SimpleType [33-38] [int32]
+            PathExpression [33-38] [int32]
+              Identifier(int32) [33-38] [int32]
+      CastExpression [47-72] [cast(@@sysvar2 as string)]
+        SystemVariableExpr [52-61] [@@sysvar2]
+          PathExpression [54-61] [sysvar2]
+            Identifier(sysvar2) [54-61] [sysvar2]
+        SimpleType [65-71] [string]
+          PathExpression [65-71] [string]
+            Identifier(string) [65-71] [string]
+--
+SELECT
+  1
+LIMIT CAST(@@sysvar1 AS int32) OFFSET CAST(@@sysvar2 AS string)
+==
+
+SELECT 1 LIMIT cast(cast(1 as int32) as int32);
+--
+QueryStatement [0-46] [SELECT 1 LIMIT...as int32)]
+  Query [0-46] [SELECT 1 LIMIT...as int32)]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-46] [LIMIT cast...as int32)]
+      Limit [9-46] [LIMIT cast...as int32)]
+        CastExpression [15-46] [cast(cast(...as int32)]
+          CastExpression [20-36] [cast(1 as int32)]
+            IntLiteral(1) [25-26] [1]
+            SimpleType [30-35] [int32]
+              PathExpression [30-35] [int32]
+                Identifier(int32) [30-35] [int32]
+          SimpleType [40-45] [int32]
+            PathExpression [40-45] [int32]
+              Identifier(int32) [40-45] [int32]
+--
+SELECT
+  1
+LIMIT CAST(CAST(1 AS int32) AS int32)
+==
+
+SELECT 1 LIMIT 1 OFFSET 1
+UNION ALL
+SELECT 1 LIMIT 1 OFFSET 2
+--
+ERROR: Syntax error: Expected end of input but got keyword UNION [at 2:1]
+UNION ALL
+^
+==
+
+(SELECT 1 LIMIT 1 OFFSET 1)
+UNION ALL
+(SELECT 1 LIMIT 1 OFFSET 2)
+LIMIT 10 OFFSET 2
+--
+QueryStatement [0-83] [(SELECT 1...10 OFFSET 2]
+  Query [0-83] [(SELECT 1...10 OFFSET 2]
+    SetOperation(UNION ALL) [0-65] [(SELECT 1...OFFSET 2)]
+      SetOperationMetadataList [28-37] [UNION ALL]
+        SetOperationMetadata [28-37] [UNION ALL]
+          SetOperationType [28-33] [UNION]
+          SetOperationAllOrDistinct [34-37] [ALL]
+      Query [1-26] [SELECT 1 LIMIT 1 OFFSET 1]
+        Select [1-9] [SELECT 1]
+          SelectList [8-9] [1]
+            SelectColumn [8-9] [1]
+              IntLiteral(1) [8-9] [1]
+        LimitOffset [10-26] [LIMIT 1 OFFSET 1]
+          Limit [10-17] [LIMIT 1]
+            IntLiteral(1) [16-17] [1]
+          IntLiteral(1) [25-26] [1]
+      Query [39-64] [SELECT 1 LIMIT 1 OFFSET 2]
+        Select [39-47] [SELECT 1]
+          SelectList [46-47] [1]
+            SelectColumn [46-47] [1]
+              IntLiteral(1) [46-47] [1]
+        LimitOffset [48-64] [LIMIT 1 OFFSET 2]
+          Limit [48-55] [LIMIT 1]
+            IntLiteral(1) [54-55] [1]
+          IntLiteral(2) [63-64] [2]
+    LimitOffset [66-83] [LIMIT 10 OFFSET 2]
+      Limit [66-74] [LIMIT 10]
+        IntLiteral(10) [72-74] [10]
+      IntLiteral(2) [82-83] [2]
+--
+(
+SELECT
+  1
+LIMIT 1 OFFSET 1) UNION ALL(
+SELECT
+  1
+LIMIT 1 OFFSET 2)
+LIMIT 10 OFFSET 2
+==
+
+select (select 1 LIMIT 1), EXISTS(select 2 LIMIT 0),
+    ARRAY(select 3 LIMIT 1 OFFSET 0)
+from T;
+--
+QueryStatement [0-96] [select (select...0) from T]
+  Query [0-96] [select (select...0) from T]
+    Select [0-96] [select (select...0) from T]
+      SelectList [7-89] [(select 1...OFFSET 0)]
+        SelectColumn [7-25] [(select 1 LIMIT 1)]
+          ExpressionSubquery [7-25] [(select 1 LIMIT 1)]
+            Query [8-24] [select 1 LIMIT 1]
+              Select [8-16] [select 1]
+                SelectList [15-16] [1]
+                  SelectColumn [15-16] [1]
+                    IntLiteral(1) [15-16] [1]
+              LimitOffset [17-24] [LIMIT 1]
+                Limit [17-24] [LIMIT 1]
+                  IntLiteral(1) [23-24] [1]
+        SelectColumn [27-51] [EXISTS(select 2 LIMIT 0)]
+          ExpressionSubquery(modifier=EXISTS) [27-51] [EXISTS(select 2 LIMIT 0)]
+            Query [34-50] [select 2 LIMIT 0]
+              Select [34-42] [select 2]
+                SelectList [41-42] [2]
+                  SelectColumn [41-42] [2]
+                    IntLiteral(2) [41-42] [2]
+              LimitOffset [43-50] [LIMIT 0]
+                Limit [43-50] [LIMIT 0]
+                  IntLiteral(0) [49-50] [0]
+        SelectColumn [57-89] [ARRAY(select...OFFSET 0)]
+          ExpressionSubquery(modifier=ARRAY) [57-89] [ARRAY(select...OFFSET 0)]
+            Query [63-88] [select 3 LIMIT 1 OFFSET 0]
+              Select [63-71] [select 3]
+                SelectList [70-71] [3]
+                  SelectColumn [70-71] [3]
+                    IntLiteral(3) [70-71] [3]
+              LimitOffset [72-88] [LIMIT 1 OFFSET 0]
+                Limit [72-79] [LIMIT 1]
+                  IntLiteral(1) [78-79] [1]
+                IntLiteral(0) [87-88] [0]
+      FromClause [90-96] [from T]
+        TablePathExpression [95-96] [T]
+          PathExpression [95-96] [T]
+            Identifier(T) [95-96] [T]
+--
+SELECT
+  (
+    SELECT
+      1
+    LIMIT 1),
+  EXISTS(
+    SELECT
+      2
+    LIMIT 0),
+  ARRAY(
+    SELECT
+      3
+    LIMIT 1 OFFSET 0)
+FROM
+  T
+==
+
+SELECT *
+FROM (SELECT * FROM T LIMIT 10 OFFSET 2) sub_foo;
+--
+QueryStatement [0-57] [SELECT * FROM...2) sub_foo]
+  Query [0-57] [SELECT * FROM...2) sub_foo]
+    Select [0-57] [SELECT * FROM...2) sub_foo]
+      SelectList [7-8] [*]
+        SelectColumn [7-8] [*]
+          Star(*) [7-8] [*]
+      FromClause [9-57] [FROM (SELECT...2) sub_foo]
+        TableSubquery [14-57] [(SELECT *...2) sub_foo]
+          Query [15-48] [SELECT * FROM...10 OFFSET 2]
+            Select [15-30] [SELECT * FROM T]
+              SelectList [22-23] [*]
+                SelectColumn [22-23] [*]
+                  Star(*) [22-23] [*]
+              FromClause [24-30] [FROM T]
+                TablePathExpression [29-30] [T]
+                  PathExpression [29-30] [T]
+                    Identifier(T) [29-30] [T]
+            LimitOffset [31-48] [LIMIT 10 OFFSET 2]
+              Limit [31-39] [LIMIT 10]
+                IntLiteral(10) [37-39] [10]
+              IntLiteral(2) [47-48] [2]
+          Alias [50-57] [sub_foo]
+            Identifier(sub_foo) [50-57] [sub_foo]
+--
+SELECT
+  *
+FROM
+  (
+    SELECT
+      *
+    FROM
+      T
+    LIMIT 10 OFFSET 2
+  ) AS sub_foo
+==
+
+select a from t order by a, b LIMIT 3;
+--
+QueryStatement [0-37] [select a from...b LIMIT 3]
+  Query [0-37] [select a from...b LIMIT 3]
+    Select [0-15] [select a from t]
+      SelectList [7-8] [a]
+        SelectColumn [7-8] [a]
+          PathExpression [7-8] [a]
+            Identifier(a) [7-8] [a]
+      FromClause [9-15] [from t]
+        TablePathExpression [14-15] [t]
+          PathExpression [14-15] [t]
+            Identifier(t) [14-15] [t]
+    OrderBy [16-29] [order by a, b]
+      OrderingExpression(ASC) [25-26] [a]
+        PathExpression [25-26] [a]
+          Identifier(a) [25-26] [a]
+      OrderingExpression(ASC) [28-29] [b]
+        PathExpression [28-29] [b]
+          Identifier(b) [28-29] [b]
+    LimitOffset [30-37] [LIMIT 3]
+      Limit [30-37] [LIMIT 3]
+        IntLiteral(3) [36-37] [3]
+--
+SELECT
+  a
+FROM
+  t
+ORDER BY a, b
+LIMIT 3
+==
+
+# ORDER BY and LIMIT attach outside of the UNION ALL
+select a from t
+union all
+select b from t
+order by 1
+LIMIT 2 OFFSET 1
+--
+QueryStatement [0-69] [select a from...2 OFFSET 1]
+  Query [0-69] [select a from...2 OFFSET 1]
+    SetOperation(UNION ALL) [0-41] [select a from...elect b from t]
+      SetOperationMetadataList [16-25] [union all]
+        SetOperationMetadata [16-25] [union all]
+          SetOperationType [16-21] [union]
+          SetOperationAllOrDistinct [22-25] [all]
+      Select [0-15] [select a from t]
+        SelectList [7-8] [a]
+          SelectColumn [7-8] [a]
+            PathExpression [7-8] [a]
+              Identifier(a) [7-8] [a]
+        FromClause [9-15] [from t]
+          TablePathExpression [14-15] [t]
+            PathExpression [14-15] [t]
+              Identifier(t) [14-15] [t]
+      Select [26-41] [select b from t]
+        SelectList [33-34] [b]
+          SelectColumn [33-34] [b]
+            PathExpression [33-34] [b]
+              Identifier(b) [33-34] [b]
+        FromClause [35-41] [from t]
+          TablePathExpression [40-41] [t]
+            PathExpression [40-41] [t]
+              Identifier(t) [40-41] [t]
+    OrderBy [42-52] [order by 1]
+      OrderingExpression(ASC) [51-52] [1]
+        IntLiteral(1) [51-52] [1]
+    LimitOffset [53-69] [LIMIT 2 OFFSET 1]
+      Limit [53-60] [LIMIT 2]
+        IntLiteral(2) [59-60] [2]
+      IntLiteral(1) [68-69] [1]
+--
+SELECT
+  a
+FROM
+  t
+UNION ALL
+SELECT
+  b
+FROM
+  t
+ORDER BY 1
+LIMIT 2 OFFSET 1
+==
+
+# LIMIT can take an identifier for argument.
+select a from t order by a, b LIMIT a OFFSET 10;
+--
+QueryStatement [0-47] [select a from...OFFSET 10]
+  Query [0-47] [select a from...OFFSET 10]
+    Select [0-15] [select a from t]
+      SelectList [7-8] [a]
+        SelectColumn [7-8] [a]
+          PathExpression [7-8] [a]
+            Identifier(a) [7-8] [a]
+      FromClause [9-15] [from t]
+        TablePathExpression [14-15] [t]
+          PathExpression [14-15] [t]
+            Identifier(t) [14-15] [t]
+    OrderBy [16-29] [order by a, b]
+      OrderingExpression(ASC) [25-26] [a]
+        PathExpression [25-26] [a]
+          Identifier(a) [25-26] [a]
+      OrderingExpression(ASC) [28-29] [b]
+        PathExpression [28-29] [b]
+          Identifier(b) [28-29] [b]
+    LimitOffset [30-47] [LIMIT a OFFSET 10]
+      Limit [30-37] [LIMIT a]
+        PathExpression [36-37] [a]
+          Identifier(a) [36-37] [a]
+      IntLiteral(10) [45-47] [10]
+--
+SELECT
+  a
+FROM
+  t
+ORDER BY a, b
+LIMIT a OFFSET 10
+==
+
+# OFFSET is not a reserved keyword and so it is parsed as an identifier here.
+select 1 limit offset;
+--
+QueryStatement [0-21] [select 1 limit offset]
+  Query [0-21] [select 1 limit offset]
+    Select [0-8] [select 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-21] [limit offset]
+      Limit [9-21] [limit offset]
+        PathExpression [15-21] [offset]
+          Identifier(offset) [15-21] [offset]
+--
+SELECT
+  1
+LIMIT offset
+==
+
+select 1 from t limit 5 offset offset;
+--
+QueryStatement [0-37] [select 1 from...offset offset]
+  Query [0-37] [select 1 from...offset offset]
+    Select [0-15] [select 1 from t]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+      FromClause [9-15] [from t]
+        TablePathExpression [14-15] [t]
+          PathExpression [14-15] [t]
+            Identifier(t) [14-15] [t]
+    LimitOffset [16-37] [limit 5 offset offset]
+      Limit [16-23] [limit 5]
+        IntLiteral(5) [22-23] [5]
+      PathExpression [31-37] [offset]
+        Identifier(offset) [31-37] [offset]
+--
+SELECT
+  1
+FROM
+  t
+LIMIT 5 OFFSET offset
+==
+
+# Negative arguments to LIMIT/OFFSET will parse but later get rejected by
+# analyzer.
+SELECT 1 LIMIT -1;
+--
+QueryStatement [0-17] [SELECT 1 LIMIT -1]
+  Query [0-17] [SELECT 1 LIMIT -1]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-17] [LIMIT -1]
+      Limit [9-17] [LIMIT -1]
+        UnaryExpression(-) [15-17] [-1]
+          IntLiteral(1) [16-17] [1]
+--
+SELECT
+  1
+LIMIT -1
+==
+
+SELECT 1 LIMIT 10 OFFSET -1;
+--
+QueryStatement [0-27] [SELECT 1 LIMIT 10 OFFSET -1]
+  Query [0-27] [SELECT 1 LIMIT 10 OFFSET -1]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-27] [LIMIT 10 OFFSET -1]
+      Limit [9-17] [LIMIT 10]
+        IntLiteral(10) [15-17] [10]
+      UnaryExpression(-) [25-27] [-1]
+        IntLiteral(1) [26-27] [1]
+--
+SELECT
+  1
+LIMIT 10 OFFSET -1
+==
+
+SELECT 1 LIMIT -10 OFFSET -22;
+--
+QueryStatement [0-29] [SELECT 1 LIMIT -10 OFFSET -22]
+  Query [0-29] [SELECT 1 LIMIT -10 OFFSET -22]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-29] [LIMIT -10 OFFSET -22]
+      Limit [9-18] [LIMIT -10]
+        UnaryExpression(-) [15-18] [-10]
+          IntLiteral(10) [16-18] [10]
+      UnaryExpression(-) [26-29] [-22]
+        IntLiteral(22) [27-29] [22]
+--
+SELECT
+  1
+LIMIT -10 OFFSET -22
+==
+
+# Non-INT64 argument to LIMIT/OFFSET will parse but later get rejected by analyzer.
+SELECT 1 LIMIT 1.5;
+--
+QueryStatement [0-18] [SELECT 1 LIMIT 1.5]
+  Query [0-18] [SELECT 1 LIMIT 1.5]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-18] [LIMIT 1.5]
+      Limit [9-18] [LIMIT 1.5]
+        FloatLiteral(1.5) [15-18] [1.5]
+--
+SELECT
+  1
+LIMIT 1.5
+==
+
+SELECT 1 LIMIT 'abc';
+--
+QueryStatement [0-20] [SELECT 1 LIMIT 'abc']
+  Query [0-20] [SELECT 1 LIMIT 'abc']
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-20] [LIMIT 'abc']
+      Limit [9-20] [LIMIT 'abc']
+        StringLiteral [15-20] ['abc']
+          StringLiteralComponent('abc') [15-20] ['abc']
+--
+SELECT
+  1
+LIMIT 'abc'
+==
+
+SELECT 1 LIMIT @param;
+--
+QueryStatement [0-21] [SELECT 1 LIMIT @param]
+  Query [0-21] [SELECT 1 LIMIT @param]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-21] [LIMIT @param]
+      Limit [9-21] [LIMIT @param]
+        ParameterExpr [15-21] [@param]
+          Identifier(param) [16-21] [param]
+--
+SELECT
+  1
+LIMIT @param
+==
+
+# Expected Errors Below
+select 1 offset 10;
+--
+ERROR: Syntax error: Expected end of input but got integer literal "10" [at 1:17]
+select 1 offset 10;
+                ^
+==
+
+select 1 limit 5 offset;
+--
+ERROR: Syntax error: Unexpected ";" [at 1:24]
+select 1 limit 5 offset;
+                       ^
+==
+
+select 1 limit 1 order by 1;
+--
+ERROR: Syntax error: Expected end of input but got keyword ORDER [at 1:18]
+select 1 limit 1 order by 1;
+                 ^
+==
+
+select 1 limit 1 offset 2 order by 1;
+--
+ERROR: Syntax error: Expected end of input but got keyword ORDER [at 1:27]
+select 1 limit 1 offset 2 order by 1;
+                          ^
+==
+
+select 1 order by 1 offset 5
+--
+ERROR: Syntax error: Expected end of input but got keyword OFFSET [at 1:21]
+select 1 order by 1 offset 5
+                    ^
+==
+
+SELECT 1 LIMIT 1 LIMIT 1;
+--
+ERROR: Syntax error: Expected end of input but got keyword LIMIT [at 1:18]
+SELECT 1 LIMIT 1 LIMIT 1;
+                 ^
+==
+
+SELECT 1 LIMIT 10 OFFSET 1 LIMIT 1;
+--
+ERROR: Syntax error: Expected end of input but got keyword LIMIT [at 1:28]
+SELECT 1 LIMIT 10 OFFSET 1 LIMIT 1;
+                           ^
+==
+
+SELECT 1 LIMIT NULL
+--
+QueryStatement [0-19] [SELECT 1 LIMIT NULL]
+  Query [0-19] [SELECT 1 LIMIT NULL]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-19] [LIMIT NULL]
+      Limit [9-19] [LIMIT NULL]
+        NullLiteral(NULL) [15-19] [NULL]
+--
+SELECT
+  1
+LIMIT NULL
+==
+
+SELECT 1 LIMIT 1 OFFSET NULL
+--
+QueryStatement [0-28] [SELECT 1 LIMIT 1 OFFSET NULL]
+  Query [0-28] [SELECT 1 LIMIT 1 OFFSET NULL]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-28] [LIMIT 1 OFFSET NULL]
+      Limit [9-16] [LIMIT 1]
+        IntLiteral(1) [15-16] [1]
+      NullLiteral(NULL) [24-28] [NULL]
+--
+SELECT
+  1
+LIMIT 1 OFFSET NULL
+==
+
+# LIMIT ALL will parse but later get rejected by analyzer if FEATURE_LIMIT_ALL
+# is not enabled.
+select 1 LIMIT ALL;
+--
+QueryStatement [0-18] [select 1 LIMIT ALL]
+  Query [0-18] [select 1 LIMIT ALL]
+    Select [0-8] [select 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-18] [LIMIT ALL]
+      Limit [9-18] [LIMIT ALL]
+        LimitAll [15-18] [ALL]
+--
+SELECT
+  1
+LIMIT ALL
+==
+
+# LIMIT ALL will parse but later get rejected by analyzer if FEATURE_LIMIT_ALL
+# is not enabled.
+SELECT 1 LIMIT ALL OFFSET 0;
+--
+QueryStatement [0-27] [SELECT 1 LIMIT ALL OFFSET 0]
+  Query [0-27] [SELECT 1 LIMIT ALL OFFSET 0]
+    Select [0-8] [SELECT 1]
+      SelectList [7-8] [1]
+        SelectColumn [7-8] [1]
+          IntLiteral(1) [7-8] [1]
+    LimitOffset [9-27] [LIMIT ALL OFFSET 0]
+      Limit [9-18] [LIMIT ALL]
+        LimitAll [15-18] [ALL]
+      IntLiteral(0) [26-27] [0]
+--
+SELECT
+  1
+LIMIT ALL OFFSET 0

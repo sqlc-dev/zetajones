@@ -1,0 +1,728 @@
+# Tests for the RETURNING clause
+
+## Delete Statement
+
+delete from T then return *
+--
+DeleteStatement [0-27] [delete from T then return *]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-27] [then return *]
+    SelectList [26-27] [*]
+      SelectColumn [26-27] [*]
+        Star(*) [26-27] [*]
+--
+DELETE T
+THEN RETURN
+  *
+==
+
+delete from T then return with action *
+--
+DeleteStatement [0-39] [delete from...with action *]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-39] [then return with action *]
+    SelectList [38-39] [*]
+      SelectColumn [38-39] [*]
+        Star(*) [38-39] [*]
+    Alias [14-39] [then return with action *]
+      Identifier(ACTION) [31-37] [action]
+--
+DELETE T
+THEN RETURN WITH ACTION AS ACTION
+  *
+==
+
+delete from T then return with action as myaction *
+--
+DeleteStatement [0-51] [delete from...myaction *]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-51] [then return...myaction *]
+    SelectList [50-51] [*]
+      SelectColumn [50-51] [*]
+        Star(*) [50-51] [*]
+    Alias [14-51] [then return...myaction *]
+      Identifier(myaction) [41-49] [myaction]
+--
+DELETE T
+THEN RETURN WITH ACTION AS myaction
+  *
+==
+
+delete from T then return col1, col2
+--
+DeleteStatement [0-36] [delete from...col1, col2]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-36] [then return col1, col2]
+    SelectList [26-36] [col1, col2]
+      SelectColumn [26-30] [col1]
+        PathExpression [26-30] [col1]
+          Identifier(col1) [26-30] [col1]
+      SelectColumn [32-36] [col2]
+        PathExpression [32-36] [col2]
+          Identifier(col2) [32-36] [col2]
+--
+DELETE T
+THEN RETURN
+  col1,
+  col2
+==
+
+delete from T then return col1 as newcol, col2
+--
+DeleteStatement [0-46] [delete from...newcol, col2]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-46] [then return...newcol, col2]
+    SelectList [26-46] [col1 as newcol, col2]
+      SelectColumn [26-40] [col1 as newcol]
+        PathExpression [26-30] [col1]
+          Identifier(col1) [26-30] [col1]
+        Alias [31-40] [as newcol]
+          Identifier(newcol) [34-40] [newcol]
+      SelectColumn [42-46] [col2]
+        PathExpression [42-46] [col2]
+          Identifier(col2) [42-46] [col2]
+--
+DELETE T
+THEN RETURN
+  col1 AS newcol,
+  col2
+==
+
+# "WITH ACTION" by default will use "action" as the output column name.
+# The resolver will fail on this because alias "action" is duplicated in
+# top-level output column list.
+
+delete from T then return with action col1 as action, col2
+--
+DeleteStatement [0-58] [delete from...action, col2]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-58] [then return...action, col2]
+    SelectList [38-58] [col1 as action, col2]
+      SelectColumn [38-52] [col1 as action]
+        PathExpression [38-42] [col1]
+          Identifier(col1) [38-42] [col1]
+        Alias [43-52] [as action]
+          Identifier(action) [46-52] [action]
+      SelectColumn [54-58] [col2]
+        PathExpression [54-58] [col2]
+          Identifier(col2) [54-58] [col2]
+    Alias [14-58] [then return...action, col2]
+      Identifier(ACTION) [31-37] [action]
+--
+DELETE T
+THEN RETURN WITH ACTION AS ACTION
+  col1 AS action,
+  col2
+==
+
+# The resolver will fail on this because alias "myaction" is duplicated in
+# top-level output column list.
+
+delete from T then return with action as myaction col1 as myaction, col2
+--
+DeleteStatement [0-72] [delete from...myaction, col2]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-72] [then return...myaction, col2]
+    SelectList [50-72] [col1 as myaction, col2]
+      SelectColumn [50-66] [col1 as myaction]
+        PathExpression [50-54] [col1]
+          Identifier(col1) [50-54] [col1]
+        Alias [55-66] [as myaction]
+          Identifier(myaction) [58-66] [myaction]
+      SelectColumn [68-72] [col2]
+        PathExpression [68-72] [col2]
+          Identifier(col2) [68-72] [col2]
+    Alias [14-72] [then return...myaction, col2]
+      Identifier(myaction) [41-49] [myaction]
+--
+DELETE T
+THEN RETURN WITH ACTION AS myaction
+  col1 AS myaction,
+  col2
+==
+
+delete from T then return abs(col1), col2, col3+col2+1
+--
+DeleteStatement [0-54] [delete from...col3+col2+1]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-54] [then return...col3+col2+1]
+    SelectList [26-54] [abs(col1), col2, col3+col2+1]
+      SelectColumn [26-35] [abs(col1)]
+        FunctionCall [26-35] [abs(col1)]
+          PathExpression [26-29] [abs]
+            Identifier(abs) [26-29] [abs]
+          PathExpression [30-34] [col1]
+            Identifier(col1) [30-34] [col1]
+      SelectColumn [37-41] [col2]
+        PathExpression [37-41] [col2]
+          Identifier(col2) [37-41] [col2]
+      SelectColumn [43-54] [col3+col2+1]
+        BinaryExpression(+) [43-54] [col3+col2+1]
+          BinaryExpression(+) [43-52] [col3+col2]
+            PathExpression [43-47] [col3]
+              Identifier(col3) [43-47] [col3]
+            PathExpression [48-52] [col2]
+              Identifier(col2) [48-52] [col2]
+          IntLiteral(1) [53-54] [1]
+--
+DELETE T
+THEN RETURN
+  abs(col1),
+  col2,
+  col3 + col2 + 1
+
+==
+
+delete from T then return with action abs(col1), col2
+--
+DeleteStatement [0-53] [delete from...col1), col2]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-53] [then return...col1), col2]
+    SelectList [38-53] [abs(col1), col2]
+      SelectColumn [38-47] [abs(col1)]
+        FunctionCall [38-47] [abs(col1)]
+          PathExpression [38-41] [abs]
+            Identifier(abs) [38-41] [abs]
+          PathExpression [42-46] [col1]
+            Identifier(col1) [42-46] [col1]
+      SelectColumn [49-53] [col2]
+        PathExpression [49-53] [col2]
+          Identifier(col2) [49-53] [col2]
+    Alias [14-53] [then return...col1), col2]
+      Identifier(ACTION) [31-37] [action]
+--
+DELETE T
+THEN RETURN WITH ACTION AS ACTION
+  abs(col1),
+  col2
+
+==
+
+delete from T then return action
+--
+DeleteStatement [0-32] [delete from...return action]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-32] [then return action]
+    SelectList [26-32] [action]
+      SelectColumn [26-32] [action]
+        PathExpression [26-32] [action]
+          Identifier(action) [26-32] [action]
+--
+DELETE T
+THEN RETURN
+  action
+
+==
+
+delete from T then return *, a, 3, b+c
+
+--
+DeleteStatement [0-38] [delete from...a, 3, b+c]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-38] [then return *, a, 3, b+c]
+    SelectList [26-38] [*, a, 3, b+c]
+      SelectColumn [26-27] [*]
+        Star(*) [26-27] [*]
+      SelectColumn [29-30] [a]
+        PathExpression [29-30] [a]
+          Identifier(a) [29-30] [a]
+      SelectColumn [32-33] [3]
+        IntLiteral(3) [32-33] [3]
+      SelectColumn [35-38] [b+c]
+        BinaryExpression(+) [35-38] [b+c]
+          PathExpression [35-36] [b]
+            Identifier(b) [35-36] [b]
+          PathExpression [37-38] [c]
+            Identifier(c) [37-38] [c]
+--
+DELETE T
+THEN RETURN
+  *,
+  a,
+  3,
+  b + c
+==
+
+delete from T then return with action *, a, 3, b+c
+
+--
+DeleteStatement [0-50] [delete from...a, 3, b+c]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-50] [then return...a, 3, b+c]
+    SelectList [38-50] [*, a, 3, b+c]
+      SelectColumn [38-39] [*]
+        Star(*) [38-39] [*]
+      SelectColumn [41-42] [a]
+        PathExpression [41-42] [a]
+          Identifier(a) [41-42] [a]
+      SelectColumn [44-45] [3]
+        IntLiteral(3) [44-45] [3]
+      SelectColumn [47-50] [b+c]
+        BinaryExpression(+) [47-50] [b+c]
+          PathExpression [47-48] [b]
+            Identifier(b) [47-48] [b]
+          PathExpression [49-50] [c]
+            Identifier(c) [49-50] [c]
+    Alias [14-50] [then return...a, 3, b+c]
+      Identifier(ACTION) [31-37] [action]
+--
+DELETE T
+THEN RETURN WITH ACTION AS ACTION
+  *,
+  a,
+  3,
+  b + c
+==
+
+delete from T then return with action as myaction *, a, 3, b+c
+
+--
+DeleteStatement [0-62] [delete from...a, 3, b+c]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  ReturningClause [14-62] [then return...a, 3, b+c]
+    SelectList [50-62] [*, a, 3, b+c]
+      SelectColumn [50-51] [*]
+        Star(*) [50-51] [*]
+      SelectColumn [53-54] [a]
+        PathExpression [53-54] [a]
+          Identifier(a) [53-54] [a]
+      SelectColumn [56-57] [3]
+        IntLiteral(3) [56-57] [3]
+      SelectColumn [59-62] [b+c]
+        BinaryExpression(+) [59-62] [b+c]
+          PathExpression [59-60] [b]
+            Identifier(b) [59-60] [b]
+          PathExpression [61-62] [c]
+            Identifier(c) [61-62] [c]
+    Alias [14-62] [then return...a, 3, b+c]
+      Identifier(myaction) [41-49] [myaction]
+--
+DELETE T
+THEN RETURN WITH ACTION AS myaction
+  *,
+  a,
+  3,
+  b + c
+==
+
+delete from T then return
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:26]
+delete from T then return
+                         ^
+==
+
+## Update Statement
+
+update T set x=y then return *
+
+--
+UpdateStatement [0-30] [update T set x=y then return *]
+  PathExpression [7-8] [T]
+    Identifier(T) [7-8] [T]
+  UpdateItemList [13-16] [x=y]
+    UpdateItem [13-16] [x=y]
+      UpdateSetValue [13-16] [x=y]
+        PathExpression [13-14] [x]
+          Identifier(x) [13-14] [x]
+        PathExpression [15-16] [y]
+          Identifier(y) [15-16] [y]
+  ReturningClause [17-30] [then return *]
+    SelectList [29-30] [*]
+      SelectColumn [29-30] [*]
+        Star(*) [29-30] [*]
+--
+UPDATE T
+SET
+  x = y
+THEN RETURN
+  *
+==
+
+update T set x=y then return with action *
+
+--
+UpdateStatement [0-42] [update T set...with action *]
+  PathExpression [7-8] [T]
+    Identifier(T) [7-8] [T]
+  UpdateItemList [13-16] [x=y]
+    UpdateItem [13-16] [x=y]
+      UpdateSetValue [13-16] [x=y]
+        PathExpression [13-14] [x]
+          Identifier(x) [13-14] [x]
+        PathExpression [15-16] [y]
+          Identifier(y) [15-16] [y]
+  ReturningClause [17-42] [then return with action *]
+    SelectList [41-42] [*]
+      SelectColumn [41-42] [*]
+        Star(*) [41-42] [*]
+    Alias [17-42] [then return with action *]
+      Identifier(ACTION) [34-40] [action]
+--
+UPDATE T
+SET
+  x = y
+THEN RETURN WITH ACTION AS ACTION
+  *
+==
+
+update T set x=y then return a
+--
+UpdateStatement [0-30] [update T set x=y then return a]
+  PathExpression [7-8] [T]
+    Identifier(T) [7-8] [T]
+  UpdateItemList [13-16] [x=y]
+    UpdateItem [13-16] [x=y]
+      UpdateSetValue [13-16] [x=y]
+        PathExpression [13-14] [x]
+          Identifier(x) [13-14] [x]
+        PathExpression [15-16] [y]
+          Identifier(y) [15-16] [y]
+  ReturningClause [17-30] [then return a]
+    SelectList [29-30] [a]
+      SelectColumn [29-30] [a]
+        PathExpression [29-30] [a]
+          Identifier(a) [29-30] [a]
+--
+UPDATE T
+SET
+  x = y
+THEN RETURN
+  a
+==
+
+update T set x=y then return a+1
+--
+UpdateStatement [0-32] [update T set...return a+1]
+  PathExpression [7-8] [T]
+    Identifier(T) [7-8] [T]
+  UpdateItemList [13-16] [x=y]
+    UpdateItem [13-16] [x=y]
+      UpdateSetValue [13-16] [x=y]
+        PathExpression [13-14] [x]
+          Identifier(x) [13-14] [x]
+        PathExpression [15-16] [y]
+          Identifier(y) [15-16] [y]
+  ReturningClause [17-32] [then return a+1]
+    SelectList [29-32] [a+1]
+      SelectColumn [29-32] [a+1]
+        BinaryExpression(+) [29-32] [a+1]
+          PathExpression [29-30] [a]
+            Identifier(a) [29-30] [a]
+          IntLiteral(1) [31-32] [1]
+--
+UPDATE T
+SET
+  x = y
+THEN RETURN
+  a + 1
+==
+
+update T set x=y then return with action a
+--
+UpdateStatement [0-42] [update T set...with action a]
+  PathExpression [7-8] [T]
+    Identifier(T) [7-8] [T]
+  UpdateItemList [13-16] [x=y]
+    UpdateItem [13-16] [x=y]
+      UpdateSetValue [13-16] [x=y]
+        PathExpression [13-14] [x]
+          Identifier(x) [13-14] [x]
+        PathExpression [15-16] [y]
+          Identifier(y) [15-16] [y]
+  ReturningClause [17-42] [then return with action a]
+    SelectList [41-42] [a]
+      SelectColumn [41-42] [a]
+        PathExpression [41-42] [a]
+          Identifier(a) [41-42] [a]
+    Alias [17-42] [then return with action a]
+      Identifier(ACTION) [34-40] [action]
+--
+UPDATE T
+SET
+  x = y
+THEN RETURN WITH ACTION AS ACTION
+  a
+==
+
+# The resolver will fail on this because alias "myaction" is duplicated in
+# top-level output column list.
+
+update T set x=y then return with action as myaction a as myaction
+--
+UpdateStatement [0-66] [update T set...as myaction]
+  PathExpression [7-8] [T]
+    Identifier(T) [7-8] [T]
+  UpdateItemList [13-16] [x=y]
+    UpdateItem [13-16] [x=y]
+      UpdateSetValue [13-16] [x=y]
+        PathExpression [13-14] [x]
+          Identifier(x) [13-14] [x]
+        PathExpression [15-16] [y]
+          Identifier(y) [15-16] [y]
+  ReturningClause [17-66] [then return...as myaction]
+    SelectList [53-66] [a as myaction]
+      SelectColumn [53-66] [a as myaction]
+        PathExpression [53-54] [a]
+          Identifier(a) [53-54] [a]
+        Alias [55-66] [as myaction]
+          Identifier(myaction) [58-66] [myaction]
+    Alias [17-66] [then return...as myaction]
+      Identifier(myaction) [44-52] [myaction]
+--
+UPDATE T
+SET
+  x = y
+THEN RETURN WITH ACTION AS myaction
+  a AS myaction
+==
+
+## Insert Statement
+
+INSERT INTO T VALUES (a, b) then return *;
+
+--
+InsertStatement [0-41] [INSERT INTO...then return *]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-41] [then return *]
+    SelectList [40-41] [*]
+      SelectColumn [40-41] [*]
+        Star(*) [40-41] [*]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN
+  *
+
+==
+
+INSERT INTO T VALUES (a, b) then return a, b, abs(c);
+
+--
+InsertStatement [0-52] [INSERT INTO...b, abs(c)]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-52] [then return a, b, abs(c)]
+    SelectList [40-52] [a, b, abs(c)]
+      SelectColumn [40-41] [a]
+        PathExpression [40-41] [a]
+          Identifier(a) [40-41] [a]
+      SelectColumn [43-44] [b]
+        PathExpression [43-44] [b]
+          Identifier(b) [43-44] [b]
+      SelectColumn [46-52] [abs(c)]
+        FunctionCall [46-52] [abs(c)]
+          PathExpression [46-49] [abs]
+            Identifier(abs) [46-49] [abs]
+          PathExpression [50-51] [c]
+            Identifier(c) [50-51] [c]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN
+  a,
+  b,
+  abs(c)
+==
+
+INSERT INTO T VALUES (a, b) then return *, c;
+
+--
+InsertStatement [0-44] [INSERT INTO...return *, c]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-44] [then return *, c]
+    SelectList [40-44] [*, c]
+      SelectColumn [40-41] [*]
+        Star(*) [40-41] [*]
+      SelectColumn [43-44] [c]
+        PathExpression [43-44] [c]
+          Identifier(c) [43-44] [c]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN
+  *,
+  c
+==
+
+INSERT INTO T VALUES (a, b) then return with action *;
+
+--
+InsertStatement [0-53] [INSERT INTO...with action *]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-53] [then return with action *]
+    SelectList [52-53] [*]
+      SelectColumn [52-53] [*]
+        Star(*) [52-53] [*]
+    Alias [28-53] [then return with action *]
+      Identifier(ACTION) [45-51] [action]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN WITH ACTION AS ACTION
+  *
+==
+
+INSERT INTO T VALUES (a, b) then return with action *, c;
+
+--
+InsertStatement [0-56] [INSERT INTO...action *, c]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-56] [then return with action *, c]
+    SelectList [52-56] [*, c]
+      SelectColumn [52-53] [*]
+        Star(*) [52-53] [*]
+      SelectColumn [55-56] [c]
+        PathExpression [55-56] [c]
+          Identifier(c) [55-56] [c]
+    Alias [28-56] [then return with action *, c]
+      Identifier(ACTION) [45-51] [action]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN WITH ACTION AS ACTION
+  *,
+  c
+==
+
+INSERT INTO T VALUES (a, b) then return with action as myaction c;
+
+--
+InsertStatement [0-65] [INSERT INTO...myaction c]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-65] [then return...myaction c]
+    SelectList [64-65] [c]
+      SelectColumn [64-65] [c]
+        PathExpression [64-65] [c]
+          Identifier(c) [64-65] [c]
+    Alias [28-65] [then return...myaction c]
+      Identifier(myaction) [55-63] [myaction]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN WITH ACTION AS myaction
+  c
+
+==
+
+INSERT INTO T VALUES (a, b) then return with action as myaction c colc;
+
+--
+InsertStatement [0-70] [INSERT INTO...myaction c colc]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-70] [then return...myaction c colc]
+    SelectList [64-70] [c colc]
+      SelectColumn [64-70] [c colc]
+        PathExpression [64-65] [c]
+          Identifier(c) [64-65] [c]
+        Alias [66-70] [colc]
+          Identifier(colc) [66-70] [colc]
+    Alias [28-70] [then return...myaction c colc]
+      Identifier(myaction) [55-63] [myaction]
+# POST-COMMENT FROM MISSING PART
+
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN WITH ACTION AS myaction
+  c AS colc
+==
+
+# The resolver will fail on this because alias "myaction" is duplicated in
+# top-level output column list.
+
+INSERT INTO T VALUES (a, b) then return with action as myaction c as myaction;
+
+--
+InsertStatement [0-77] [INSERT INTO...as myaction]
+  PathExpression [12-13] [T]
+    Identifier(T) [12-13] [T]
+  InsertValuesRowList [14-27] [VALUES (a, b)]
+    InsertValuesRow [21-27] [(a, b)]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      PathExpression [25-26] [b]
+        Identifier(b) [25-26] [b]
+  ReturningClause [28-77] [then return...as myaction]
+    SelectList [64-77] [c as myaction]
+      SelectColumn [64-77] [c as myaction]
+        PathExpression [64-65] [c]
+          Identifier(c) [64-65] [c]
+        Alias [66-77] [as myaction]
+          Identifier(myaction) [69-77] [myaction]
+    Alias [28-77] [then return...as myaction]
+      Identifier(myaction) [55-63] [myaction]
+--
+INSERT INTO T
+VALUES
+  (a, b)
+THEN RETURN WITH ACTION AS myaction
+  c AS myaction

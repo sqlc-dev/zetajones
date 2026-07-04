@@ -1,0 +1,363 @@
+# TODO: Remove this after parse locations have been manually
+# verified as correct.
+[default no_show_parse_location_text]
+[default mode=script]
+{{BREAK|LEAVE}};
+--
+ALTERNATION GROUP: BREAK
+--
+Script [0-6]
+  StatementList [0-6]
+    BreakStatement [0-5]
+--
+BREAK ;
+--
+ALTERNATION GROUP: LEAVE
+--
+Script [0-6]
+  StatementList [0-6]
+    BreakStatement [0-5]
+--
+LEAVE ;
+==
+
+{{CONTINUE|ITERATE}};
+--
+ALTERNATION GROUP: CONTINUE
+--
+Script [0-9]
+  StatementList [0-9]
+    ContinueStatement [0-8]
+--
+CONTINUE ;
+--
+ALTERNATION GROUP: ITERATE
+--
+Script [0-8]
+  StatementList [0-8]
+    ContinueStatement [0-7]
+--
+ITERATE ;
+==
+
+LOOP
+  {{BREAK|LEAVE}};
+END LOOP;
+--
+ALTERNATION GROUP: BREAK
+--
+Script [0-23]
+  StatementList [0-23]
+    WhileStatement [0-22]
+      StatementList [7-13]
+        BreakStatement [7-12]
+--
+LOOP
+  BREAK ;
+END LOOP ;
+--
+ALTERNATION GROUP: LEAVE
+--
+Script [0-23]
+  StatementList [0-23]
+    WhileStatement [0-22]
+      StatementList [7-13]
+        BreakStatement [7-12]
+--
+LOOP
+  LEAVE ;
+END LOOP ;
+==
+
+LOOP
+  {{CONTINUE|ITERATE}};
+END LOOP;
+--
+ALTERNATION GROUP: CONTINUE
+--
+Script [0-26]
+  StatementList [0-26]
+    WhileStatement [0-25]
+      StatementList [7-16]
+        ContinueStatement [7-15]
+--
+LOOP
+  CONTINUE ;
+END LOOP ;
+--
+ALTERNATION GROUP: ITERATE
+--
+Script [0-25]
+  StatementList [0-25]
+    WhileStatement [0-24]
+      StatementList [7-15]
+        ContinueStatement [7-14]
+--
+LOOP
+  ITERATE ;
+END LOOP ;
+==
+
+WHILE TRUE DO
+  {{BREAK|LEAVE}};
+END WHILE;
+--
+ALTERNATION GROUP: BREAK
+--
+Script [0-33]
+  StatementList [0-33]
+    WhileStatement [0-32]
+      BooleanLiteral(TRUE) [6-10]
+      StatementList [16-22]
+        BreakStatement [16-21]
+--
+WHILE TRUE DO
+  BREAK ;
+END WHILE ;
+--
+ALTERNATION GROUP: LEAVE
+--
+Script [0-33]
+  StatementList [0-33]
+    WhileStatement [0-32]
+      BooleanLiteral(TRUE) [6-10]
+      StatementList [16-22]
+        BreakStatement [16-21]
+--
+WHILE TRUE DO
+  LEAVE ;
+END WHILE ;
+==
+
+WHILE TRUE DO
+  {{CONTINUE|ITERATE}};
+END WHILE;
+--
+ALTERNATION GROUP: CONTINUE
+--
+Script [0-36]
+  StatementList [0-36]
+    WhileStatement [0-35]
+      BooleanLiteral(TRUE) [6-10]
+      StatementList [16-25]
+        ContinueStatement [16-24]
+--
+WHILE TRUE DO
+  CONTINUE ;
+END WHILE ;
+--
+ALTERNATION GROUP: ITERATE
+--
+Script [0-35]
+  StatementList [0-35]
+    WhileStatement [0-34]
+      BooleanLiteral(TRUE) [6-10]
+      StatementList [16-24]
+        ContinueStatement [16-23]
+--
+WHILE TRUE DO
+  ITERATE ;
+END WHILE ;
+==
+
+LOOP
+  SELECT 5;
+  BREAK;
+END LOOP;
+--
+Script [0-35]
+  StatementList [0-35]
+    WhileStatement [0-34]
+      StatementList [7-25]
+        QueryStatement [7-15]
+          Query [7-15]
+            Select [7-15]
+              SelectList [14-15]
+                SelectColumn [14-15]
+                  IntLiteral(5) [14-15]
+        BreakStatement [19-24]
+--
+LOOP
+  SELECT
+    5
+  ;
+  BREAK ;
+END LOOP ;
+==
+
+LOOP
+  IF x THEN
+    BREAK;
+  ELSE
+    CONTINUE;
+  END IF;
+END LOOP;
+--
+Script [0-68]
+  StatementList [0-68]
+    WhileStatement [0-67]
+      StatementList [7-58]
+        IfStatement [7-57]
+          PathExpression [10-11]
+            Identifier(x) [10-11]
+          StatementList [21-27]
+            BreakStatement [21-26]
+          StatementList [39-48]
+            ContinueStatement [39-47]
+--
+LOOP
+  IF x THEN
+    BREAK ;
+  ELSE
+    CONTINUE ;
+  END IF ;
+END LOOP ;
+==
+
+LOOP
+  IF x THEN
+    IF y THEN
+      BREAK;
+    END IF;
+  ELSE
+    CONTINUE;
+  END IF;
+END LOOP;
+--
+Script [0-96]
+  StatementList [0-96]
+    WhileStatement [0-95]
+      StatementList [7-86]
+        IfStatement [7-85]
+          PathExpression [10-11]
+            Identifier(x) [10-11]
+          StatementList [21-55]
+            IfStatement [21-54]
+              PathExpression [24-25]
+                Identifier(y) [24-25]
+              StatementList [37-43]
+                BreakStatement [37-42]
+          StatementList [67-76]
+            ContinueStatement [67-75]
+--
+LOOP
+  IF x THEN
+    IF y THEN
+      BREAK ;
+    END IF ;
+  ELSE
+    CONTINUE ;
+  END IF ;
+END LOOP ;
+==
+
+LOOP
+  WHILE x DO
+    IF y THEN
+      BREAK;
+    END IF;
+    CONTINUE;
+  END WHILE;
+END LOOP;
+--
+Script [0-93]
+  StatementList [0-93]
+    WhileStatement [0-92]
+      StatementList [7-83]
+        WhileStatement [7-82]
+          PathExpression [13-14]
+            Identifier(x) [13-14]
+          StatementList [22-70]
+            IfStatement [22-55]
+              PathExpression [25-26]
+                Identifier(y) [25-26]
+              StatementList [38-44]
+                BreakStatement [38-43]
+            ContinueStatement [61-69]
+--
+LOOP
+  WHILE x DO
+    IF y THEN
+      BREAK ;
+    END IF ;
+    CONTINUE ;
+  END WHILE ;
+END LOOP ;
+==
+
+IF y THEN
+  BREAK;
+END IF;
+--
+Script [0-26]
+  StatementList [0-26]
+    IfStatement [0-25]
+      PathExpression [3-4]
+        Identifier(y) [3-4]
+      StatementList [12-18]
+        BreakStatement [12-17]
+--
+IF y THEN
+  BREAK ;
+END IF ;
+==
+
+WHILE {{BREAK|LEAVE|CONTINUE|ITERATE}} DO
+  CONTINUE;
+END WHILE;
+--
+ALTERNATION GROUP: BREAK
+--
+Script [0-37]
+  StatementList [0-37]
+    WhileStatement [0-36]
+      PathExpression [6-11]
+        Identifier(BREAK) [6-11]
+      StatementList [17-26]
+        ContinueStatement [17-25]
+--
+WHILE BREAK DO
+  CONTINUE ;
+END WHILE ;
+--
+ALTERNATION GROUP: LEAVE
+--
+Script [0-37]
+  StatementList [0-37]
+    WhileStatement [0-36]
+      PathExpression [6-11]
+        Identifier(LEAVE) [6-11]
+      StatementList [17-26]
+        ContinueStatement [17-25]
+--
+WHILE LEAVE DO
+  CONTINUE ;
+END WHILE ;
+--
+ALTERNATION GROUP: CONTINUE
+--
+Script [0-40]
+  StatementList [0-40]
+    WhileStatement [0-39]
+      PathExpression [6-14]
+        Identifier(CONTINUE) [6-14]
+      StatementList [20-29]
+        ContinueStatement [20-28]
+--
+WHILE CONTINUE DO
+  CONTINUE ;
+END WHILE ;
+--
+ALTERNATION GROUP: ITERATE
+--
+Script [0-39]
+  StatementList [0-39]
+    WhileStatement [0-38]
+      PathExpression [6-13]
+        Identifier(ITERATE) [6-13]
+      StatementList [19-28]
+        ContinueStatement [19-27]
+--
+WHILE ITERATE DO
+  CONTINUE ;
+END WHILE ;

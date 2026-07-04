@@ -1,0 +1,128 @@
+# Ensure this doesn't crash.
+select col1,(exists @{a = b} (select col2 from T2)
+from T1
+where exists @{a=1} (select col from T3)
+--
+ERROR: Syntax error: Expected "," but got keyword FROM [at 2:1]
+from T1
+^
+==
+
+SELECT 
+SAFE_CAST(COALESCE(ARRAY<gtype>[CAST("TESTENUM1" AS gtype)]) 
+AS ARRAY<gtype>) AS a_1, 
+SAFE_CAST(COALESCE(ARRAY<gtype>[CAST("" AS gtype)]) AS ARRAY<gtype>) AS a_2, 
+SAFE_CAST(COALESCE(STRUCT<BOOL, ARRAY<gtype>, gtype>(false, 
+ARRAY<gtype>[CAST("" AS gtype)], CAST("TESTENUM1" AS gtype))) AS STRUCT<BOOL, ARRAY<gtype>, gtype>) 
+--
+QueryStatement [0-334] [SELECT  SAFE_CAST...>, gtype>)]
+  Query [0-334] [SELECT  SAFE_CAST...>, gtype>)]
+    Select [0-334] [SELECT  SAFE_CAST...>, gtype>)]
+      SelectList [8-334] [SAFE_CAST(...>, gtype>)]
+        SelectColumn [8-93] [SAFE_CAST(...gtype>) AS a_1]
+          CastExpression(return_null_on_error=true) [8-86] [SAFE_CAST(...ARRAY<gtype>)]
+            FunctionCall [18-68] [COALESCE(ARRAY...AS gtype)])]
+              PathExpression [18-26] [COALESCE]
+                Identifier(COALESCE) [18-26] [COALESCE]
+              ArrayConstructor [27-67] [ARRAY<gtype...AS gtype)]]
+                ArrayType [27-39] [ARRAY<gtype>]
+                  SimpleType [33-38] [gtype]
+                    PathExpression [33-38] [gtype]
+                      Identifier(gtype) [33-38] [gtype]
+                CastExpression [40-66] [CAST("TESTENUM1" AS gtype)]
+                  StringLiteral [45-56] ["TESTENUM1"]
+                    StringLiteralComponent("TESTENUM1") [45-56] ["TESTENUM1"]
+                  SimpleType [60-65] [gtype]
+                    PathExpression [60-65] [gtype]
+                      Identifier(gtype) [60-65] [gtype]
+            ArrayType [73-85] [ARRAY<gtype>]
+              SimpleType [79-84] [gtype]
+                PathExpression [79-84] [gtype]
+                  Identifier(gtype) [79-84] [gtype]
+          Alias [87-93] [AS a_1]
+            Identifier(a_1) [90-93] [a_1]
+        SelectColumn [96-171] [SAFE_CAST(...gtype>) AS a_2]
+          CastExpression(return_null_on_error=true) [96-164] [SAFE_CAST(...ARRAY<gtype>)]
+            FunctionCall [106-147] [COALESCE(ARRAY...AS gtype)])]
+              PathExpression [106-114] [COALESCE]
+                Identifier(COALESCE) [106-114] [COALESCE]
+              ArrayConstructor [115-146] [ARRAY<gtype...AS gtype)]]
+                ArrayType [115-127] [ARRAY<gtype>]
+                  SimpleType [121-126] [gtype]
+                    PathExpression [121-126] [gtype]
+                      Identifier(gtype) [121-126] [gtype]
+                CastExpression [128-145] [CAST("" AS gtype)]
+                  StringLiteral [133-135] [""]
+                    StringLiteralComponent("") [133-135] [""]
+                  SimpleType [139-144] [gtype]
+                    PathExpression [139-144] [gtype]
+                      Identifier(gtype) [139-144] [gtype]
+            ArrayType [151-163] [ARRAY<gtype>]
+              SimpleType [157-162] [gtype]
+                PathExpression [157-162] [gtype]
+                  Identifier(gtype) [157-162] [gtype]
+          Alias [165-171] [AS a_2]
+            Identifier(a_2) [168-171] [a_2]
+        SelectColumn [174-334] [SAFE_CAST(...>, gtype>)]
+          CastExpression(return_null_on_error=true) [174-334] [SAFE_CAST(...>, gtype>)]
+            FunctionCall [184-296] [COALESCE(STRUCT...AS gtype)))]
+              PathExpression [184-192] [COALESCE]
+                Identifier(COALESCE) [184-192] [COALESCE]
+              StructConstructorWithKeyword [193-295] [STRUCT<BOOL...AS gtype))]
+                StructType [193-226] [STRUCT<BOOL...gtype>, gtype>]
+                  StructField [200-204] [BOOL]
+                    SimpleType [200-204] [BOOL]
+                      PathExpression [200-204] [BOOL]
+                        Identifier(BOOL) [200-204] [BOOL]
+                  StructField [206-218] [ARRAY<gtype>]
+                    ArrayType [206-218] [ARRAY<gtype>]
+                      SimpleType [212-217] [gtype]
+                        PathExpression [212-217] [gtype]
+                          Identifier(gtype) [212-217] [gtype]
+                  StructField [220-225] [gtype]
+                    SimpleType [220-225] [gtype]
+                      PathExpression [220-225] [gtype]
+                        Identifier(gtype) [220-225] [gtype]
+                StructConstructorArg [227-232] [false]
+                  BooleanLiteral(false) [227-232] [false]
+                StructConstructorArg [235-266] [ARRAY<gtype...AS gtype)]]
+                  ArrayConstructor [235-266] [ARRAY<gtype...AS gtype)]]
+                    ArrayType [235-247] [ARRAY<gtype>]
+                      SimpleType [241-246] [gtype]
+                        PathExpression [241-246] [gtype]
+                          Identifier(gtype) [241-246] [gtype]
+                    CastExpression [248-265] [CAST("" AS gtype)]
+                      StringLiteral [253-255] [""]
+                        StringLiteralComponent("") [253-255] [""]
+                      SimpleType [259-264] [gtype]
+                        PathExpression [259-264] [gtype]
+                          Identifier(gtype) [259-264] [gtype]
+                StructConstructorArg [268-294] [CAST("TESTENUM1" AS gtype)]
+                  CastExpression [268-294] [CAST("TESTENUM1" AS gtype)]
+                    StringLiteral [273-284] ["TESTENUM1"]
+                      StringLiteralComponent("TESTENUM1") [273-284] ["TESTENUM1"]
+                    SimpleType [288-293] [gtype]
+                      PathExpression [288-293] [gtype]
+                        Identifier(gtype) [288-293] [gtype]
+            StructType [300-333] [STRUCT<BOOL...gtype>, gtype>]
+              StructField [307-311] [BOOL]
+                SimpleType [307-311] [BOOL]
+                  PathExpression [307-311] [BOOL]
+                    Identifier(BOOL) [307-311] [BOOL]
+              StructField [313-325] [ARRAY<gtype>]
+                ArrayType [313-325] [ARRAY<gtype>]
+                  SimpleType [319-324] [gtype]
+                    PathExpression [319-324] [gtype]
+                      Identifier(gtype) [319-324] [gtype]
+              StructField [327-332] [gtype]
+                SimpleType [327-332] [gtype]
+                  PathExpression [327-332] [gtype]
+                    Identifier(gtype) [327-332] [gtype]
+--
+SELECT
+  SAFE_CAST(COALESCE(ARRAY< gtype >[CAST("TESTENUM1" AS gtype)]) AS ARRAY< gtype >) AS a_1,
+  SAFE_CAST(COALESCE(ARRAY< gtype >[CAST("" AS gtype)]) AS ARRAY< gtype >) AS a_2,
+  SAFE_CAST(COALESCE(STRUCT< BOOL, ARRAY< gtype >, gtype > (false, ARRAY< gtype >[CAST("" AS gtype)], CAST("TESTENUM1" AS gtype))) AS STRUCT<
+  BOOL, ARRAY< gtype >, gtype >)
+==
+

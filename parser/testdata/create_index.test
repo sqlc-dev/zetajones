@@ -1,0 +1,1684 @@
+create index a.b.i1 on c.d.t1(a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-55] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  IndexItemList [29-38] [(a, b, c)]
+    OrderingExpression(ASC) [30-31] [a]
+      PathExpression [30-31] [a]
+        Identifier(a) [30-31] [a]
+    OrderingExpression(ASC) [33-34] [b]
+      PathExpression [33-34] [b]
+        Identifier(b) [33-34] [b]
+    OrderingExpression(ASC) [36-37] [c]
+      PathExpression [36-37] [c]
+        Identifier(c) [36-37] [c]
+  OptionsList [46-55] [(x=1,y=2)]
+    OptionsEntry [47-50] [x=1]
+      Identifier(x) [47-48] [x]
+      IntLiteral(1) [49-50] [1]
+    OptionsEntry [51-54] [y=2]
+      Identifier(y) [51-52] [y]
+      IntLiteral(2) [53-54] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1(a, b, c)
+OPTIONS(x = 1, y = 2)
+==
+
+create index i1 on t1(a desc, b asc);
+--
+CreateIndexStatement [0-36] [create index...desc, b asc)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-36] [(a desc, b asc)]
+    OrderingExpression(DESC) [22-28] [a desc]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+    OrderingExpression(ASC EXPLICITLY) [30-35] [b asc]
+      PathExpression [30-31] [b]
+        Identifier(b) [30-31] [b]
+--
+CREATE INDEX i1 ON t1(a DESC, b ASC)
+==
+
+create index i1 on t1(a {{|ASC|DESC}} {{|NULLS FIRST|NULLS LAST}});
+--
+ALTERNATION GROUP: <empty>
+--
+CreateIndexStatement [0-26] [create index i1 on t1(a  )]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-26] [(a  )]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+--
+CREATE INDEX i1 ON t1(a)
+--
+ALTERNATION GROUP: NULLS FIRST
+--
+CreateIndexStatement [0-37] [create index...NULLS FIRST)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-37] [(a  NULLS FIRST)]
+    OrderingExpression(ASC) [22-36] [a  NULLS FIRST]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      NullOrder(NULLS FIRST) [25-36] [NULLS FIRST]
+--
+CREATE INDEX i1 ON t1(a NULLS FIRST)
+--
+ALTERNATION GROUP: NULLS LAST
+--
+CreateIndexStatement [0-36] [create index...NULLS LAST)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-36] [(a  NULLS LAST)]
+    OrderingExpression(ASC) [22-35] [a  NULLS LAST]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      NullOrder(NULLS LAST) [25-35] [NULLS LAST]
+--
+CREATE INDEX i1 ON t1(a NULLS LAST)
+--
+ALTERNATION GROUP: ASC,
+--
+CreateIndexStatement [0-29] [create index i1 on t1(a ASC )]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-29] [(a ASC )]
+    OrderingExpression(ASC EXPLICITLY) [22-27] [a ASC]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+--
+CREATE INDEX i1 ON t1(a ASC)
+--
+ALTERNATION GROUP: ASC,NULLS FIRST
+--
+CreateIndexStatement [0-40] [create index...NULLS FIRST)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-40] [(a ASC NULLS FIRST)]
+    OrderingExpression(ASC EXPLICITLY) [22-39] [a ASC NULLS FIRST]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      NullOrder(NULLS FIRST) [28-39] [NULLS FIRST]
+--
+CREATE INDEX i1 ON t1(a ASC NULLS FIRST)
+--
+ALTERNATION GROUP: ASC,NULLS LAST
+--
+CreateIndexStatement [0-39] [create index...NULLS LAST)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-39] [(a ASC NULLS LAST)]
+    OrderingExpression(ASC EXPLICITLY) [22-38] [a ASC NULLS LAST]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      NullOrder(NULLS LAST) [28-38] [NULLS LAST]
+--
+CREATE INDEX i1 ON t1(a ASC NULLS LAST)
+--
+ALTERNATION GROUP: DESC,
+--
+CreateIndexStatement [0-30] [create index i1 on t1(a DESC )]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-30] [(a DESC )]
+    OrderingExpression(DESC) [22-28] [a DESC]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+--
+CREATE INDEX i1 ON t1(a DESC)
+--
+ALTERNATION GROUP: DESC,NULLS FIRST
+--
+CreateIndexStatement [0-41] [create index...NULLS FIRST)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-41] [(a DESC NULLS FIRST)]
+    OrderingExpression(DESC) [22-40] [a DESC NULLS FIRST]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      NullOrder(NULLS FIRST) [29-40] [NULLS FIRST]
+--
+CREATE INDEX i1 ON t1(a DESC NULLS FIRST)
+--
+ALTERNATION GROUP: DESC,NULLS LAST
+--
+CreateIndexStatement [0-40] [create index...NULLS LAST)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-40] [(a DESC NULLS LAST)]
+    OrderingExpression(DESC) [22-39] [a DESC NULLS LAST]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+      NullOrder(NULLS LAST) [29-39] [NULLS LAST]
+--
+CREATE INDEX i1 ON t1(a DESC NULLS LAST)
+==
+
+create unique index i1 on t1(a, b);
+--
+CreateIndexStatement(UNIQUE) [0-34] [create unique...on t1(a, b)]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-34] [(a, b)]
+    OrderingExpression(ASC) [29-30] [a]
+      PathExpression [29-30] [a]
+        Identifier(a) [29-30] [a]
+    OrderingExpression(ASC) [32-33] [b]
+      PathExpression [32-33] [b]
+        Identifier(b) [32-33] [b]
+--
+CREATE UNIQUE INDEX i1 ON t1(a, b)
+==
+
+# Expressions are supported in the syntax.
+create index i1 on t1 (a.b.c, e, c*d);
+--
+CreateIndexStatement [0-37] [create index...c, e, c*d)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [22-37] [(a.b.c, e, c*d)]
+    OrderingExpression(ASC) [23-28] [a.b.c]
+      PathExpression [23-28] [a.b.c]
+        Identifier(a) [23-24] [a]
+        Identifier(b) [25-26] [b]
+        Identifier(c) [27-28] [c]
+    OrderingExpression(ASC) [30-31] [e]
+      PathExpression [30-31] [e]
+        Identifier(e) [30-31] [e]
+    OrderingExpression(ASC) [33-36] [c*d]
+      BinaryExpression(*) [33-36] [c*d]
+        PathExpression [33-34] [c]
+          Identifier(c) [33-34] [c]
+        PathExpression [35-36] [d]
+          Identifier(d) [35-36] [d]
+--
+CREATE INDEX i1 ON t1(a.b.c, e, c * d)
+==
+
+# Alias is not supported.
+create index i1 on t1 (a*2 as twice_a);
+--
+ERROR: Syntax error: Expected ")" or "," but got keyword AS [at 1:28]
+create index i1 on t1 (a*2 as twice_a);
+                           ^
+==
+
+create index i1 on t1();
+--
+ERROR: Syntax error: Unexpected ")" [at 1:23]
+create index i1 on t1();
+                      ^
+==
+
+create {{|or replace}} {{|unique}} {{|search|vector}} index
+{{|if not exists}} i1 on t1 (a)
+options()
+--
+ALTERNATION GROUP: <empty>
+--
+CreateIndexStatement [0-39] [create...options()]
+  PathExpression [17-19] [i1]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-25] [t1]
+    Identifier(t1) [23-25] [t1]
+  IndexItemList [26-29] [(a)]
+    OrderingExpression(ASC) [27-28] [a]
+      PathExpression [27-28] [a]
+        Identifier(a) [27-28] [a]
+  OptionsList [37-39] [()]
+--
+CREATE INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: if not exists
+--
+CreateIndexStatement [0-52] [create...options()]
+  PathExpression [30-32] [i1]
+    Identifier(i1) [30-32] [i1]
+  PathExpression [36-38] [t1]
+    Identifier(t1) [36-38] [t1]
+  IndexItemList [39-42] [(a)]
+    OrderingExpression(ASC) [40-41] [a]
+      PathExpression [40-41] [a]
+        Identifier(a) [40-41] [a]
+  OptionsList [50-52] [()]
+--
+CREATE INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: search,
+--
+CreateIndexStatement(SEARCH) [0-45] [create   search...options()]
+  PathExpression [23-25] [i1]
+    Identifier(i1) [23-25] [i1]
+  PathExpression [29-31] [t1]
+    Identifier(t1) [29-31] [t1]
+  IndexItemList [32-35] [(a)]
+    OrderingExpression(ASC) [33-34] [a]
+      PathExpression [33-34] [a]
+        Identifier(a) [33-34] [a]
+  OptionsList [43-45] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: search,if not exists
+--
+CreateIndexStatement(SEARCH) [0-58] [create   search...options()]
+  PathExpression [36-38] [i1]
+    Identifier(i1) [36-38] [i1]
+  PathExpression [42-44] [t1]
+    Identifier(t1) [42-44] [t1]
+  IndexItemList [45-48] [(a)]
+    OrderingExpression(ASC) [46-47] [a]
+      PathExpression [46-47] [a]
+        Identifier(a) [46-47] [a]
+  OptionsList [56-58] [()]
+--
+CREATE SEARCH INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: vector,
+--
+CreateIndexStatement(VECTOR) [0-45] [create   vector...options()]
+  PathExpression [23-25] [i1]
+    Identifier(i1) [23-25] [i1]
+  PathExpression [29-31] [t1]
+    Identifier(t1) [29-31] [t1]
+  IndexItemList [32-35] [(a)]
+    OrderingExpression(ASC) [33-34] [a]
+      PathExpression [33-34] [a]
+        Identifier(a) [33-34] [a]
+  OptionsList [43-45] [()]
+--
+CREATE VECTOR INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: vector,if not exists
+--
+CreateIndexStatement(VECTOR) [0-58] [create   vector...options()]
+  PathExpression [36-38] [i1]
+    Identifier(i1) [36-38] [i1]
+  PathExpression [42-44] [t1]
+    Identifier(t1) [42-44] [t1]
+  IndexItemList [45-48] [(a)]
+    OrderingExpression(ASC) [46-47] [a]
+      PathExpression [46-47] [a]
+        Identifier(a) [46-47] [a]
+  OptionsList [56-58] [()]
+--
+CREATE VECTOR INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: unique,,
+--
+CreateIndexStatement(UNIQUE) [0-45] [create  unique...options()]
+  PathExpression [23-25] [i1]
+    Identifier(i1) [23-25] [i1]
+  PathExpression [29-31] [t1]
+    Identifier(t1) [29-31] [t1]
+  IndexItemList [32-35] [(a)]
+    OrderingExpression(ASC) [33-34] [a]
+      PathExpression [33-34] [a]
+        Identifier(a) [33-34] [a]
+  OptionsList [43-45] [()]
+--
+CREATE UNIQUE INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: unique,,if not exists
+--
+CreateIndexStatement(UNIQUE) [0-58] [create  unique...options()]
+  PathExpression [36-38] [i1]
+    Identifier(i1) [36-38] [i1]
+  PathExpression [42-44] [t1]
+    Identifier(t1) [42-44] [t1]
+  IndexItemList [45-48] [(a)]
+    OrderingExpression(ASC) [46-47] [a]
+      PathExpression [46-47] [a]
+        Identifier(a) [46-47] [a]
+  OptionsList [56-58] [()]
+--
+CREATE UNIQUE INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: unique,search,
+--
+CreateIndexStatement(UNIQUE,SEARCH) [0-51] [create  unique...options()]
+  PathExpression [29-31] [i1]
+    Identifier(i1) [29-31] [i1]
+  PathExpression [35-37] [t1]
+    Identifier(t1) [35-37] [t1]
+  IndexItemList [38-41] [(a)]
+    OrderingExpression(ASC) [39-40] [a]
+      PathExpression [39-40] [a]
+        Identifier(a) [39-40] [a]
+  OptionsList [49-51] [()]
+--
+CREATE UNIQUE SEARCH INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: unique,search,if not exists
+--
+CreateIndexStatement(UNIQUE,SEARCH) [0-64] [create  unique...options()]
+  PathExpression [42-44] [i1]
+    Identifier(i1) [42-44] [i1]
+  PathExpression [48-50] [t1]
+    Identifier(t1) [48-50] [t1]
+  IndexItemList [51-54] [(a)]
+    OrderingExpression(ASC) [52-53] [a]
+      PathExpression [52-53] [a]
+        Identifier(a) [52-53] [a]
+  OptionsList [62-64] [()]
+--
+CREATE UNIQUE SEARCH INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: unique,vector,
+--
+CreateIndexStatement(UNIQUE,VECTOR) [0-51] [create  unique...options()]
+  PathExpression [29-31] [i1]
+    Identifier(i1) [29-31] [i1]
+  PathExpression [35-37] [t1]
+    Identifier(t1) [35-37] [t1]
+  IndexItemList [38-41] [(a)]
+    OrderingExpression(ASC) [39-40] [a]
+      PathExpression [39-40] [a]
+        Identifier(a) [39-40] [a]
+  OptionsList [49-51] [()]
+--
+CREATE UNIQUE VECTOR INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: unique,vector,if not exists
+--
+CreateIndexStatement(UNIQUE,VECTOR) [0-64] [create  unique...options()]
+  PathExpression [42-44] [i1]
+    Identifier(i1) [42-44] [i1]
+  PathExpression [48-50] [t1]
+    Identifier(t1) [48-50] [t1]
+  IndexItemList [51-54] [(a)]
+    OrderingExpression(ASC) [52-53] [a]
+      PathExpression [52-53] [a]
+        Identifier(a) [52-53] [a]
+  OptionsList [62-64] [()]
+--
+CREATE UNIQUE VECTOR INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,,,
+--
+CreateIndexStatement [0-49] [create or...options()]
+  PathExpression [27-29] [i1]
+    Identifier(i1) [27-29] [i1]
+  PathExpression [33-35] [t1]
+    Identifier(t1) [33-35] [t1]
+  IndexItemList [36-39] [(a)]
+    OrderingExpression(ASC) [37-38] [a]
+      PathExpression [37-38] [a]
+        Identifier(a) [37-38] [a]
+  OptionsList [47-49] [()]
+--
+CREATE OR REPLACE INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,,,if not exists
+--
+CreateIndexStatement [0-62] [create or...options()]
+  PathExpression [40-42] [i1]
+    Identifier(i1) [40-42] [i1]
+  PathExpression [46-48] [t1]
+    Identifier(t1) [46-48] [t1]
+  IndexItemList [49-52] [(a)]
+    OrderingExpression(ASC) [50-51] [a]
+      PathExpression [50-51] [a]
+        Identifier(a) [50-51] [a]
+  OptionsList [60-62] [()]
+--
+CREATE OR REPLACE INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,,search,
+--
+CreateIndexStatement(SEARCH) [0-55] [create or...options()]
+  PathExpression [33-35] [i1]
+    Identifier(i1) [33-35] [i1]
+  PathExpression [39-41] [t1]
+    Identifier(t1) [39-41] [t1]
+  IndexItemList [42-45] [(a)]
+    OrderingExpression(ASC) [43-44] [a]
+      PathExpression [43-44] [a]
+        Identifier(a) [43-44] [a]
+  OptionsList [53-55] [()]
+--
+CREATE OR REPLACE SEARCH INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,,search,if not exists
+--
+CreateIndexStatement(SEARCH) [0-68] [create or...options()]
+  PathExpression [46-48] [i1]
+    Identifier(i1) [46-48] [i1]
+  PathExpression [52-54] [t1]
+    Identifier(t1) [52-54] [t1]
+  IndexItemList [55-58] [(a)]
+    OrderingExpression(ASC) [56-57] [a]
+      PathExpression [56-57] [a]
+        Identifier(a) [56-57] [a]
+  OptionsList [66-68] [()]
+--
+CREATE OR REPLACE SEARCH INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,,vector,
+--
+CreateIndexStatement(VECTOR) [0-55] [create or...options()]
+  PathExpression [33-35] [i1]
+    Identifier(i1) [33-35] [i1]
+  PathExpression [39-41] [t1]
+    Identifier(t1) [39-41] [t1]
+  IndexItemList [42-45] [(a)]
+    OrderingExpression(ASC) [43-44] [a]
+      PathExpression [43-44] [a]
+        Identifier(a) [43-44] [a]
+  OptionsList [53-55] [()]
+--
+CREATE OR REPLACE VECTOR INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,,vector,if not exists
+--
+CreateIndexStatement(VECTOR) [0-68] [create or...options()]
+  PathExpression [46-48] [i1]
+    Identifier(i1) [46-48] [i1]
+  PathExpression [52-54] [t1]
+    Identifier(t1) [52-54] [t1]
+  IndexItemList [55-58] [(a)]
+    OrderingExpression(ASC) [56-57] [a]
+      PathExpression [56-57] [a]
+        Identifier(a) [56-57] [a]
+  OptionsList [66-68] [()]
+--
+CREATE OR REPLACE VECTOR INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,unique,,
+--
+CreateIndexStatement(UNIQUE) [0-55] [create or...options()]
+  PathExpression [33-35] [i1]
+    Identifier(i1) [33-35] [i1]
+  PathExpression [39-41] [t1]
+    Identifier(t1) [39-41] [t1]
+  IndexItemList [42-45] [(a)]
+    OrderingExpression(ASC) [43-44] [a]
+      PathExpression [43-44] [a]
+        Identifier(a) [43-44] [a]
+  OptionsList [53-55] [()]
+--
+CREATE OR REPLACE UNIQUE INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,unique,,if not exists
+--
+CreateIndexStatement(UNIQUE) [0-68] [create or...options()]
+  PathExpression [46-48] [i1]
+    Identifier(i1) [46-48] [i1]
+  PathExpression [52-54] [t1]
+    Identifier(t1) [52-54] [t1]
+  IndexItemList [55-58] [(a)]
+    OrderingExpression(ASC) [56-57] [a]
+      PathExpression [56-57] [a]
+        Identifier(a) [56-57] [a]
+  OptionsList [66-68] [()]
+--
+CREATE OR REPLACE UNIQUE INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,unique,search,
+--
+CreateIndexStatement(UNIQUE,SEARCH) [0-61] [create or...options()]
+  PathExpression [39-41] [i1]
+    Identifier(i1) [39-41] [i1]
+  PathExpression [45-47] [t1]
+    Identifier(t1) [45-47] [t1]
+  IndexItemList [48-51] [(a)]
+    OrderingExpression(ASC) [49-50] [a]
+      PathExpression [49-50] [a]
+        Identifier(a) [49-50] [a]
+  OptionsList [59-61] [()]
+--
+CREATE OR REPLACE UNIQUE SEARCH INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,unique,search,if not exists
+--
+CreateIndexStatement(UNIQUE,SEARCH) [0-74] [create or...options()]
+  PathExpression [52-54] [i1]
+    Identifier(i1) [52-54] [i1]
+  PathExpression [58-60] [t1]
+    Identifier(t1) [58-60] [t1]
+  IndexItemList [61-64] [(a)]
+    OrderingExpression(ASC) [62-63] [a]
+      PathExpression [62-63] [a]
+        Identifier(a) [62-63] [a]
+  OptionsList [72-74] [()]
+--
+CREATE OR REPLACE UNIQUE SEARCH INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,unique,vector,
+--
+CreateIndexStatement(UNIQUE,VECTOR) [0-61] [create or...options()]
+  PathExpression [39-41] [i1]
+    Identifier(i1) [39-41] [i1]
+  PathExpression [45-47] [t1]
+    Identifier(t1) [45-47] [t1]
+  IndexItemList [48-51] [(a)]
+    OrderingExpression(ASC) [49-50] [a]
+      PathExpression [49-50] [a]
+        Identifier(a) [49-50] [a]
+  OptionsList [59-61] [()]
+--
+CREATE OR REPLACE UNIQUE VECTOR INDEX i1 ON t1(a)
+OPTIONS()
+--
+ALTERNATION GROUP: or replace,unique,vector,if not exists
+--
+CreateIndexStatement(UNIQUE,VECTOR) [0-74] [create or...options()]
+  PathExpression [52-54] [i1]
+    Identifier(i1) [52-54] [i1]
+  PathExpression [58-60] [t1]
+    Identifier(t1) [58-60] [t1]
+  IndexItemList [61-64] [(a)]
+    OrderingExpression(ASC) [62-63] [a]
+      PathExpression [62-63] [a]
+        Identifier(a) [62-63] [a]
+  OptionsList [72-74] [()]
+--
+CREATE OR REPLACE UNIQUE VECTOR INDEX IF NOT EXISTS i1 ON t1(a)
+OPTIONS()
+==
+
+# Specifying table name alias
+create index a.b.i1 on c.d.t1 foo (a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-60] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexItemList [34-43] [(a, b, c)]
+    OrderingExpression(ASC) [35-36] [a]
+      PathExpression [35-36] [a]
+        Identifier(a) [35-36] [a]
+    OrderingExpression(ASC) [38-39] [b]
+      PathExpression [38-39] [b]
+        Identifier(b) [38-39] [b]
+    OrderingExpression(ASC) [41-42] [c]
+      PathExpression [41-42] [c]
+        Identifier(c) [41-42] [c]
+  OptionsList [51-60] [(x=1,y=2)]
+    OptionsEntry [52-55] [x=1]
+      Identifier(x) [52-53] [x]
+      IntLiteral(1) [54-55] [1]
+    OptionsEntry [56-59] [y=2]
+      Identifier(y) [56-57] [y]
+      IntLiteral(2) [58-59] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo(a, b, c)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying a single UNNEST expression.
+create index a.b.i1 on c.d.t1 foo UNNEST(a) (a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-70] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-43] [UNNEST(a)]
+    UnnestExpressionWithOptAliasAndOffset [34-43] [UNNEST(a)]
+      UnnestExpression [34-43] [UNNEST(a)]
+        ExpressionWithOptAlias [41-42] [a]
+          PathExpression [41-42] [a]
+            Identifier(a) [41-42] [a]
+  IndexItemList [44-53] [(a, b, c)]
+    OrderingExpression(ASC) [45-46] [a]
+      PathExpression [45-46] [a]
+        Identifier(a) [45-46] [a]
+    OrderingExpression(ASC) [48-49] [b]
+      PathExpression [48-49] [b]
+        Identifier(b) [48-49] [b]
+    OrderingExpression(ASC) [51-52] [c]
+      PathExpression [51-52] [c]
+        Identifier(c) [51-52] [c]
+  OptionsList [61-70] [(x=1,y=2)]
+    OptionsEntry [62-65] [x=1]
+      Identifier(x) [62-63] [x]
+      IntLiteral(1) [64-65] [1]
+    OptionsEntry [66-69] [y=2]
+      Identifier(y) [66-67] [y]
+      IntLiteral(2) [68-69] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(a)
+(a, b, c)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying a single UNNEST expression with alias.
+create index a.b.i1 on c.d.t1 foo UNNEST(a) AS bar (a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-77] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-50] [UNNEST(a) AS bar]
+    UnnestExpressionWithOptAliasAndOffset [34-50] [UNNEST(a) AS bar]
+      UnnestExpression [34-43] [UNNEST(a)]
+        ExpressionWithOptAlias [41-42] [a]
+          PathExpression [41-42] [a]
+            Identifier(a) [41-42] [a]
+      Alias [44-50] [AS bar]
+        Identifier(bar) [47-50] [bar]
+  IndexItemList [51-60] [(a, b, c)]
+    OrderingExpression(ASC) [52-53] [a]
+      PathExpression [52-53] [a]
+        Identifier(a) [52-53] [a]
+    OrderingExpression(ASC) [55-56] [b]
+      PathExpression [55-56] [b]
+        Identifier(b) [55-56] [b]
+    OrderingExpression(ASC) [58-59] [c]
+      PathExpression [58-59] [c]
+        Identifier(c) [58-59] [c]
+  OptionsList [68-77] [(x=1,y=2)]
+    OptionsEntry [69-72] [x=1]
+      Identifier(x) [69-70] [x]
+      IntLiteral(1) [71-72] [1]
+    OptionsEntry [73-76] [y=2]
+      Identifier(y) [73-74] [y]
+      IntLiteral(2) [75-76] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(a) AS bar
+(a, b, c)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying a single UNNEST expression with alias and offset.
+create index a.b.i1 on c.d.t1 foo UNNEST(a) bar WITH OFFSET (a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-86] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-59] [UNNEST(a) bar WITH OFFSET]
+    UnnestExpressionWithOptAliasAndOffset [34-59] [UNNEST(a) bar WITH OFFSET]
+      UnnestExpression [34-43] [UNNEST(a)]
+        ExpressionWithOptAlias [41-42] [a]
+          PathExpression [41-42] [a]
+            Identifier(a) [41-42] [a]
+      Alias [44-47] [bar]
+        Identifier(bar) [44-47] [bar]
+      WithOffset [48-59] [WITH OFFSET]
+  IndexItemList [60-69] [(a, b, c)]
+    OrderingExpression(ASC) [61-62] [a]
+      PathExpression [61-62] [a]
+        Identifier(a) [61-62] [a]
+    OrderingExpression(ASC) [64-65] [b]
+      PathExpression [64-65] [b]
+        Identifier(b) [64-65] [b]
+    OrderingExpression(ASC) [67-68] [c]
+      PathExpression [67-68] [c]
+        Identifier(c) [67-68] [c]
+  OptionsList [77-86] [(x=1,y=2)]
+    OptionsEntry [78-81] [x=1]
+      Identifier(x) [78-79] [x]
+      IntLiteral(1) [80-81] [1]
+    OptionsEntry [82-85] [y=2]
+      Identifier(y) [82-83] [y]
+      IntLiteral(2) [84-85] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(a) AS bar WITH OFFSET
+(a, b, c)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying a single UNNEST expression with alias and offset.
+create index a.b.i1 on c.d.t1 foo UNNEST(a) bar WITH OFFSET AS offset (a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-96] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-69] [UNNEST(a)...AS offset]
+    UnnestExpressionWithOptAliasAndOffset [34-69] [UNNEST(a)...AS offset]
+      UnnestExpression [34-43] [UNNEST(a)]
+        ExpressionWithOptAlias [41-42] [a]
+          PathExpression [41-42] [a]
+            Identifier(a) [41-42] [a]
+      Alias [44-47] [bar]
+        Identifier(bar) [44-47] [bar]
+      WithOffset [48-69] [WITH OFFSET AS offset]
+        Alias [60-69] [AS offset]
+          Identifier(offset) [63-69] [offset]
+  IndexItemList [70-79] [(a, b, c)]
+    OrderingExpression(ASC) [71-72] [a]
+      PathExpression [71-72] [a]
+        Identifier(a) [71-72] [a]
+    OrderingExpression(ASC) [74-75] [b]
+      PathExpression [74-75] [b]
+        Identifier(b) [74-75] [b]
+    OrderingExpression(ASC) [77-78] [c]
+      PathExpression [77-78] [c]
+        Identifier(c) [77-78] [c]
+  OptionsList [87-96] [(x=1,y=2)]
+    OptionsEntry [88-91] [x=1]
+      Identifier(x) [88-89] [x]
+      IntLiteral(1) [90-91] [1]
+    OptionsEntry [92-95] [y=2]
+      Identifier(y) [92-93] [y]
+      IntLiteral(2) [94-95] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(a) AS bar WITH OFFSET AS offset
+(a, b, c)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying a more complicated UNNEST expression on field paths.
+create index a.b.i1 on c.d.t1 foo UNNEST(x.y.z) bar (bar) options(x=1,y=2);
+--
+CreateIndexStatement [0-74] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-51] [UNNEST(x.y.z) bar]
+    UnnestExpressionWithOptAliasAndOffset [34-51] [UNNEST(x.y.z) bar]
+      UnnestExpression [34-47] [UNNEST(x.y.z)]
+        ExpressionWithOptAlias [41-46] [x.y.z]
+          PathExpression [41-46] [x.y.z]
+            Identifier(x) [41-42] [x]
+            Identifier(y) [43-44] [y]
+            Identifier(z) [45-46] [z]
+      Alias [48-51] [bar]
+        Identifier(bar) [48-51] [bar]
+  IndexItemList [52-57] [(bar)]
+    OrderingExpression(ASC) [53-56] [bar]
+      PathExpression [53-56] [bar]
+        Identifier(bar) [53-56] [bar]
+  OptionsList [65-74] [(x=1,y=2)]
+    OptionsEntry [66-69] [x=1]
+      Identifier(x) [66-67] [x]
+      IntLiteral(1) [68-69] [1]
+    OptionsEntry [70-73] [y=2]
+      Identifier(y) [70-71] [y]
+      IntLiteral(2) [72-73] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(x.y.z) AS bar
+(bar)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying a single UNNEST expression on a concatenated array.
+create index a.b.i1 on c.d.t1 foo UNNEST(array_concat([1], [2])) bar (bar)
+options(x=1,y=2);
+--
+CreateIndexStatement [0-91] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-68] [UNNEST(array_conc...[2])) bar]
+    UnnestExpressionWithOptAliasAndOffset [34-68] [UNNEST(array_conc...[2])) bar]
+      UnnestExpression [34-64] [UNNEST(array_concat([1], [2]))]
+        ExpressionWithOptAlias [41-63] [array_concat([1], [2])]
+          FunctionCall [41-63] [array_concat([1], [2])]
+            PathExpression [41-53] [array_concat]
+              Identifier(array_concat) [41-53] [array_concat]
+            ArrayConstructor [54-57] [[1]]
+              IntLiteral(1) [55-56] [1]
+            ArrayConstructor [59-62] [[2]]
+              IntLiteral(2) [60-61] [2]
+      Alias [65-68] [bar]
+        Identifier(bar) [65-68] [bar]
+  IndexItemList [69-74] [(bar)]
+    OrderingExpression(ASC) [70-73] [bar]
+      PathExpression [70-73] [bar]
+        Identifier(bar) [70-73] [bar]
+  OptionsList [82-91] [(x=1,y=2)]
+    OptionsEntry [83-86] [x=1]
+      Identifier(x) [83-84] [x]
+      IntLiteral(1) [85-86] [1]
+    OptionsEntry [87-90] [y=2]
+      Identifier(y) [87-88] [y]
+      IntLiteral(2) [89-90] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(array_concat(ARRAY[1], ARRAY[2])) AS bar
+(bar)
+OPTIONS(x = 1, y = 2)
+==
+
+# Specifying two UNNEST expressions.
+create index a.b.i1 on c.d.t1 foo UNNEST(a) AS bar1 WITH OFFSET AS offset1
+UNNEST(b) AS bar2 WITH OFFSET AS offset2 (a, b, c) options(x=1,y=2);
+--
+CreateIndexStatement [0-142] [create index...ptions(x=1,y=2)]
+  PathExpression [13-19] [a.b.i1]
+    Identifier(a) [13-14] [a]
+    Identifier(b) [15-16] [b]
+    Identifier(i1) [17-19] [i1]
+  PathExpression [23-29] [c.d.t1]
+    Identifier(c) [23-24] [c]
+    Identifier(d) [25-26] [d]
+    Identifier(t1) [27-29] [t1]
+  Alias [30-33] [foo]
+    Identifier(foo) [30-33] [foo]
+  IndexUnnestExpressionList [34-115] [UNNEST(a)...AS offset2]
+    UnnestExpressionWithOptAliasAndOffset [34-74] [UNNEST(a)...AS offset1]
+      UnnestExpression [34-43] [UNNEST(a)]
+        ExpressionWithOptAlias [41-42] [a]
+          PathExpression [41-42] [a]
+            Identifier(a) [41-42] [a]
+      Alias [44-51] [AS bar1]
+        Identifier(bar1) [47-51] [bar1]
+      WithOffset [52-74] [WITH OFFSET AS offset1]
+        Alias [64-74] [AS offset1]
+          Identifier(offset1) [67-74] [offset1]
+    UnnestExpressionWithOptAliasAndOffset [75-115] [UNNEST(b)...AS offset2]
+      UnnestExpression [75-84] [UNNEST(b)]
+        ExpressionWithOptAlias [82-83] [b]
+          PathExpression [82-83] [b]
+            Identifier(b) [82-83] [b]
+      Alias [85-92] [AS bar2]
+        Identifier(bar2) [88-92] [bar2]
+      WithOffset [93-115] [WITH OFFSET AS offset2]
+        Alias [105-115] [AS offset2]
+          Identifier(offset2) [108-115] [offset2]
+  IndexItemList [116-125] [(a, b, c)]
+    OrderingExpression(ASC) [117-118] [a]
+      PathExpression [117-118] [a]
+        Identifier(a) [117-118] [a]
+    OrderingExpression(ASC) [120-121] [b]
+      PathExpression [120-121] [b]
+        Identifier(b) [120-121] [b]
+    OrderingExpression(ASC) [123-124] [c]
+      PathExpression [123-124] [c]
+        Identifier(c) [123-124] [c]
+  OptionsList [133-142] [(x=1,y=2)]
+    OptionsEntry [134-137] [x=1]
+      Identifier(x) [134-135] [x]
+      IntLiteral(1) [136-137] [1]
+    OptionsEntry [138-141] [y=2]
+      Identifier(y) [138-139] [y]
+      IntLiteral(2) [140-141] [2]
+--
+CREATE INDEX a.b.i1 ON c.d.t1 AS foo
+UNNEST(a) AS bar1 WITH OFFSET AS offset1 UNNEST(b) AS bar2 WITH OFFSET AS offset2
+(a, b, c)
+OPTIONS(x = 1, y = 2)
+
+==
+
+# Create index with storing clause and one column.
+create index i1 on t1(a) STORING (b) {{|options(x=1,y=2)}};
+--
+ALTERNATION GROUP: <empty>
+--
+CreateIndexStatement [0-36] [create index...STORING (b)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-24] [(a)]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+  IndexStoringExpressionList [33-36] [(b)]
+    PathExpression [34-35] [b]
+      Identifier(b) [34-35] [b]
+
+--
+CREATE INDEX i1 ON t1(a)
+STORING(b)
+--
+ALTERNATION GROUP: options(x=1,y=2)
+--
+CreateIndexStatement [0-53] [create index...ptions(x=1,y=2)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-24] [(a)]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+  IndexStoringExpressionList [33-36] [(b)]
+    PathExpression [34-35] [b]
+      Identifier(b) [34-35] [b]
+  OptionsList [44-53] [(x=1,y=2)]
+    OptionsEntry [45-48] [x=1]
+      Identifier(x) [45-46] [x]
+      IntLiteral(1) [47-48] [1]
+    OptionsEntry [49-52] [y=2]
+      Identifier(y) [49-50] [y]
+      IntLiteral(2) [51-52] [2]
+--
+CREATE INDEX i1 ON t1(a)
+STORING(b)
+OPTIONS(x = 1, y = 2)
+
+==
+
+# Create index with storing clause and two columns.
+create index i1 on t1(a) STORING (b, c) {{|options(x=1,y=2)}};
+--
+
+ALTERNATION GROUP: <empty>
+--
+CreateIndexStatement [0-39] [create index...STORING (b, c)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-24] [(a)]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+  IndexStoringExpressionList [33-39] [(b, c)]
+    PathExpression [34-35] [b]
+      Identifier(b) [34-35] [b]
+    PathExpression [37-38] [c]
+      Identifier(c) [37-38] [c]
+--
+CREATE INDEX i1 ON t1(a)
+STORING(b, c)
+--
+ALTERNATION GROUP: options(x=1,y=2)
+--
+CreateIndexStatement [0-56] [create index...ptions(x=1,y=2)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-24] [(a)]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+  IndexStoringExpressionList [33-39] [(b, c)]
+    PathExpression [34-35] [b]
+      Identifier(b) [34-35] [b]
+    PathExpression [37-38] [c]
+      Identifier(c) [37-38] [c]
+  OptionsList [47-56] [(x=1,y=2)]
+    OptionsEntry [48-51] [x=1]
+      Identifier(x) [48-49] [x]
+      IntLiteral(1) [50-51] [1]
+    OptionsEntry [52-55] [y=2]
+      Identifier(y) [52-53] [y]
+      IntLiteral(2) [54-55] [2]
+--
+CREATE INDEX i1 ON t1(a)
+STORING(b, c)
+OPTIONS(x = 1, y = 2)
+
+==
+
+# Create index with storing clause on a dotted identifier.
+create index i1 on t1(a) STORING (b1.b2);
+--
+
+CreateIndexStatement [0-40] [create index...STORING (b1.b2)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-24] [(a)]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+  IndexStoringExpressionList [33-40] [(b1.b2)]
+    PathExpression [34-39] [b1.b2]
+      Identifier(b1) [34-36] [b1]
+      Identifier(b2) [37-39] [b2]
+--
+CREATE INDEX i1 ON t1(a)
+STORING(b1.b2)
+==
+
+# Create index with mathematical expression on the storing clause.
+create index i1 on t1(a) STORING (b+1);
+--
+
+CreateIndexStatement [0-38] [create index...STORING (b+1)]
+  PathExpression [13-15] [i1]
+    Identifier(i1) [13-15] [i1]
+  PathExpression [19-21] [t1]
+    Identifier(t1) [19-21] [t1]
+  IndexItemList [21-24] [(a)]
+    OrderingExpression(ASC) [22-23] [a]
+      PathExpression [22-23] [a]
+        Identifier(a) [22-23] [a]
+  IndexStoringExpressionList [33-38] [(b+1)]
+    BinaryExpression(+) [34-37] [b+1]
+      PathExpression [34-35] [b]
+        Identifier(b) [34-35] [b]
+      IntLiteral(1) [36-37] [1]
+--
+CREATE INDEX i1 ON t1(a)
+STORING(b + 1)
+==
+
+# Empty storing clause.
+create index SimpleTypesStoringZeroValues on SimpleTypes(int32) STORING ();
+--
+ERROR: Syntax error: Unexpected ")" [at 1:74]
+create index SimpleTypesStoringZeroValues on SimpleTypes(int32) STORING ();
+                                                                         ^
+==
+
+CREATE SEARCH INDEX i1 ON t1 (`ALL COLUMNS`) OPTIONS();
+--
+
+CreateIndexStatement(SEARCH) [0-54] [CREATE SEARCH...OPTIONS()]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [29-44] [(`ALL COLUMNS`)]
+    OrderingExpression(ASC) [30-43] [`ALL COLUMNS`]
+      PathExpression [30-43] [`ALL COLUMNS`]
+        Identifier(`ALL COLUMNS`) [30-43] [`ALL COLUMNS`]
+  OptionsList [52-54] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(`ALL COLUMNS`)
+OPTIONS()
+==
+
+CREATE SEARCH INDEX i1 ON t1 (ALL COLUMNS) OPTIONS();
+--
+
+CreateIndexStatement(SEARCH) [0-52] [CREATE SEARCH...OPTIONS()]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [29-42] [(ALL COLUMNS)]
+    OrderingExpression(ASC) [29-42] [(ALL COLUMNS)]
+      IndexAllColumns(ALL COLUMNS) [29-42] [(ALL COLUMNS)]
+  OptionsList [50-52] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(ALL COLUMNS)
+OPTIONS()
+==
+
+CREATE SEARCH INDEX i1 ON t1 ( all columns ) OPTIONS (key=value);
+--
+
+CreateIndexStatement(SEARCH) [0-64] [CREATE SEARCH...key=value)]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [29-44] [( all columns )]
+    OrderingExpression(ASC) [29-44] [( all columns )]
+      IndexAllColumns(ALL COLUMNS) [29-44] [( all columns )]
+  OptionsList [53-64] [(key=value)]
+    OptionsEntry [54-63] [key=value]
+      Identifier(key) [54-57] [key]
+      PathExpression [58-63] [value]
+        Identifier(value) [58-63] [value]
+--
+CREATE SEARCH INDEX i1 ON t1(ALL COLUMNS)
+OPTIONS(key = value)
+==
+
+CREATE SEARCH INDEX i1 ON t1 (ALL, COLUMNS) OPTIONS();
+--
+
+ERROR: Syntax error: Expected keyword COLUMNS but got "," [at 1:34]
+CREATE SEARCH INDEX i1 ON t1 (ALL, COLUMNS) OPTIONS();
+                                 ^
+==
+
+CREATE SEARCH INDEX i1 ON t1 ('ALL', COLUMNS) OPTIONS();
+--
+
+CreateIndexStatement(SEARCH) [0-55] [CREATE SEARCH...OPTIONS()]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [29-45] [('ALL', COLUMNS)]
+    OrderingExpression(ASC) [30-35] ['ALL']
+      StringLiteral [30-35] ['ALL']
+        StringLiteralComponent('ALL') [30-35] ['ALL']
+    OrderingExpression(ASC) [37-44] [COLUMNS]
+      PathExpression [37-44] [COLUMNS]
+        Identifier(COLUMNS) [37-44] [COLUMNS]
+  OptionsList [53-55] [()]
+--
+CREATE SEARCH INDEX i1 ON t1('ALL', COLUMNS)
+OPTIONS()
+==
+
+# Create a search index use ALL COLUMNS and other column keys should fail.
+create search index i1 on ComplexTypes (ALL COLUMNS,TestStruct);
+--
+ERROR: Syntax error: Expected ")" or keyword WITH but got "," [at 1:52]
+create search index i1 on ComplexTypes (ALL COLUMNS,TestStruct);
+                                                   ^
+==
+
+# Create a search index use a column and ALL COLUMNS together should fail.
+create search index i1 on ComplexTypes (TestStruct, ALL COLUMNS);
+--
+ERROR: Syntax error: Unexpected keyword ALL [at 1:53]
+create search index i1 on ComplexTypes (TestStruct, ALL COLUMNS);
+                                                    ^
+==
+
+CREATE SEARCH INDEX i1 ON t1 (ALL COLUMNS EXCEPT (a)) OPTIONS();
+--
+ERROR: Syntax error: Expected ")" or keyword WITH but got keyword EXCEPT [at 1:43]
+CREATE SEARCH INDEX i1 ON t1 (ALL COLUMNS EXCEPT (a)) OPTIONS();
+                                          ^
+==
+
+CREATE SEARCH INDEX i1 ON t1 (*) OPTIONS();
+--
+ERROR: Syntax error: Unexpected "*" [at 1:31]
+CREATE SEARCH INDEX i1 ON t1 (*) OPTIONS();
+                              ^
+==
+
+CREATE SEARCH INDEX i1 ON t1 (* EXCEPT a) OPTIONS();
+--
+ERROR: Syntax error: Unexpected "*" [at 1:31]
+CREATE SEARCH INDEX i1 ON t1 (* EXCEPT a) OPTIONS();
+                              ^
+
+==
+
+# Specify both VECTOR and SEARCH
+create {{|or replace}} search vector index on t1(a)
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected keyword INDEX but got keyword VECTOR [at 1:16]
+create  search vector index on t1(a)
+               ^
+--
+ALTERNATION GROUP: or replace
+--
+ERROR: Syntax error: Expected keyword INDEX but got keyword VECTOR [at 1:26]
+create or replace search vector index on t1(a)
+                         ^
+==
+
+# Specify both VECTOR and SEARCH
+create {{|or replace}} vector search index on i1 on t1(a);
+--
+ALTERNATION GROUP: <empty>
+--
+ERROR: Syntax error: Expected keyword INDEX but got keyword SEARCH [at 1:16]
+create  vector search index on i1 on t1(a);
+               ^
+--
+ALTERNATION GROUP: or replace
+--
+ERROR: Syntax error: Expected keyword INDEX but got keyword SEARCH [at 1:26]
+create or replace vector search index on i1 on t1(a);
+                         ^
+
+==
+
+# Partition by error, keyword by is missing in the partition by clause.
+create vector index i1 on t1(a) partition a options()
+--
+ERROR: Syntax error: Expected keyword BY but got identifier "a" [at 1:43]
+create vector index i1 on t1(a) partition a options()
+                                          ^
+
+==
+
+# Partition by error, hint is unsupported in the partition by clause.
+create search index i1 on t1(a) partition @{hint_name=5} by a options()
+--
+ERROR: Syntax error: Expected keyword BY but got "@" [at 1:43]
+create search index i1 on t1(a) partition @{hint_name=5} by a options()
+                                          ^
+
+==
+
+# Partition by error, expression missing in the partition by clause.
+create vector index i1 on t1(a) storing (s) partition by
+--
+ERROR: Syntax error: Unexpected end of statement [at 1:57]
+create vector index i1 on t1(a) storing (s) partition by
+                                                        ^
+
+==
+
+create search index i1 on t1(a) storing (s) partition by a options()
+--
+CreateIndexStatement(SEARCH) [0-68] [create search...options()]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-31] [(a)]
+    OrderingExpression(ASC) [29-30] [a]
+      PathExpression [29-30] [a]
+        Identifier(a) [29-30] [a]
+  IndexStoringExpressionList [40-43] [(s)]
+    PathExpression [41-42] [s]
+      Identifier(s) [41-42] [s]
+  PartitionBy [44-58] [partition by a]
+    PathExpression [57-58] [a]
+      Identifier(a) [57-58] [a]
+  OptionsList [66-68] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(a)
+STORING(s)
+PARTITION BY a
+OPTIONS()
+
+==
+
+create vector index i1 on t1(a) partition by p1, p2 options()
+--
+CreateIndexStatement(VECTOR) [0-61] [create vector...options()]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-31] [(a)]
+    OrderingExpression(ASC) [29-30] [a]
+      PathExpression [29-30] [a]
+        Identifier(a) [29-30] [a]
+  PartitionBy [32-51] [partition by p1, p2]
+    PathExpression [45-47] [p1]
+      Identifier(p1) [45-47] [p1]
+    PathExpression [49-51] [p2]
+      Identifier(p2) [49-51] [p2]
+  OptionsList [59-61] [()]
+--
+CREATE VECTOR INDEX i1 ON t1(a)
+PARTITION BY p1, p2
+OPTIONS()
+
+==
+
+create search index i1 on t1(a) partition by DATE_TRUNC(_PARTITIONTIME, MONTH) options()
+--
+CreateIndexStatement(SEARCH) [0-88] [create search...options()]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-31] [(a)]
+    OrderingExpression(ASC) [29-30] [a]
+      PathExpression [29-30] [a]
+        Identifier(a) [29-30] [a]
+  PartitionBy [32-78] [partition...TITIONTIME, MONTH)]
+    FunctionCall [45-78] [DATE_TRUNC...ITIONTIME, MONTH)]
+      PathExpression [45-55] [DATE_TRUNC]
+        Identifier(DATE_TRUNC) [45-55] [DATE_TRUNC]
+      PathExpression [56-70] [_PARTITIONTIME]
+        Identifier(_PARTITIONTIME) [56-70] [_PARTITIONTIME]
+      PathExpression [72-77] [MONTH]
+        Identifier(MONTH) [72-77] [MONTH]
+  OptionsList [86-88] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(a)
+PARTITION BY DATE_TRUNC(_PARTITIONTIME, MONTH)
+OPTIONS()
+
+==
+
+# Specify key only in OPTIONS is invalid.
+create search index i1 on t1(a options(k))
+--
+ERROR: Syntax error: Expected "=" but got ")" [at 1:41]
+create search index i1 on t1(a options(k))
+                                        ^
+
+==
+
+# Specify value only in OPTIONS is invalid
+create search index i1 on t1(a options(=v))
+--
+ERROR: Syntax error: Expected ")" but got "=" [at 1:40]
+create search index i1 on t1(a options(=v))
+                                       ^
+
+==
+
+# Specify empty OPTIONS.
+create search index i1 on t1(a options())
+--
+CreateIndexStatement(SEARCH) [0-41] [create search...options())]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-41] [(a options())]
+    OrderingExpression(ASC) [29-40] [a options()]
+      PathExpression [29-30] [a]
+        Identifier(a) [29-30] [a]
+      OptionsList [38-40] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(a OPTIONS())
+
+==
+
+# Specify per-column options
+create search index i1 on t1(a options(k1=v1))
+--
+CreateIndexStatement(SEARCH) [0-46] [create search...ptions(k1=v1))]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-46] [(a options(k1=v1))]
+    OrderingExpression(ASC) [29-45] [a options(k1=v1)]
+      PathExpression [29-30] [a]
+        Identifier(a) [29-30] [a]
+      OptionsList [38-45] [(k1=v1)]
+        OptionsEntry [39-44] [k1=v1]
+          Identifier(k1) [39-41] [k1]
+          PathExpression [42-44] [v1]
+            Identifier(v1) [42-44] [v1]
+--
+CREATE SEARCH INDEX i1 ON t1(a OPTIONS(k1 = v1))
+
+==
+
+# Specify multiple per-column options
+create search index i1 on t1(c1 options(k1=v1), c2 options({{k2=v2, k3=v3|}}))
+--
+ALTERNATION GROUP: k2=v2, k3=v3
+--
+CreateIndexStatement(SEARCH) [0-73] [create search...v2, k3=v3))]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-73] [(c1 options...v2, k3=v3))]
+    OrderingExpression(ASC) [29-46] [c1 options(k1=v1)]
+      PathExpression [29-31] [c1]
+        Identifier(c1) [29-31] [c1]
+      OptionsList [39-46] [(k1=v1)]
+        OptionsEntry [40-45] [k1=v1]
+          Identifier(k1) [40-42] [k1]
+          PathExpression [43-45] [v1]
+            Identifier(v1) [43-45] [v1]
+    OrderingExpression(ASC) [48-72] [c2 options(k2=v2, k3=v3)]
+      PathExpression [48-50] [c2]
+        Identifier(c2) [48-50] [c2]
+      OptionsList [58-72] [(k2=v2, k3=v3)]
+        OptionsEntry [59-64] [k2=v2]
+          Identifier(k2) [59-61] [k2]
+          PathExpression [62-64] [v2]
+            Identifier(v2) [62-64] [v2]
+        OptionsEntry [66-71] [k3=v3]
+          Identifier(k3) [66-68] [k3]
+          PathExpression [69-71] [v3]
+            Identifier(v3) [69-71] [v3]
+
+--
+CREATE SEARCH INDEX i1 ON t1(c1 OPTIONS(k1 = v1), c2 OPTIONS(k2 = v2, k3 = v3))
+--
+ALTERNATION GROUP: <empty>
+--
+CreateIndexStatement(SEARCH) [0-61] [create search...options())]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-61] [(c1 options...options())]
+    OrderingExpression(ASC) [29-46] [c1 options(k1=v1)]
+      PathExpression [29-31] [c1]
+        Identifier(c1) [29-31] [c1]
+      OptionsList [39-46] [(k1=v1)]
+        OptionsEntry [40-45] [k1=v1]
+          Identifier(k1) [40-42] [k1]
+          PathExpression [43-45] [v1]
+            Identifier(v1) [43-45] [v1]
+    OrderingExpression(ASC) [48-60] [c2 options()]
+      PathExpression [48-50] [c2]
+        Identifier(c2) [48-50] [c2]
+      OptionsList [58-60] [()]
+--
+CREATE SEARCH INDEX i1 ON t1(c1 OPTIONS(k1 = v1), c2 OPTIONS())
+
+==
+
+# Specify multiple per-column options with overlapping option keys
+create search index i1 on t1(c1 options(k1=v1), c2 options(k1=v1, k2=v2))
+--
+CreateIndexStatement(SEARCH) [0-73] [create search...v1, k2=v2))]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-73] [(c1 options...v1, k2=v2))]
+    OrderingExpression(ASC) [29-46] [c1 options(k1=v1)]
+      PathExpression [29-31] [c1]
+        Identifier(c1) [29-31] [c1]
+      OptionsList [39-46] [(k1=v1)]
+        OptionsEntry [40-45] [k1=v1]
+          Identifier(k1) [40-42] [k1]
+          PathExpression [43-45] [v1]
+            Identifier(v1) [43-45] [v1]
+    OrderingExpression(ASC) [48-72] [c2 options(k1=v1, k2=v2)]
+      PathExpression [48-50] [c2]
+        Identifier(c2) [48-50] [c2]
+      OptionsList [58-72] [(k1=v1, k2=v2)]
+        OptionsEntry [59-64] [k1=v1]
+          Identifier(k1) [59-61] [k1]
+          PathExpression [62-64] [v1]
+            Identifier(v1) [62-64] [v1]
+        OptionsEntry [66-71] [k2=v2]
+          Identifier(k2) [66-68] [k2]
+          PathExpression [69-71] [v2]
+            Identifier(v2) [69-71] [v2]
+--
+CREATE SEARCH INDEX i1 ON t1(c1 OPTIONS(k1 = v1), c2 OPTIONS(k1 = v1, k2 = v2))
+
+==
+
+# Specify empty list of columns inside WITH COLUMN OPTIONS
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS ())
+--
+ERROR: Syntax error: Unexpected ")" [at 1:64]
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS ())
+                                                               ^
+
+==
+
+# Specify key only ordering column option in WITH COLUMN OPTIONS is invalid.
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS (c1 OPTIONS(k)))
+--
+ERROR: Syntax error: Expected "=" but got ")" [at 1:76]
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS (c1 OPTIONS(k)))
+                                                                           ^
+
+==
+
+# Specify value only in WITH COLUMN OPTIONS is invalid.
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS (c1 OPTIONS(=v)))
+--
+ERROR: Syntax error: Expected ")" but got "=" [at 1:75]
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS (c1 OPTIONS(=v)))
+                                                                          ^
+
+==
+
+# Specify empty list of OPTIONS for a column in WITH COLUMN OPTIONS.
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS (c1 OPTIONS()))
+--
+CreateIndexStatement(SEARCH) [0-77] [create search...OPTIONS()))]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [29-77] [(ALL COLUMNS...OPTIONS()))]
+    OrderingExpression(ASC) [29-77] [(ALL COLUMNS...OPTIONS()))]
+      IndexAllColumns(ALL COLUMNS) [29-77] [(ALL COLUMNS...OPTIONS()))]
+        IndexItemList [62-75] [(c1 OPTIONS()]
+          OrderingExpression(ASC) [63-75] [c1 OPTIONS()]
+            PathExpression [63-65] [c1]
+              Identifier(c1) [63-65] [c1]
+            OptionsList [73-75] [()]
+
+--
+CREATE SEARCH INDEX i1 ON t1(ALL COLUMNS WITH COLUMN OPTIONS(c1 OPTIONS()))
+
+==
+
+# Specify WITH COLUMN OPTIONS with ALL COLUMNS
+create search index i1 on t1 (ALL COLUMNS WITH COLUMN OPTIONS (c1 OPTIONS (k1=v1)))
+--
+CreateIndexStatement(SEARCH) [0-83] [create search...(k1=v1)))]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [29-83] [(ALL COLUMNS...(k1=v1)))]
+    OrderingExpression(ASC) [29-83] [(ALL COLUMNS...(k1=v1)))]
+      IndexAllColumns(ALL COLUMNS) [29-83] [(ALL COLUMNS...(k1=v1)))]
+        IndexItemList [62-81] [(c1 OPTIONS (k1=v1)]
+          OrderingExpression(ASC) [63-81] [c1 OPTIONS (k1=v1)]
+            PathExpression [63-65] [c1]
+              Identifier(c1) [63-65] [c1]
+            OptionsList [74-81] [(k1=v1)]
+              OptionsEntry [75-80] [k1=v1]
+                Identifier(k1) [75-77] [k1]
+                PathExpression [78-80] [v1]
+                  Identifier(v1) [78-80] [v1]
+--
+CREATE SEARCH INDEX i1 ON t1(ALL COLUMNS WITH COLUMN OPTIONS(c1 OPTIONS(k1 = v1)))
+
+==
+
+# Specify multiple per-column options with ALL COLUMNS
+create search index i1 on t1(ALL COLUMNS WITH COLUMN OPTIONS (c1 options(k1=v1), c2 options(k2=v2, k3=v3)))
+--
+CreateIndexStatement(SEARCH) [0-107] [create search..., k3=v3)))]
+  PathExpression [20-22] [i1]
+    Identifier(i1) [20-22] [i1]
+  PathExpression [26-28] [t1]
+    Identifier(t1) [26-28] [t1]
+  IndexItemList [28-107] [(ALL COLUMNS..., k3=v3)))]
+    OrderingExpression(ASC) [28-107] [(ALL COLUMNS..., k3=v3)))]
+      IndexAllColumns(ALL COLUMNS) [28-107] [(ALL COLUMNS..., k3=v3)))]
+        IndexItemList [61-105] [(c1 options...v2, k3=v3)]
+          OrderingExpression(ASC) [62-79] [c1 options(k1=v1)]
+            PathExpression [62-64] [c1]
+              Identifier(c1) [62-64] [c1]
+            OptionsList [72-79] [(k1=v1)]
+              OptionsEntry [73-78] [k1=v1]
+                Identifier(k1) [73-75] [k1]
+                PathExpression [76-78] [v1]
+                  Identifier(v1) [76-78] [v1]
+          OrderingExpression(ASC) [81-105] [c2 options(k2=v2, k3=v3)]
+            PathExpression [81-83] [c2]
+              Identifier(c2) [81-83] [c2]
+            OptionsList [91-105] [(k2=v2, k3=v3)]
+              OptionsEntry [92-97] [k2=v2]
+                Identifier(k2) [92-94] [k2]
+                PathExpression [95-97] [v2]
+                  Identifier(v2) [95-97] [v2]
+              OptionsEntry [99-104] [k3=v3]
+                Identifier(k3) [99-101] [k3]
+                PathExpression [102-104] [v3]
+                  Identifier(v3) [102-104] [v3]
+--
+CREATE SEARCH INDEX i1 ON t1(ALL COLUMNS WITH COLUMN OPTIONS(c1 OPTIONS(k1 = v1), c2 OPTIONS(k2 = v2,
+  k3 = v3)))
