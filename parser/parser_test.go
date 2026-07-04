@@ -23,7 +23,15 @@ var checkParse = flag.Bool("check-parse", false, "Run parse_todo cases and updat
 // shape as the expected section: either the parse tree debug string or an
 // "ERROR: ..." message.
 func runCase(c *testfile.Case) string {
-	stmt, err := parser.ParseStatement(c.SQL)
+	var opts parser.Options
+	// The last language_features option wins: case options follow inherited
+	// [default ...] options. Without one, all features stay enabled.
+	for _, opt := range c.Options {
+		if spec, ok := strings.CutPrefix(opt, "language_features="); ok {
+			opts.Features = parser.ParseFeatureSet(spec)
+		}
+	}
+	stmt, err := parser.ParseStatementWithOptions(c.SQL, opts)
 	if err != nil {
 		var perr *parser.Error
 		if errors.As(err, &perr) {

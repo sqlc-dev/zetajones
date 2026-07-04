@@ -124,9 +124,81 @@ func Parse(ctx context.Context, r io.Reader) ([]ast.Statement, error) {
 	return []ast.Statement{stmt}, nil
 }
 
+// Feature names a GoogleSQL language feature that gates optional syntax; see
+// LanguageFeature in googlesql/public/options.proto. Feature names omit the
+// FEATURE_ prefix, matching the language_features option used by the parser
+// test suite.
+type Feature string
+
+// FeatureWithGroupRows gates "WITH name() AS GROUP ROWS" entries in WITH
+// clauses (FEATURE_WITH_GROUP_ROWS).
+const FeatureWithGroupRows Feature = "WITH_GROUP_ROWS"
+
+// featureInMaximum records whether each gated feature is enabled by
+// language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
+// development; see LanguageOptions::EnableMaximumLanguageFeatures and the
+// language_feature_options annotations in googlesql/public/options.proto.
+var featureInMaximum = map[Feature]bool{
+	FeatureWithGroupRows: false, // in_development
+}
+
+// FeatureSet is a set of enabled language features. The zero value has no
+// features enabled; a nil *FeatureSet enables every feature.
+type FeatureSet struct {
+	maximum   bool
+	overrides map[Feature]bool
+}
+
+// ParseFeatureSet parses a language_features test option value such as
+// "MAXIMUM,+WITH_GROUP_ROWS": a comma-separated list of feature names to
+// enable, where MAXIMUM enables the maximum supported features and +NAME /
+// -NAME add or remove a feature relative to that.
+func ParseFeatureSet(spec string) *FeatureSet {
+	fs := &FeatureSet{overrides: map[Feature]bool{}}
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		switch {
+		case part == "":
+		case strings.EqualFold(part, "MAXIMUM"):
+			fs.maximum = true
+		case part[0] == '+':
+			fs.overrides[Feature(part[1:])] = true
+		case part[0] == '-':
+			fs.overrides[Feature(part[1:])] = false
+		default:
+			fs.overrides[Feature(part)] = true
+		}
+	}
+	return fs
+}
+
+// Enabled reports whether the feature is enabled. A nil FeatureSet enables
+// every feature.
+func (f *FeatureSet) Enabled(feat Feature) bool {
+	if f == nil {
+		return true
+	}
+	if v, ok := f.overrides[feat]; ok {
+		return v
+	}
+	return f.maximum && featureInMaximum[feat]
+}
+
+// Options controls optional parser behavior.
+type Options struct {
+	// Features is the set of enabled language features; nil enables all.
+	Features *FeatureSet
+}
+
 // ParseStatement parses a single SQL statement, allowing an optional
-// trailing semicolon.
+// trailing semicolon. All language features are enabled.
 func ParseStatement(sql string) (ast.Statement, error) {
+	return ParseStatementWithOptions(sql, Options{})
+}
+
+// ParseStatementWithOptions parses a single SQL statement, allowing an
+// optional trailing semicolon.
+func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) {
 	toks, err := lexer.Lex(sql)
 	if err != nil {
 		var lerr *lexer.Error
@@ -135,7 +207,7 @@ func ParseStatement(sql string) (ast.Statement, error) {
 		}
 		return nil, err
 	}
-	p := &parser{sql: sql, toks: toks}
+	p := &parser{sql: sql, toks: toks, features: opts.Features}
 	stmt, err := p.parseStatement()
 	if err != nil {
 		return nil, err
@@ -150,9 +222,10 @@ func ParseStatement(sql string) (ast.Statement, error) {
 }
 
 type parser struct {
-	sql  string
-	toks []token.Token
-	pos  int
+	sql      string
+	toks     []token.Token
+	pos      int
+	features *FeatureSet
 }
 
 func (p *parser) peek() token.Token { return p.toks[p.pos] }
@@ -687,6 +760,32 @@ func (p *parser) parseWithClauseEntry() (*ast.WithClauseEntry, error) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	ident := p.parseIdentifierToken(p.advance())
+	if p.peek().Kind == token.LPAREN {
+		// "identifier ( ) AS GROUP ROWS"; see the second alternative of
+		// with_clause_entry in googlesql.tm.
+		p.advance() // (
+		if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("AS"); err != nil {
+			return nil, err
+		}
+		groupTok, err := p.expectKeyword("GROUP")
+		if err != nil {
+			return nil, err
+		}
+		rowsTok, err := p.expectKeyword("ROWS")
+		if err != nil {
+			return nil, err
+		}
+		if !p.features.Enabled(FeatureWithGroupRows) {
+			// No "Syntax error: " prefix; see with_clause_entry in
+			// googlesql.tm.
+			return nil, p.errorf(groupTok.Pos, "GROUP ROWS is not supported.")
+		}
+		agr := &ast.AliasedGroupRows{Span: span(ident.Pos(), rowsTok.End), Identifier: ident}
+		return &ast.WithClauseEntry{Span: agr.Span, AliasedGroupRows: agr}, nil
+	}
 	if _, err := p.expectKeyword("AS"); err != nil {
 		return nil, err
 	}
@@ -1275,7 +1374,7 @@ func (p *parser) parseTableSubquery() (*ast.TableSubquery, error) {
 	return node, nil
 }
 
-func (p *parser) parseTablePathExpression() (*ast.TablePathExpression, error) {
+func (p *parser) parseTablePathExpression() (ast.Node, error) {
 	var table *ast.TablePathExpression
 	if isKeyword(p.peek(), "UNNEST") {
 		unnest, err := p.parseUnnestExpression()
@@ -1287,6 +1386,9 @@ func (p *parser) parseTablePathExpression() (*ast.TablePathExpression, error) {
 		path, err := p.parsePathExpression()
 		if err != nil {
 			return nil, err
+		}
+		if p.peek().Kind == token.LPAREN {
+			return p.parseTVFRest(path)
 		}
 		table = &ast.TablePathExpression{Span: span(path.Pos(), path.End()), Path: path}
 	}
@@ -1315,6 +1417,43 @@ func (p *parser) parseTablePathExpression() (*ast.TablePathExpression, error) {
 		table.Stop = offset.End()
 	}
 	return table, nil
+}
+
+// parseTVFRest parses the argument list and optional alias of a
+// table-valued function call in a FROM clause, after the function's path
+// expression has already been parsed; see tvf in googlesql.tm. The opening
+// parenthesis is the next token.
+func (p *parser) parseTVFRest(path *ast.PathExpression) (*ast.TVF, error) {
+	p.advance() // (
+	tvf := &ast.TVF{Span: span(path.Pos(), 0), Name: path}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			arg := &ast.TVFArgument{Span: span(expr.Pos(), expr.End()), Expr: expr}
+			tvf.Args = append(tvf.Args, arg)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance() // ,
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	tvf.Stop = rparen.End
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		tvf.Alias = alias
+		tvf.Stop = alias.End()
+	}
+	return tvf, nil
 }
 
 // parseUnnestExpression parses "UNNEST ( expression [AS alias] [, ...] )";

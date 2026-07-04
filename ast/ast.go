@@ -99,15 +99,29 @@ func (n *WithClause) Children() []Node {
 	return out
 }
 
-// WithClauseEntry is a single entry in a WITH clause, wrapping an aliased
-// query; see ASTWithClauseEntry in googlesql/parser/parse_tree.h.
+// WithClauseEntry is a single entry in a WITH clause, wrapping either an
+// aliased query or an aliased GROUP ROWS entry; see ASTWithClauseEntry in
+// googlesql/parser/parse_tree.h. Exactly one of AliasedQuery and
+// AliasedGroupRows is set.
 type WithClauseEntry struct {
 	Span
-	AliasedQuery *AliasedQuery `json:"aliased_query"`
+	AliasedQuery     *AliasedQuery     `json:"aliased_query,omitempty"`
+	AliasedGroupRows *AliasedGroupRows `json:"aliased_group_rows,omitempty"`
 }
 
 func (n *WithClauseEntry) Children() []Node {
-	return children(n.AliasedQuery)
+	return children(n.AliasedQuery, n.AliasedGroupRows)
+}
+
+// AliasedGroupRows is "name() AS GROUP ROWS" in a WITH clause; see
+// ASTAliasedGroupRows in googlesql/parser/parse_tree.h.
+type AliasedGroupRows struct {
+	Span
+	Identifier *Identifier `json:"identifier"`
+}
+
+func (n *AliasedGroupRows) Children() []Node {
+	return children(n.Identifier)
 }
 
 // AliasedQuery is "name AS ( query )"; see ASTAliasedQuery in
@@ -225,6 +239,35 @@ type TableSubquery struct {
 
 func (n *TableSubquery) Children() []Node {
 	return children(n.Query, n.Alias)
+}
+
+// TVF is a call to a table-valued function in a FROM clause, e.g.
+// "FROM tvf(arg1, arg2)"; see ASTTVF in googlesql/parser/parse_tree.h. The
+// span includes the closing parenthesis and the alias when present.
+type TVF struct {
+	Span
+	Name  *PathExpression `json:"name"`
+	Args  []*TVFArgument  `json:"args,omitempty"`
+	Alias *Alias          `json:"alias,omitempty"`
+}
+
+func (n *TVF) Children() []Node {
+	out := children(n.Name)
+	for _, a := range n.Args {
+		out = append(out, a)
+	}
+	return append(out, children(n.Alias)...)
+}
+
+// TVFArgument is a single argument to a table-valued function call; see
+// ASTTVFArgument in googlesql/parser/parse_tree.h.
+type TVFArgument struct {
+	Span
+	Expr Node `json:"expr"`
+}
+
+func (n *TVFArgument) Children() []Node {
+	return children(n.Expr)
 }
 
 // UnnestExpression is UNNEST(expr [AS alias], ...); see ASTUnnestExpression

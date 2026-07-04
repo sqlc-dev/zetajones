@@ -67,6 +67,12 @@ func nodeString(n ast.Node) string {
 		return "WithClauseEntry"
 	case *ast.AliasedQuery:
 		return "AliasedQuery"
+	case *ast.AliasedGroupRows:
+		return "AliasedGroupRows"
+	case *ast.TVF:
+		return "TVF"
+	case *ast.TVFArgument:
+		return "TVFArgument"
 	case *ast.Select:
 		if t.Distinct {
 			return "Select(distinct=true)"
