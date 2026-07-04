@@ -4677,27 +4677,78 @@ func (p *parser) parseComparison() (ast.Node, error) {
 	})
 }
 
-// finishComparison enforces non-associativity of the comparison level. A
-// LIKE after a comparison result gets a dedicated message because the
-// reference shifts it and then rejects the lhs (IsAllowedInComparison is
-// false; see the like_operator alternatives of
-// expression_higher_prec_than_and in googlesql.tm); the other comparison
-// operators fail immediately on the %nonassoc conflict.
+// finishComparison enforces non-associativity of the comparison level. The
+// reference grammar splits these operators into two precedence tiers within
+// expression_higher_prec_than_and (see googlesql.tm): IN and IS bind tighter
+// than the comparison, LIKE, and BETWEEN operators.
+//
+// When the already-parsed operand (op1, n) is an IN or IS expression, it is a
+// valid higher-precedence operand for the following operator's rule, which
+// then rejects it via IsAllowedInComparison with a dedicated "Expression to
+// the left of <op> must be parenthesized" message. When op1 is instead a
+// comparison, LIKE, or BETWEEN expression, it sits at the non-associative
+// comparison tier and a following comparison-level operator produces a plain
+// "Unexpected <token>" conflict.
 func (p *parser) finishComparison(n ast.Node) (ast.Node, error) {
 	tok := p.peek()
+
+	// Classify the following operator (op2), if any. NOT introduces the
+	// NOT LIKE / NOT IN / NOT BETWEEN forms.
+	opName := ""
 	switch {
-	case isKeyword(tok, "LIKE"):
-		return nil, p.errorf(tok.Pos, "Syntax error: Expression to the left of LIKE must be parenthesized")
-	case isKeyword(tok, "IN"), isKeyword(tok, "IS"), isKeyword(tok, "BETWEEN"):
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	case tok.Kind == token.EQ, tok.Kind == token.NEQ, tok.Kind == token.LT,
 		tok.Kind == token.GT, tok.Kind == token.LTE, tok.Kind == token.GTE:
-		// Comparison operators are non-associative (see the %nonassoc
-		// declaration in googlesql.tm); a second one is a syntax error at
-		// that operator rather than a swallowed trailing token.
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		opName = "comparison"
+	case isKeyword(tok, "LIKE"):
+		opName = "LIKE"
+	case isKeyword(tok, "IN"):
+		opName = "IN"
+	case isKeyword(tok, "IS"):
+		opName = "IS"
+	case isKeyword(tok, "BETWEEN"):
+		opName = "BETWEEN"
+	case isKeyword(tok, "NOT"):
+		switch {
+		case isKeyword(p.peekAt(1), "LIKE"):
+			opName = "LIKE"
+		case isKeyword(p.peekAt(1), "IN"):
+			opName = "IN"
+		case isKeyword(p.peekAt(1), "BETWEEN"):
+			opName = "BETWEEN"
+		}
 	}
-	return n, nil
+	if opName == "" {
+		return n, nil
+	}
+
+	if isInOrIsExpr(n) {
+		// op1 binds tighter; the following operator rejects the parenthesis-
+		// less left operand. The message points at the operator keyword
+		// itself, which for the NOT LIKE / NOT IN / NOT BETWEEN forms is the
+		// token after NOT.
+		pos := tok.Pos
+		if isKeyword(tok, "NOT") {
+			pos = p.peekAt(1).Pos
+		}
+		return nil, p.errorf(pos, "Syntax error: Expression to the left of %s must be parenthesized", opName)
+	}
+	// op1 is at the non-associative comparison tier; the following operator is
+	// simply unexpected.
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// isInOrIsExpr reports whether n is an IN or IS expression, which bind tighter
+// than the comparison/LIKE/BETWEEN operators (see finishComparison).
+func isInOrIsExpr(n ast.Node) bool {
+	switch e := n.(type) {
+	case *ast.InExpression:
+		return true
+	case *ast.BinaryExpression:
+		// IS NULL / IS [NOT] TRUE / IS [NOT] FALSE. IS DISTINCT FROM binds at
+		// the comparison tier, not here.
+		return e.Op == "IS"
+	}
+	return false
 }
 
 // isAllowedInComparison reports whether n may appear unparenthesized as an
