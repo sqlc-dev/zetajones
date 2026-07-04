@@ -343,6 +343,10 @@ type parser struct {
 	// valid when the whole select column expression is exactly this postfix
 	// expression (e.g. "1+x.*" is an error).
 	dotStarTarget ast.Node
+	// inTablePath is set while parsing the path expression of a FROM-clause
+	// table item, where "." followed by "(" reports the dedicated generalized
+	// field access error; see table_path_expression_base in googlesql.tm.
+	inTablePath bool
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -2132,7 +2136,9 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 		if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
+		p.inTablePath = true
 		path, err := p.parsePathExpression()
+		p.inTablePath = false
 		if err != nil {
 			return nil, err
 		}
@@ -2140,6 +2146,15 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 			return p.parseTVFRest(path)
 		}
 		table = &ast.TablePathExpression{Span: span(path.Pos(), path.End()), Path: path}
+	}
+	// Array element access and generalized field access on a table path are
+	// only allowed inside UNNEST; see table_path_expression_base in
+	// googlesql.tm.
+	if tok := p.peek(); tok.Kind == token.LBRACKET {
+		return nil, p.errorf(tok.Pos, "Syntax error: Array element access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
+	}
+	if p.peek().Kind == token.DOT && p.peekAt(1).Kind == token.LPAREN {
+		return nil, p.errorf(p.peekAt(1).Pos, "Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
 	}
 	alias, err := p.parseOptionalAlias()
 	if err != nil {
@@ -4008,6 +4023,9 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 		}
 		p.advance()
 		tok := p.peek()
+		if p.inTablePath && tok.Kind == token.LPAREN {
+			return nil, p.errorf(tok.Pos, "Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
+		}
 		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}

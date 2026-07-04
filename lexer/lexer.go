@@ -196,7 +196,18 @@ func (l *lexer) next() (token.Token, error) {
 	switch {
 	case isIdentStart(c):
 		return l.identOrPrefixedString()
-	case isDigit(c) || (c == '.' && isDigit(l.peekAt(1))):
+	case isDigit(c) && l.afterPathDot:
+		// Digits after a path-continuation dot lex as an identifier ("t.1",
+		// "t.1b", "t.0x1"); see TransformIntegerLiteral in
+		// googlesql/parser/lookahead_transformer.cc.
+		for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
+			l.pos++
+		}
+		return l.emit(token.IDENT, start), nil
+	case isDigit(c) || (c == '.' && isDigit(l.peekAt(1)) && !lookbackAllowsPathDot(l.prev)):
+		// A "." after an expression-ending token continues a path expression
+		// rather than starting a float; see TransformDotSymbol in
+		// googlesql/parser/lookahead_transformer.cc.
 		return l.number()
 	case c == '\'' || c == '"':
 		return l.str(start, false, false)
