@@ -628,6 +628,23 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		return node, nil
 	case isKeyword(tok, "AGGREGATE"):
 		return p.parsePipeAggregate(pipeTok)
+	case isKeyword(tok, "SELECT"):
+		sel, err := p.parseSelectClause()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.PipeSelect{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
+	case isKeyword(tok, "EXTEND"):
+		return p.parsePipeExtend(pipeTok)
+	case isKeyword(tok, "LIMIT"):
+		limitOffset, err := p.parseLimitOffset()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.PipeLimitOffset{Span: span(pipeTok.Pos, limitOffset.End()), LimitOffset: limitOffset}, nil
+	case isKeyword(tok, "DISTINCT"):
+		distinctTok := p.advance()
+		return &ast.PipeDistinct{Span: span(pipeTok.Pos, distinctTok.End)}, nil
 	}
 	// The reference grammar's recovery point for an unrecognized pipe
 	// operator is the JOIN inside pipe_join.
@@ -752,6 +769,45 @@ func (p *parser) parsePipeAggregate(pipeTok token.Token) (ast.Node, error) {
 	return &ast.PipeAggregate{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
 }
 
+// parsePipeExtend parses "EXTEND pipe_selection_item_list" after a |> token.
+// The selection list is represented as a Select node whose location starts at
+// the EXTEND keyword; see pipe_extend in googlesql.tm.
+func (p *parser) parsePipeExtend(pipeTok token.Token) (ast.Node, error) {
+	extendTok := p.advance() // EXTEND
+	list, err := p.parsePipeSelectionItemList()
+	if err != nil {
+		return nil, err
+	}
+	sel := &ast.Select{Span: span(extendTok.Pos, list.End()), SelectList: list}
+	return &ast.PipeExtend{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
+}
+
+// parsePipeSelectionItemList parses one or more comma-separated selection
+// items with an optional trailing comma; see pipe_selection_item_list in
+// googlesql.tm.
+func (p *parser) parsePipeSelectionItemList() (*ast.SelectList, error) {
+	first, err := p.parseSelectColumnExpr()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.SelectList{Span: span(first.Pos(), first.End()), Columns: []*ast.SelectColumn{first}}
+	for p.peek().Kind == token.COMMA {
+		comma := p.advance()
+		if !startsExpression(p.peek()) {
+			// Trailing comma; it is included in the list's location.
+			list.Stop = comma.End
+			break
+		}
+		col, err := p.parseSelectColumnExpr()
+		if err != nil {
+			return nil, err
+		}
+		list.Columns = append(list.Columns, col)
+		list.Stop = col.End()
+	}
+	return list, nil
+}
+
 // parseSelectColumnExpr parses "expression [[AS] alias]" (a select list item
 // without the * forms); see select_column_expr in googlesql.tm.
 func (p *parser) parseSelectColumnExpr() (*ast.SelectColumn, error) {
@@ -807,7 +863,9 @@ func (p *parser) parseWhereClause() (*ast.WhereClause, error) {
 	return &ast.WhereClause{Span: span(whereTok.Pos, expr.End()), Expr: expr}, nil
 }
 
-func (p *parser) parseSelect() (*ast.Select, error) {
+// parseSelectClause parses "SELECT [ALL|DISTINCT] select_list" with none of
+// the clauses after the select list; see select_clause in googlesql.tm.
+func (p *parser) parseSelectClause() (*ast.Select, error) {
 	selectTok, err := p.expectKeyword("SELECT")
 	if err != nil {
 		return nil, err
@@ -827,6 +885,14 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 	}
 	sel.SelectList = list
 	sel.Stop = list.End()
+	return sel, nil
+}
+
+func (p *parser) parseSelect() (*ast.Select, error) {
+	sel, err := p.parseSelectClause()
+	if err != nil {
+		return nil, err
+	}
 
 	if isKeyword(p.peek(), "FROM") {
 		from, err := p.parseFromClause()
@@ -865,22 +931,28 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 }
 
 func (p *parser) parseSelectList() (*ast.SelectList, error) {
-	var cols []*ast.SelectColumn
-	for {
+	first, err := p.parseSelectColumn()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.SelectList{Span: span(first.Pos(), first.End()), Columns: []*ast.SelectColumn{first}}
+	for p.peek().Kind == token.COMMA {
+		comma := p.advance()
+		next := p.peek()
+		if next.Kind != token.STAR && !startsExpression(next) {
+			// Trailing comma; it is included in the list's location. See
+			// select_list in googlesql.tm.
+			list.Stop = comma.End
+			break
+		}
 		col, err := p.parseSelectColumn()
 		if err != nil {
 			return nil, err
 		}
-		cols = append(cols, col)
-		if p.peek().Kind != token.COMMA {
-			break
-		}
-		p.advance()
+		list.Columns = append(list.Columns, col)
+		list.Stop = col.End()
 	}
-	return &ast.SelectList{
-		Span:    span(cols[0].Pos(), cols[len(cols)-1].End()),
-		Columns: cols,
-	}, nil
+	return list, nil
 }
 
 func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {

@@ -170,6 +170,14 @@ func nodeString(n ast.Node) string {
 		return "Subpipeline"
 	case *ast.PipeLog:
 		return "PipeLog"
+	case *ast.PipeSelect:
+		return "PipeSelect"
+	case *ast.PipeExtend:
+		return "PipeExtend"
+	case *ast.PipeLimitOffset:
+		return "PipeLimitOffset"
+	case *ast.PipeDistinct:
+		return "PipeDistinct"
 	case *ast.PipeAggregate:
 		return "PipeAggregate"
 	case *ast.PipeWhere:

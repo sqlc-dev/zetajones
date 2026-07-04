@@ -529,6 +529,46 @@ func (n *PipeLog) Children() []Node {
 	return children(n.Subpipeline)
 }
 
+// PipeSelect is a |> SELECT pipe operator. The select list is represented
+// as an ASTSelect for resolver code sharing in the reference implementation.
+type PipeSelect struct {
+	Span
+	Select *Select `json:"select"`
+}
+
+func (n *PipeSelect) Children() []Node {
+	return children(n.Select)
+}
+
+// PipeExtend is a |> EXTEND pipe operator. The selection item list is
+// represented as an ASTSelect for resolver code sharing in the reference
+// implementation.
+type PipeExtend struct {
+	Span
+	Select *Select `json:"select"`
+}
+
+func (n *PipeExtend) Children() []Node {
+	return children(n.Select)
+}
+
+// PipeLimitOffset is a |> LIMIT [OFFSET] pipe operator.
+type PipeLimitOffset struct {
+	Span
+	LimitOffset *LimitOffset `json:"limit_offset"`
+}
+
+func (n *PipeLimitOffset) Children() []Node {
+	return children(n.LimitOffset)
+}
+
+// PipeDistinct is a |> DISTINCT pipe operator; it has no children.
+type PipeDistinct struct {
+	Span
+}
+
+func (n *PipeDistinct) Children() []Node { return nil }
+
 // PipeAggregate is a |> AGGREGATE pipe operator. The aggregate list and
 // optional GROUP BY are represented as an ASTSelect for resolver code
 // sharing in the reference implementation.
