@@ -217,15 +217,17 @@ func isKeyword(tok token.Token, kw string) bool {
 // currently needs to recognize to know where expressions and clauses end.
 // See googlesql/parser/keywords.cc for the full list.
 var reservedKeywords = map[string]bool{
-	"ALL": true, "AND": true, "AS": true, "ASC": true, "BETWEEN": true,
-	"BY": true, "CASE": true, "CROSS": true, "DESC": true, "DISTINCT": true,
+	"ALL": true, "AND": true, "ARRAY": true, "AS": true, "ASC": true,
+	"BETWEEN": true,
+	"BY":      true, "CASE": true, "CROSS": true, "DESC": true, "DISTINCT": true,
 	"ELSE": true, "END": true, "EXCEPT": true, "FALSE": true, "FOR": true,
 	"FROM": true,
 	"FULL": true, "GROUP": true, "HAVING": true, "IN": true, "INNER": true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LEFT": true, "LIKE": true,
 	"LIMIT": true, "NOT": true, "NULL": true, "ON": true, "OR": true,
 	"ORDER": true, "OUTER": true, "RIGHT": true, "SELECT": true, "SET": true,
-	"TRUE": true, "UNION": true, "USING": true, "WHERE": true, "WITH": true,
+	"TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
+	"WITH": true,
 }
 
 func isReserved(tok token.Token) bool {
@@ -773,11 +775,20 @@ func (p *parser) parseFromClause() (*ast.FromClause, error) {
 }
 
 func (p *parser) parseTablePathExpression() (*ast.TablePathExpression, error) {
-	path, err := p.parsePathExpression()
-	if err != nil {
-		return nil, err
+	var table *ast.TablePathExpression
+	if isKeyword(p.peek(), "UNNEST") {
+		unnest, err := p.parseUnnestExpression()
+		if err != nil {
+			return nil, err
+		}
+		table = &ast.TablePathExpression{Span: span(unnest.Pos(), unnest.End()), UnnestExpr: unnest}
+	} else {
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		table = &ast.TablePathExpression{Span: span(path.Pos(), path.End()), Path: path}
 	}
-	table := &ast.TablePathExpression{Span: span(path.Pos(), path.End()), Path: path}
 	alias, err := p.parseOptionalAlias()
 	if err != nil {
 		return nil, err
@@ -786,7 +797,76 @@ func (p *parser) parseTablePathExpression() (*ast.TablePathExpression, error) {
 		table.Alias = alias
 		table.Stop = alias.End()
 	}
+	// WITH OFFSET [[AS] alias]; see with_offset_and_alias in googlesql.tm.
+	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "OFFSET") {
+		withTok := p.advance()   // WITH
+		offsetTok := p.advance() // OFFSET
+		offset := &ast.WithOffset{Span: span(withTok.Pos, offsetTok.End)}
+		offsetAlias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		if offsetAlias != nil {
+			offset.Alias = offsetAlias
+			offset.Stop = offsetAlias.End()
+		}
+		table.Offset = offset
+		table.Stop = offset.End()
+	}
 	return table, nil
+}
+
+// parseUnnestExpression parses "UNNEST ( expression [AS alias] [, ...] )";
+// see unnest_expression in googlesql.tm.
+func (p *parser) parseUnnestExpression() (*ast.UnnestExpression, error) {
+	unnestTok := p.advance() // UNNEST
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "SELECT") {
+		// No "Syntax error: " prefix; see unnest_expression in googlesql.tm.
+		return nil, p.errorf(p.peek().Pos, "The argument to UNNEST is an expression, not a query; to use a query as an expression, the query must be wrapped with additional parentheses to make it a scalar subquery expression")
+	}
+	node := &ast.UnnestExpression{Span: span(unnestTok.Pos, 0)}
+	for {
+		expr, err := p.parseExpressionWithOptAlias()
+		if err != nil {
+			return nil, err
+		}
+		node.Expressions = append(node.Expressions, expr)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	node.Stop = rparen.End
+	return node, nil
+}
+
+// parseExpressionWithOptAlias parses an expression with an optional alias
+// that requires the AS keyword; see expression_with_opt_alias in
+// googlesql.tm.
+func (p *parser) parseExpressionWithOptAlias() (*ast.ExpressionWithOptAlias, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.ExpressionWithOptAlias{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	if isKeyword(p.peek(), "AS") {
+		asTok := p.advance()
+		tok := p.peek()
+		if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+		}
+		ident := p.parseIdentifierToken(p.advance())
+		node.Alias = &ast.Alias{Span: span(asTok.Pos, ident.End()), Identifier: ident}
+		node.Stop = ident.End()
+	}
+	return node, nil
 }
 
 func (p *parser) parseGroupBy() (*ast.GroupBy, error) {
@@ -1180,6 +1260,8 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		return p.parseStringLiteral()
 	case token.BYTES:
 		return p.parseBytesLiteral()
+	case token.LBRACKET:
+		return p.parseArrayConstructor(tok.Pos)
 	case token.LPAREN:
 		lparen := p.advance()
 		expr, err := p.parseExpression()
@@ -1226,12 +1308,43 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isKeyword(tok, "TRUE"), isKeyword(tok, "FALSE"):
 			p.advance()
 			return &ast.BooleanLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image, Value: isKeyword(tok, "TRUE")}, nil
+		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACKET:
+			p.advance() // ARRAY; the constructor's span starts at the keyword.
+			return p.parseArrayConstructor(tok.Pos)
 		case isReserved(tok):
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
 		return p.parsePathOrCall()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseArrayConstructor parses "[ [expression, ...] ]" with the opening
+// bracket as the next token; start is the start offset of the constructor
+// (the "[" itself, or an ARRAY keyword already consumed by the caller). See
+// array_constructor in googlesql.tm.
+func (p *parser) parseArrayConstructor(start int) (ast.Node, error) {
+	p.advance() // [
+	arr := &ast.ArrayConstructor{Span: span(start, 0)}
+	if p.peek().Kind != token.RBRACKET {
+		for {
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			arr.Elements = append(arr.Elements, expr)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	rbracket, err := p.expect(token.RBRACKET, `"]"`)
+	if err != nil {
+		return nil, err
+	}
+	arr.Stop = rbracket.End
+	return arr, nil
 }
 
 // parsePathOrCall parses a path expression, possibly followed by a function

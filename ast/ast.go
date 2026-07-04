@@ -154,15 +154,68 @@ func (n *FromClause) Children() []Node {
 	return children(n.TableExpression)
 }
 
-// TablePathExpression is a table reference by (possibly dotted) path.
+// TablePathExpression is a table reference by (possibly dotted) path or an
+// UNNEST expression; exactly one of Path and UnnestExpr is set.
 type TablePathExpression struct {
 	Span
-	Path  *PathExpression `json:"path"`
-	Alias *Alias          `json:"alias,omitempty"`
+	Path       *PathExpression   `json:"path,omitempty"`
+	UnnestExpr *UnnestExpression `json:"unnest_expr,omitempty"`
+	Alias      *Alias            `json:"alias,omitempty"`
+	Offset     *WithOffset       `json:"offset,omitempty"`
 }
 
 func (n *TablePathExpression) Children() []Node {
-	return children(n.Path, n.Alias)
+	return children(n.Path, n.UnnestExpr, n.Alias, n.Offset)
+}
+
+// UnnestExpression is UNNEST(expr [AS alias], ...); see ASTUnnestExpression
+// in googlesql/parser/parse_tree.h. The span includes the UNNEST keyword and
+// the closing parenthesis.
+type UnnestExpression struct {
+	Span
+	Expressions []*ExpressionWithOptAlias `json:"expressions"`
+}
+
+func (n *UnnestExpression) Children() []Node {
+	var out []Node
+	for _, e := range n.Expressions {
+		out = append(out, e)
+	}
+	return out
+}
+
+// ExpressionWithOptAlias is an expression with an optional "AS alias" (the
+// AS keyword is required when the alias is present).
+type ExpressionWithOptAlias struct {
+	Span
+	Expr  Node   `json:"expr"`
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *ExpressionWithOptAlias) Children() []Node {
+	return children(n.Expr, n.Alias)
+}
+
+// WithOffset is the WITH OFFSET [[AS] alias] clause on a FROM-clause table
+// expression.
+type WithOffset struct {
+	Span
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *WithOffset) Children() []Node {
+	return children(n.Alias)
+}
+
+// ArrayConstructor is "[...]" or "ARRAY[...]"; see ASTArrayConstructor in
+// googlesql/parser/parse_tree.h.
+type ArrayConstructor struct {
+	Span
+	Elements []Node `json:"elements"`
+}
+
+func (n *ArrayConstructor) Children() []Node {
+	return append([]Node(nil), n.Elements...)
 }
 
 // WhereClause holds the WHERE clause expression.

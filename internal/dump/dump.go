@@ -75,6 +75,14 @@ func nodeString(n ast.Node) string {
 		return "FromClause"
 	case *ast.TablePathExpression:
 		return "TablePathExpression"
+	case *ast.UnnestExpression:
+		return "UnnestExpression"
+	case *ast.ExpressionWithOptAlias:
+		return "ExpressionWithOptAlias"
+	case *ast.WithOffset:
+		return "WithOffset"
+	case *ast.ArrayConstructor:
+		return "ArrayConstructor"
 	case *ast.WhereClause:
 		return "WhereClause"
 	case *ast.GroupBy:
