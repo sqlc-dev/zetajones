@@ -299,6 +299,54 @@ func nodeString(n ast.Node) string {
 		return "RenameToClause"
 	case *ast.SetOptionsAction:
 		return "SetOptionsAction"
+	case *ast.AddColumnAction:
+		if t.IsIfNotExists {
+			return "AddColumnAction(is_if_not_exists)"
+		}
+		return "AddColumnAction"
+	case *ast.ColumnPosition:
+		return "ColumnPosition(" + t.Type + ")"
+	case *ast.DropColumnAction:
+		if t.IsIfExists {
+			return "DropColumnAction(is_if_exists)"
+		}
+		return "DropColumnAction"
+	case *ast.RenameColumnAction:
+		if t.IsIfExists {
+			return "RenameColumnAction(is_if_exists)"
+		}
+		return "RenameColumnAction"
+	case *ast.AddConstraintAction:
+		if t.IsIfNotExists {
+			return "AddConstraintAction(is_if_not_exists)"
+		}
+		return "AddConstraintAction"
+	case *ast.DropConstraintAction:
+		if t.IsIfExists {
+			return "DropConstraintAction(is_if_exists)"
+		}
+		return "DropConstraintAction"
+	case *ast.DropPrimaryKeyAction:
+		if t.IsIfExists {
+			return "DropPrimaryKeyAction(is_if_exists)"
+		}
+		return "DropPrimaryKeyAction"
+	case *ast.AlterConstraintEnforcementAction:
+		if t.IsIfExists {
+			return "AlterConstraintEnforcementAction(is_if_exists)"
+		}
+		return "AlterConstraintEnforcementAction"
+	case *ast.AlterConstraintSetOptionsAction:
+		if t.IsIfExists {
+			return "AlterConstraintSetOptionsAction(is_if_exists)"
+		}
+		return "AlterConstraintSetOptionsAction"
+	case *ast.AddTtlAction:
+		return "AddTtlAction"
+	case *ast.ReplaceTtlAction:
+		return "ReplaceTtlAction"
+	case *ast.DropTtlAction:
+		return "DropTtlAction"
 	case *ast.OptionsList:
 		return "OptionsList"
 	case *ast.OptionsEntry:

@@ -247,6 +247,12 @@ const FeatureAllowDashesInTableName Feature = "ALLOW_DASHES_IN_TABLE_NAME"
 // supported".
 const FeatureOrderedPrimaryKeys Feature = "ORDERED_PRIMARY_KEYS"
 
+// FeatureTtl gates ROW DELETION POLICY alter actions (FEATURE_TTL); see the
+// ADD/REPLACE/DROP ROW DELETION POLICY productions in alter_action in
+// googlesql.tm. When off, they report "... ROW DELETION POLICY clause is not
+// supported.".
+const FeatureTtl Feature = "TTL"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -263,6 +269,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureCreateFunctionLanguageWithConnection: true,
 	FeatureAllowDashesInTableName:               true,
 	FeatureOrderedPrimaryKeys:                   false, // in_development
+	FeatureTtl:                                  true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -2080,7 +2087,9 @@ func (p *parser) parsePrimaryKeyElement() (*ast.PrimaryKeyElement, error) {
 // next token.
 func (p *parser) parseCheckConstraint() (*ast.CheckConstraint, error) {
 	checkTok := p.advance() // CHECK
-	p.advance()             // (
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
 	expr, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -3575,27 +3584,85 @@ func (p *parser) parseAlterActionList() (*ast.AlterActionList, error) {
 	return list, nil
 }
 
+// tryParseIfExists consumes an "IF EXISTS" clause if present, reporting whether
+// it was consumed; see opt_if_exists in googlesql.tm.
+func (p *parser) tryParseIfExists() bool {
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "EXISTS") {
+		p.advance()
+		p.advance()
+		return true
+	}
+	return false
+}
+
+// tryParseIfNotExists consumes an "IF NOT EXISTS" clause if present, reporting
+// whether it was consumed; see opt_if_not_exists in googlesql.tm.
+func (p *parser) tryParseIfNotExists() bool {
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		return true
+	}
+	return false
+}
+
 // parseAlterAction parses a single alter action; see alter_action in
-// googlesql.tm. Only SET OPTIONS and RENAME TO are implemented so far.
+// googlesql.tm.
 func (p *parser) parseAlterAction() (ast.Node, error) {
 	tok := p.peek()
-	if isKeyword(tok, "RENAME") {
-		renameTok := p.advance()
-		next := p.peek()
-		if !isKeyword(next, "TO") {
-			return nil, p.errorf(next.Pos, "Syntax error: Expected keyword COLUMN or keyword TO but got %s", describeToken(next))
-		}
-		p.advance() // TO
-		path, err := p.parsePathExpression()
+	switch {
+	case isKeyword(tok, "RENAME"):
+		return p.parseRenameAlterAction()
+	case isKeyword(tok, "SET"):
+		return p.parseSetAlterAction()
+	case isKeyword(tok, "ADD"):
+		return p.parseAddAlterAction()
+	case isKeyword(tok, "DROP"):
+		return p.parseDropAlterAction()
+	case isKeyword(tok, "ALTER"):
+		return p.parseAlterConstraintAlterAction()
+	case isKeyword(tok, "REPLACE"):
+		return p.parseReplaceAlterAction()
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseRenameAlterAction parses "RENAME TO path" or
+// "RENAME COLUMN [IF EXISTS] identifier TO identifier".
+func (p *parser) parseRenameAlterAction() (ast.Node, error) {
+	renameTok := p.advance() // RENAME
+	if isKeyword(p.peek(), "COLUMN") {
+		p.advance() // COLUMN
+		ifExists := p.tryParseIfExists()
+		name, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
 		}
-		return &ast.RenameToClause{Span: span(renameTok.Pos, path.End()), NewName: path}, nil
+		if _, err := p.expectKeyword("TO"); err != nil {
+			return nil, err
+		}
+		newName, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.RenameColumnAction{Span: span(renameTok.Pos, newName.End()), IsIfExists: ifExists, Name: name, NewName: newName}, nil
 	}
-	if !isKeyword(tok, "SET") {
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	next := p.peek()
+	if !isKeyword(next, "TO") {
+		return nil, p.errorf(next.Pos, "Syntax error: Expected keyword COLUMN or keyword TO but got %s", describeToken(next))
 	}
-	setTok := p.advance()
+	p.advance() // TO
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RenameToClause{Span: span(renameTok.Pos, path.End()), NewName: path}, nil
+}
+
+// parseSetAlterAction parses "SET OPTIONS (...)".
+func (p *parser) parseSetAlterAction() (ast.Node, error) {
+	setTok := p.advance() // SET
 	next := p.peek()
 	if !isKeyword(next, "OPTIONS") {
 		return nil, p.errorf(next.Pos, "Syntax error: Expected keyword AS or keyword DEFAULT or keyword ON or keyword OPTIONS but got %s", describeToken(next))
@@ -3606,6 +3673,264 @@ func (p *parser) parseAlterAction() (ast.Node, error) {
 		return nil, err
 	}
 	return &ast.SetOptionsAction{Span: span(setTok.Pos, opts.End()), Options: opts}, nil
+}
+
+// parseAddAlterAction parses the "ADD ..." alter actions: ADD COLUMN, ADD
+// CONSTRAINT, an unnamed table constraint or primary key, and ADD ROW DELETION
+// POLICY; see alter_action in googlesql.tm.
+func (p *parser) parseAddAlterAction() (ast.Node, error) {
+	addTok := p.advance() // ADD
+	next := p.peek()
+	switch {
+	case isKeyword(next, "COLUMN"):
+		return p.parseAddColumnAction(addTok)
+	case isKeyword(next, "CONSTRAINT"):
+		return p.parseAddNamedConstraintAction(addTok)
+	case isKeyword(next, "ROW"):
+		return p.parseAddTtlAction(addTok)
+	case isKeyword(next, "CHECK"), isKeyword(next, "FOREIGN"), (isKeyword(next, "PRIMARY") && isKeyword(p.peekAt(1), "KEY")):
+		constraint, err := p.parseConstraintSpec()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AddConstraintAction{Span: span(addTok.Pos, constraint.End()), Constraint: constraint}, nil
+	}
+	return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+}
+
+// parseAddColumnAction parses "COLUMN [IF NOT EXISTS] column_definition
+// [column_position] [FILL USING expression]" after ADD; see ASTAddColumnAction.
+func (p *parser) parseAddColumnAction(addTok token.Token) (ast.Node, error) {
+	p.advance() // COLUMN
+	ifNotExists := p.tryParseIfNotExists()
+	col, err := p.parseColumnDefinition()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.AddColumnAction{Span: span(addTok.Pos, col.End()), IsIfNotExists: ifNotExists, Column: col}
+	// opt_column_position
+	if isKeyword(p.peek(), "PRECEDING") || isKeyword(p.peek(), "FOLLOWING") {
+		posTok := p.advance()
+		kind := "PRECEDING"
+		if isKeyword(posTok, "FOLLOWING") {
+			kind = "FOLLOWING"
+		}
+		ident, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		node.Position = &ast.ColumnPosition{Span: span(posTok.Pos, ident.End()), Type: kind, Identifier: ident}
+		node.Stop = ident.End()
+	}
+	// opt_fill_using_expression
+	if isKeyword(p.peek(), "FILL") {
+		p.advance() // FILL
+		if _, err := p.expectKeyword("USING"); err != nil {
+			return nil, err
+		}
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		node.FillExpression = expr
+		node.Stop = p.extEnd(expr)
+	}
+	return node, nil
+}
+
+// parseAddNamedConstraintAction parses "CONSTRAINT [IF NOT EXISTS] identifier
+// constraint_spec" after ADD; see the "ADD" "CONSTRAINT" production in
+// googlesql.tm. The constraint name is attached to the constraint node and the
+// constraint's start location is moved to the name.
+func (p *parser) parseAddNamedConstraintAction(addTok token.Token) (ast.Node, error) {
+	p.advance() // CONSTRAINT
+	ifNotExists := p.tryParseIfNotExists()
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	constraint, err := p.parseConstraintSpec()
+	if err != nil {
+		return nil, err
+	}
+	// ExtendNodeRight($constraint, ..., $name); WithStartLocation(name.start()).
+	switch c := constraint.(type) {
+	case *ast.CheckConstraint:
+		c.ConstraintName = name
+		c.Start = name.Pos()
+	case *ast.PrimaryKey:
+		c.ConstraintName = name
+		c.Start = name.Pos()
+	}
+	return &ast.AddConstraintAction{Span: span(addTok.Pos, constraint.End()), IsIfNotExists: ifNotExists, Constraint: constraint}, nil
+}
+
+// parseConstraintSpec parses primary_key_or_table_constraint_spec: a CHECK or
+// FOREIGN table constraint, or a PRIMARY KEY spec; see googlesql.tm. FOREIGN
+// KEY references are not implemented yet.
+func (p *parser) parseConstraintSpec() (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "CHECK"):
+		return p.parseCheckConstraint()
+	case isKeyword(tok, "PRIMARY"):
+		return p.parsePrimaryKey()
+	case isKeyword(tok, "FOREIGN"):
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword CHECK or keyword FOREIGN or keyword PRIMARY but got %s", describeToken(tok))
+}
+
+// parseAddTtlAction parses "ROW DELETION POLICY [IF NOT EXISTS] (expression)"
+// after ADD; see the "ADD" "ROW" "DELETION" "POLICY" production in googlesql.tm.
+func (p *parser) parseAddTtlAction(addTok token.Token) (ast.Node, error) {
+	p.advance() // ROW
+	if _, err := p.expectKeyword("DELETION"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("POLICY"); err != nil {
+		return nil, err
+	}
+	if !p.features.Enabled(FeatureTtl) {
+		return nil, p.errorf(addTok.Pos, "Syntax error: ADD ROW DELETION POLICY clause is not supported.")
+	}
+	ifNotExists := p.tryParseIfNotExists()
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.AddTtlAction{Span: span(addTok.Pos, rparen.End), IsIfNotExists: ifNotExists, Expression: expr}, nil
+}
+
+// parseReplaceAlterAction parses "REPLACE ROW DELETION POLICY [IF EXISTS]
+// (expression)"; see the "REPLACE" "ROW" "DELETION" "POLICY" production.
+func (p *parser) parseReplaceAlterAction() (ast.Node, error) {
+	replaceTok := p.advance() // REPLACE
+	if _, err := p.expectKeyword("ROW"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("DELETION"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("POLICY"); err != nil {
+		return nil, err
+	}
+	if !p.features.Enabled(FeatureTtl) {
+		return nil, p.errorf(replaceTok.Pos, "Syntax error: REPLACE ROW DELETION POLICY clause is not supported.")
+	}
+	ifExists := p.tryParseIfExists()
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ReplaceTtlAction{Span: span(replaceTok.Pos, rparen.End), IsIfExists: ifExists, Expression: expr}, nil
+}
+
+// parseDropAlterAction parses the "DROP ..." alter actions: DROP COLUMN, DROP
+// CONSTRAINT, DROP PRIMARY KEY, and DROP ROW DELETION POLICY; see alter_action.
+func (p *parser) parseDropAlterAction() (ast.Node, error) {
+	dropTok := p.advance() // DROP
+	next := p.peek()
+	switch {
+	case isKeyword(next, "COLUMN"):
+		p.advance() // COLUMN
+		ifExists := p.tryParseIfExists()
+		name, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.DropColumnAction{Span: span(dropTok.Pos, name.End()), IsIfExists: ifExists, Name: name}, nil
+	case isKeyword(next, "CONSTRAINT"):
+		p.advance() // CONSTRAINT
+		ifExists := p.tryParseIfExists()
+		name, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.DropConstraintAction{Span: span(dropTok.Pos, name.End()), IsIfExists: ifExists, Name: name}, nil
+	case isKeyword(next, "PRIMARY") && isKeyword(p.peekAt(1), "KEY"):
+		p.advance() // PRIMARY
+		keyTok := p.advance()
+		ifExists := p.tryParseIfExists()
+		end := keyTok.End
+		if ifExists {
+			end = p.prevEnd()
+		}
+		return &ast.DropPrimaryKeyAction{Span: span(dropTok.Pos, end), IsIfExists: ifExists}, nil
+	case isKeyword(next, "ROW"):
+		p.advance() // ROW
+		if _, err := p.expectKeyword("DELETION"); err != nil {
+			return nil, err
+		}
+		policyTok, err := p.expectKeyword("POLICY")
+		if err != nil {
+			return nil, err
+		}
+		if !p.features.Enabled(FeatureTtl) {
+			return nil, p.errorf(dropTok.Pos, "Syntax error: DROP ROW DELETION POLICY clause is not supported.")
+		}
+		ifExists := p.tryParseIfExists()
+		end := policyTok.End
+		if ifExists {
+			end = p.prevEnd()
+		}
+		return &ast.DropTtlAction{Span: span(dropTok.Pos, end), IsIfExists: ifExists}, nil
+	}
+	return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+}
+
+// parseAlterConstraintAlterAction parses "ALTER CONSTRAINT [IF EXISTS]
+// identifier {ENFORCED|NOT ENFORCED | SET OPTIONS (...)}"; see the "ALTER"
+// "CONSTRAINT" productions in googlesql.tm.
+func (p *parser) parseAlterConstraintAlterAction() (ast.Node, error) {
+	alterTok := p.advance() // ALTER
+	if !isKeyword(p.peek(), "CONSTRAINT") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	p.advance() // CONSTRAINT
+	ifExists := p.tryParseIfExists()
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	next := p.peek()
+	switch {
+	case isKeyword(next, "ENFORCED"):
+		endTok := p.advance()
+		return &ast.AlterConstraintEnforcementAction{Span: span(alterTok.Pos, endTok.End), IsIfExists: ifExists, IsEnforced: true, Name: name}, nil
+	case isKeyword(next, "NOT"):
+		p.advance() // NOT
+		endTok, err := p.expectKeyword("ENFORCED")
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AlterConstraintEnforcementAction{Span: span(alterTok.Pos, endTok.End), IsIfExists: ifExists, IsEnforced: false, Name: name}, nil
+	case isKeyword(next, "SET"):
+		p.advance() // SET
+		if _, err := p.expectKeyword("OPTIONS"); err != nil {
+			return nil, err
+		}
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AlterConstraintSetOptionsAction{Span: span(alterTok.Pos, opts.End()), IsIfExists: ifExists, Name: name, Options: opts}, nil
+	}
+	return nil, p.errorf(next.Pos, "Syntax error: Expected keyword ENFORCED or keyword NOT or keyword SET but got %s", describeToken(next))
 }
 
 // parseOptionsList parses "( [options_entry, ...] )".

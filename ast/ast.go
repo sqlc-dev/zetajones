@@ -2052,6 +2052,155 @@ func (n *SetOptionsAction) Children() []Node {
 	return children(n.Options)
 }
 
+// AddColumnAction is an "ADD COLUMN [IF NOT EXISTS] column_definition
+// [column_position] [FILL USING expression]" alter action; see
+// ASTAddColumnAction in googlesql/parser/parse_tree.h.
+type AddColumnAction struct {
+	Span
+	IsIfNotExists  bool              `json:"is_if_not_exists,omitempty"`
+	Column         *ColumnDefinition `json:"column"`
+	Position       *ColumnPosition   `json:"position,omitempty"`
+	FillExpression Node              `json:"fill_expression,omitempty"`
+}
+
+func (n *AddColumnAction) Children() []Node {
+	return children(n.Column, n.Position, n.FillExpression)
+}
+
+// ColumnPosition is a "PRECEDING identifier" or "FOLLOWING identifier" clause
+// on an ADD COLUMN action; see ASTColumnPosition in
+// googlesql/parser/parse_tree.h. Type is "PRECEDING" or "FOLLOWING".
+type ColumnPosition struct {
+	Span
+	Type       string      `json:"type"`
+	Identifier *Identifier `json:"identifier"`
+}
+
+func (n *ColumnPosition) Children() []Node {
+	return children(n.Identifier)
+}
+
+// DropColumnAction is a "DROP COLUMN [IF EXISTS] identifier" alter action; see
+// ASTDropColumnAction in googlesql/parser/parse_tree.h.
+type DropColumnAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Name       *Identifier `json:"name"`
+}
+
+func (n *DropColumnAction) Children() []Node {
+	return children(n.Name)
+}
+
+// RenameColumnAction is a "RENAME COLUMN [IF EXISTS] identifier TO identifier"
+// alter action; see ASTRenameColumnAction in googlesql/parser/parse_tree.h.
+type RenameColumnAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Name       *Identifier `json:"name"`
+	NewName    *Identifier `json:"new_name"`
+}
+
+func (n *RenameColumnAction) Children() []Node {
+	return children(n.Name, n.NewName)
+}
+
+// AddConstraintAction is an "ADD [CONSTRAINT [IF NOT EXISTS] name]
+// constraint_spec" alter action; see ASTAddConstraintAction in
+// googlesql/parser/parse_tree.h. Constraint is a CheckConstraint, PrimaryKey,
+// or ForeignKey node.
+type AddConstraintAction struct {
+	Span
+	IsIfNotExists bool `json:"is_if_not_exists,omitempty"`
+	Constraint    Node `json:"constraint"`
+}
+
+func (n *AddConstraintAction) Children() []Node {
+	return children(n.Constraint)
+}
+
+// DropConstraintAction is a "DROP CONSTRAINT [IF EXISTS] identifier" alter
+// action; see ASTDropConstraintAction in googlesql/parser/parse_tree.h.
+type DropConstraintAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Name       *Identifier `json:"name"`
+}
+
+func (n *DropConstraintAction) Children() []Node {
+	return children(n.Name)
+}
+
+// DropPrimaryKeyAction is a "DROP PRIMARY KEY [IF EXISTS]" alter action; see
+// ASTDropPrimaryKeyAction in googlesql/parser/parse_tree.h.
+type DropPrimaryKeyAction struct {
+	Span
+	IsIfExists bool `json:"is_if_exists,omitempty"`
+}
+
+func (n *DropPrimaryKeyAction) Children() []Node { return nil }
+
+// AlterConstraintEnforcementAction is an "ALTER CONSTRAINT [IF EXISTS]
+// identifier {ENFORCED|NOT ENFORCED}" alter action; see
+// ASTAlterConstraintEnforcementAction in googlesql/parser/parse_tree.h.
+type AlterConstraintEnforcementAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	IsEnforced bool        `json:"is_enforced,omitempty"`
+	Name       *Identifier `json:"name"`
+}
+
+func (n *AlterConstraintEnforcementAction) Children() []Node {
+	return children(n.Name)
+}
+
+// AlterConstraintSetOptionsAction is an "ALTER CONSTRAINT [IF EXISTS]
+// identifier SET OPTIONS (...)" alter action; see
+// ASTAlterConstraintSetOptionsAction in googlesql/parser/parse_tree.h.
+type AlterConstraintSetOptionsAction struct {
+	Span
+	IsIfExists bool         `json:"is_if_exists,omitempty"`
+	Name       *Identifier  `json:"name"`
+	Options    *OptionsList `json:"options"`
+}
+
+func (n *AlterConstraintSetOptionsAction) Children() []Node {
+	return children(n.Name, n.Options)
+}
+
+// AddTtlAction is an "ADD ROW DELETION POLICY [IF NOT EXISTS] (expression)"
+// alter action; see ASTAddTtlAction in googlesql/parser/parse_tree.h.
+type AddTtlAction struct {
+	Span
+	IsIfNotExists bool `json:"is_if_not_exists,omitempty"`
+	Expression    Node `json:"expression"`
+}
+
+func (n *AddTtlAction) Children() []Node {
+	return children(n.Expression)
+}
+
+// ReplaceTtlAction is a "REPLACE ROW DELETION POLICY [IF EXISTS] (expression)"
+// alter action; see ASTReplaceTtlAction in googlesql/parser/parse_tree.h.
+type ReplaceTtlAction struct {
+	Span
+	IsIfExists bool `json:"is_if_exists,omitempty"`
+	Expression Node `json:"expression"`
+}
+
+func (n *ReplaceTtlAction) Children() []Node {
+	return children(n.Expression)
+}
+
+// DropTtlAction is a "DROP ROW DELETION POLICY [IF EXISTS]" alter action; see
+// ASTDropTtlAction in googlesql/parser/parse_tree.h.
+type DropTtlAction struct {
+	Span
+	IsIfExists bool `json:"is_if_exists,omitempty"`
+}
+
+func (n *DropTtlAction) Children() []Node { return nil }
+
 // OptionsList is a parenthesized list of name = value options.
 type OptionsList struct {
 	Span
@@ -2256,13 +2405,14 @@ func (n *NotNullColumnAttribute) Children() []Node { return nil }
 // defaults to true.
 type PrimaryKey struct {
 	Span
-	Enforced    bool                   `json:"enforced"`
-	ElementList *PrimaryKeyElementList `json:"element_list,omitempty"`
-	Options     *OptionsList           `json:"options,omitempty"`
+	Enforced       bool                   `json:"enforced"`
+	ElementList    *PrimaryKeyElementList `json:"element_list,omitempty"`
+	Options        *OptionsList           `json:"options,omitempty"`
+	ConstraintName *Identifier            `json:"constraint_name,omitempty"`
 }
 
 func (n *PrimaryKey) Children() []Node {
-	return children(n.ElementList, n.Options)
+	return children(n.ElementList, n.Options, n.ConstraintName)
 }
 
 // PrimaryKeyElementList is the parenthesized list of primary key elements; see
@@ -2298,13 +2448,14 @@ func (n *PrimaryKeyElement) Children() []Node {
 // constraint; see ASTCheckConstraint in googlesql/parser/parse_tree.h.
 type CheckConstraint struct {
 	Span
-	Enforced   bool         `json:"enforced"`
-	Expression Node         `json:"expression"`
-	Options    *OptionsList `json:"options,omitempty"`
+	Enforced       bool         `json:"enforced"`
+	Expression     Node         `json:"expression"`
+	Options        *OptionsList `json:"options,omitempty"`
+	ConstraintName *Identifier  `json:"constraint_name,omitempty"`
 }
 
 func (n *CheckConstraint) Children() []Node {
-	return children(n.Expression, n.Options)
+	return children(n.Expression, n.Options, n.ConstraintName)
 }
 
 // WithPartitionColumnsClause is "WITH PARTITION COLUMNS [(table elements)]" in
