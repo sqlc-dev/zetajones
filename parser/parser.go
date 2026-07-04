@@ -381,9 +381,22 @@ func (p *parser) parseAlterActionList() (*ast.AlterActionList, error) {
 }
 
 // parseAlterAction parses a single alter action; see alter_action in
-// googlesql.tm. Only SET OPTIONS is implemented so far.
+// googlesql.tm. Only SET OPTIONS and RENAME TO are implemented so far.
 func (p *parser) parseAlterAction() (ast.Node, error) {
 	tok := p.peek()
+	if isKeyword(tok, "RENAME") {
+		renameTok := p.advance()
+		next := p.peek()
+		if !isKeyword(next, "TO") {
+			return nil, p.errorf(next.Pos, "Syntax error: Expected keyword COLUMN or keyword TO but got %s", describeToken(next))
+		}
+		p.advance() // TO
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.RenameToClause{Span: span(renameTok.Pos, path.End()), NewName: path}, nil
+	}
 	if !isKeyword(tok, "SET") {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}

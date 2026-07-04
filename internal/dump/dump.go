@@ -106,6 +106,8 @@ func nodeString(n ast.Node) string {
 		return t.NodeName
 	case *ast.AlterActionList:
 		return "AlterActionList"
+	case *ast.RenameToClause:
+		return "RenameToClause"
 	case *ast.SetOptionsAction:
 		return "SetOptionsAction"
 	case *ast.OptionsList:

@@ -508,6 +508,16 @@ func (n *AlterActionList) Children() []Node {
 	return append([]Node(nil), n.Actions...)
 }
 
+// RenameToClause is a RENAME TO <path> alter action.
+type RenameToClause struct {
+	Span
+	NewName *PathExpression `json:"new_name"`
+}
+
+func (n *RenameToClause) Children() []Node {
+	return children(n.NewName)
+}
+
 // SetOptionsAction is a SET OPTIONS (...) alter action.
 type SetOptionsAction struct {
 	Span
