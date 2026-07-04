@@ -1537,6 +1537,21 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "FUNCTION") {
 		return p.parseCreateFunctionStatement(createTok, scope, isOrReplace, isAggregate)
 	}
+	// CREATE [OR REPLACE] ROW [ACCESS] POLICY ...; see
+	// create_row_access_policy_statement in googlesql.tm. Scope modifiers
+	// (TEMP/PUBLIC/PRIVATE) are not allowed here, so a scope followed by ROW is
+	// reported as an unexpected ROW keyword.
+	if isKeyword(p.peek(), "ROW") {
+		if scope != "" {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+		}
+		return p.parseCreateRowAccessPolicyStatement(createTok, isOrReplace)
+	}
+	// POLICY only follows ROW; on its own after CREATE it is unexpected rather
+	// than a missing TABLE keyword.
+	if isKeyword(p.peek(), "POLICY") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
 	if _, err := p.expectKeyword("TABLE"); err != nil {
 		return nil, err
 	}
@@ -2453,7 +2468,12 @@ func (p *parser) parseRevokeFromClause() (*ast.RevokeFromClause, error) {
 // parseFilterUsingClause parses "FILTER USING (expr)"; see filter_using_clause
 // in googlesql.tm.
 func (p *parser) parseFilterUsingClause() (*ast.FilterUsingClause, error) {
-	filterTok := p.advance() // FILTER
+	// The FILTER keyword is optional; when omitted the clause location starts
+	// at USING. See filter_using_clause in googlesql.tm.
+	start := p.peek().Pos
+	if isKeyword(p.peek(), "FILTER") {
+		p.advance()
+	}
 	if _, err := p.expectKeyword("USING"); err != nil {
 		return nil, err
 	}
@@ -2468,7 +2488,76 @@ func (p *parser) parseFilterUsingClause() (*ast.FilterUsingClause, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.FilterUsingClause{Span: span(filterTok.Pos, rparen.End), Predicate: expr}, nil
+	return &ast.FilterUsingClause{Span: span(start, rparen.End), Predicate: expr}, nil
+}
+
+// parseCreateRowAccessPolicyStatement parses the tail of "CREATE [OR REPLACE]
+// ROW [ACCESS] POLICY [IF NOT EXISTS] [name] ON path [grant_to] filter_using";
+// see create_row_access_policy_statement in googlesql.tm. The ROW keyword is
+// the next token. The optional policy name is a single identifier and is
+// emitted last in the debug tree.
+func (p *parser) parseCreateRowAccessPolicyStatement(createTok token.Token, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // ROW
+	if isKeyword(p.peek(), "ACCESS") {
+		p.advance()
+	}
+	if _, err := p.expectKeyword("POLICY"); err != nil {
+		return nil, err
+	}
+	stmt := &ast.CreateRowAccessPolicyStatement{Span: span(createTok.Pos, 0), IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	// Optional policy name: a single (non-reserved) identifier wrapped in a
+	// PathExpression node. A reserved keyword such as ON is not an identifier,
+	// so the common no-name form falls through to the ON expectation below.
+	var name *ast.PathExpression
+	if tok := p.peek(); tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+		ident := p.parseIdentifierToken(p.advance())
+		name = &ast.PathExpression{Span: span(ident.Pos(), ident.End()), Names: []*ast.Identifier{ident}}
+	}
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.TargetPath = target
+	// Optional create_row_access_policy_grant_to_clause: either
+	// "GRANT TO (grantee_list)" or the bare "TO grantee_list".
+	switch {
+	case isKeyword(p.peek(), "GRANT"):
+		gt, err := p.parseGrantToClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.GrantTo = gt
+	case isKeyword(p.peek(), "TO"):
+		toTok := p.advance() // TO
+		grantees, err := p.parseGranteeList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.GrantTo = &ast.GrantToClause{Span: span(toTok.Pos, grantees.End()), Grantees: grantees}
+	}
+	// filter_using_clause is mandatory but is introduced by either the optional
+	// FILTER keyword or USING; any other token here is simply unexpected (the
+	// reference has several valid continuations, so it does not name one).
+	if !isKeyword(p.peek(), "FILTER") && !isKeyword(p.peek(), "USING") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	fu, err := p.parseFilterUsingClause()
+	if err != nil {
+		return nil, err
+	}
+	stmt.FilterUsing = fu
+	stmt.Name = name
+	stmt.Stop = fu.End()
+	return stmt, nil
 }
 
 // parseGranteeList parses one or more comma-separated grantees; the opening

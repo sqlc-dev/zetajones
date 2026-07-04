@@ -617,6 +617,18 @@ func nodeString(n ast.Node) string {
 			return "CreateTableStatement"
 		}
 		return fmt.Sprintf("CreateTableStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateRowAccessPolicyStatement:
+		var mods []string
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreateRowAccessPolicyStatement"
+		}
+		return fmt.Sprintf("CreateRowAccessPolicyStatement(%s)", strings.Join(mods, ", "))
 	case *ast.CreateTableFunctionStatement:
 		// The SQL SECURITY clause is parsed but, matching the reference's
 		// ASTCreateTableFunctionStatement::SingleNodeDebugString (which defers

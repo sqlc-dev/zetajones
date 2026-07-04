@@ -2164,6 +2164,27 @@ func (n *CreateTableStatement) Children() []Node {
 	return children(n.Name, n.Query)
 }
 
+// CreateRowAccessPolicyStatement is a
+// "CREATE [OR REPLACE] ROW [ACCESS] POLICY [IF NOT EXISTS] [name] ON path
+// [grant_to_clause] filter_using_clause" statement; see
+// ASTCreateRowAccessPolicyStatement in googlesql/parser/parse_tree.h. The
+// optional policy name is emitted LAST in the debug tree, matching the
+// reference child order (target path, grant-to, filter-using, name).
+type CreateRowAccessPolicyStatement struct {
+	Span
+	IsOrReplace   bool               `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool               `json:"is_if_not_exists,omitempty"`
+	TargetPath    *PathExpression    `json:"target_path"`
+	GrantTo       *GrantToClause     `json:"grant_to,omitempty"`
+	FilterUsing   *FilterUsingClause `json:"filter_using"`
+	Name          *PathExpression    `json:"name,omitempty"`
+}
+
+func (n *CreateRowAccessPolicyStatement) statementNode() {}
+func (n *CreateRowAccessPolicyStatement) Children() []Node {
+	return children(n.TargetPath, n.GrantTo, n.FilterUsing, n.Name)
+}
+
 // CreateTableFunctionStatement is a CREATE TABLE FUNCTION statement; see
 // ASTCreateTableFunctionStatement in googlesql/parser/parse_tree.h. Scope is
 // "", "TEMP", "PUBLIC", or "PRIVATE" (TEMPORARY normalizes to "TEMP").
