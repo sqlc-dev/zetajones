@@ -3814,6 +3814,20 @@ func (p *parser) parseComparison() (ast.Node, error) {
 				Left:  lhs,
 				Right: rhs,
 			})
+		case isKeyword(tok, "UNKNOWN"):
+			// IS [NOT] UNKNOWN produces a unary expression (see the
+			// is_operator "UNKNOWN" alternative of
+			// expression_higher_prec_than_and in googlesql.tm).
+			p.advance()
+			op := "IS UNKNOWN"
+			if isNot {
+				op = "IS NOT UNKNOWN"
+			}
+			return p.finishComparison(&ast.UnaryExpression{
+				Span:    span(p.extStart(lhs), tok.End),
+				Op:      op,
+				Operand: lhs,
+			})
 		case isKeyword(tok, "NULL"):
 			p.advance()
 			rhs = &ast.NullLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
@@ -3821,7 +3835,7 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			p.advance()
 			rhs = &ast.BooleanLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image, Value: isKeyword(tok, "TRUE")}
 		default:
-			return nil, p.errorf(tok.Pos, "Syntax error: Expected NULL, TRUE, or FALSE after IS")
+			return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword FALSE or keyword NULL or keyword TRUE or keyword UNKNOWN but got %s", describeToken(tok))
 		}
 		return p.finishComparison(&ast.BinaryExpression{
 			Span:  span(p.extStart(lhs), p.extEnd(rhs)),
