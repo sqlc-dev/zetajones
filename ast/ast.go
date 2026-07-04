@@ -2170,17 +2170,146 @@ func (n *CreateTableStatement) Children() []Node {
 // "", "TEMP", "PUBLIC", or "PRIVATE".
 type CreateExternalTableStatement struct {
 	Span
-	Scope          string                `json:"scope,omitempty"`
-	IsOrReplace    bool                  `json:"is_or_replace,omitempty"`
-	IsIfNotExists  bool                  `json:"is_if_not_exists,omitempty"`
-	Name           *PathExpression       `json:"name"`
-	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
-	Options        *OptionsList          `json:"options"`
+	Scope            string                      `json:"scope,omitempty"`
+	IsOrReplace      bool                        `json:"is_or_replace,omitempty"`
+	IsIfNotExists    bool                        `json:"is_if_not_exists,omitempty"`
+	Name             *PathExpression             `json:"name"`
+	TableElementList *TableElementList           `json:"table_element_list,omitempty"`
+	WithPartition    *WithPartitionColumnsClause `json:"with_partition_columns,omitempty"`
+	WithConnection   *WithConnectionClause       `json:"with_connection,omitempty"`
+	Options          *OptionsList                `json:"options"`
 }
 
 func (n *CreateExternalTableStatement) statementNode() {}
 func (n *CreateExternalTableStatement) Children() []Node {
-	return children(n.Name, n.WithConnection, n.Options)
+	return children(n.Name, n.TableElementList, n.WithPartition, n.WithConnection, n.Options)
+}
+
+// TableElementList is the parenthesized list of column definitions and table
+// constraints in a CREATE TABLE-family statement; see ASTTableElementList in
+// googlesql/parser/parse_tree.h. Its span runs from the opening to the
+// closing parenthesis.
+type TableElementList struct {
+	Span
+	Elements []Node `json:"elements,omitempty"`
+}
+
+func (n *TableElementList) Children() []Node {
+	return append([]Node(nil), n.Elements...)
+}
+
+// ColumnDefinition is "identifier column_schema [attributes] [OPTIONS(...)]" in
+// a table element list; see ASTColumnDefinition in
+// googlesql/parser/parse_tree.h.
+type ColumnDefinition struct {
+	Span
+	Name   *Identifier `json:"name"`
+	Schema Node        `json:"schema"`
+}
+
+func (n *ColumnDefinition) Children() []Node {
+	return children(n.Name, n.Schema)
+}
+
+// SimpleColumnSchema is a column schema naming a type by path expression (e.g.
+// "int64"); see ASTSimpleColumnSchema in googlesql/parser/parse_tree.h. The
+// optional ColumnAttributeList holds trailing attributes such as NOT NULL.
+type SimpleColumnSchema struct {
+	Span
+	Type       *PathExpression      `json:"type"`
+	Attributes *ColumnAttributeList `json:"attributes,omitempty"`
+}
+
+func (n *SimpleColumnSchema) Children() []Node {
+	return children(n.Type, n.Attributes)
+}
+
+// ColumnAttributeList is the list of column attributes trailing a column
+// schema; see ASTColumnAttributeList in googlesql/parser/parse_tree.h.
+type ColumnAttributeList struct {
+	Span
+	Attributes []Node `json:"attributes,omitempty"`
+}
+
+func (n *ColumnAttributeList) Children() []Node {
+	return append([]Node(nil), n.Attributes...)
+}
+
+// NotNullColumnAttribute is the "NOT NULL" column attribute; see
+// ASTNotNullColumnAttribute in googlesql/parser/parse_tree.h. It has no
+// children.
+type NotNullColumnAttribute struct {
+	Span
+}
+
+func (n *NotNullColumnAttribute) Children() []Node { return nil }
+
+// PrimaryKey is a "PRIMARY KEY (elements) [ENFORCED|NOT ENFORCED]" table
+// constraint; see ASTPrimaryKey in googlesql/parser/parse_tree.h. Enforced
+// defaults to true.
+type PrimaryKey struct {
+	Span
+	Enforced    bool                   `json:"enforced"`
+	ElementList *PrimaryKeyElementList `json:"element_list,omitempty"`
+	Options     *OptionsList           `json:"options,omitempty"`
+}
+
+func (n *PrimaryKey) Children() []Node {
+	return children(n.ElementList, n.Options)
+}
+
+// PrimaryKeyElementList is the parenthesized list of primary key elements; see
+// ASTPrimaryKeyElementList in googlesql/parser/parse_tree.h.
+type PrimaryKeyElementList struct {
+	Span
+	Elements []*PrimaryKeyElement `json:"elements"`
+}
+
+func (n *PrimaryKeyElementList) Children() []Node {
+	out := make([]Node, 0, len(n.Elements))
+	for _, e := range n.Elements {
+		out = append(out, e)
+	}
+	return out
+}
+
+// PrimaryKeyElement is a single "column [ASC|DESC] [NULLS FIRST|LAST]" entry
+// in a primary key element list; see ASTPrimaryKeyElement in
+// googlesql/parser/parse_tree.h. Ordering is "", "ASC", or "DESC" (the empty
+// value renders as "(ASC)", an explicit "ASC" renders as "(ASC EXPLICITLY)").
+type PrimaryKeyElement struct {
+	Span
+	Column   *Identifier `json:"column"`
+	Ordering string      `json:"ordering,omitempty"`
+}
+
+func (n *PrimaryKeyElement) Children() []Node {
+	return children(n.Column)
+}
+
+// CheckConstraint is a "CHECK (expression) [ENFORCED|NOT ENFORCED]" table
+// constraint; see ASTCheckConstraint in googlesql/parser/parse_tree.h.
+type CheckConstraint struct {
+	Span
+	Enforced   bool         `json:"enforced"`
+	Expression Node         `json:"expression"`
+	Options    *OptionsList `json:"options,omitempty"`
+}
+
+func (n *CheckConstraint) Children() []Node {
+	return children(n.Expression, n.Options)
+}
+
+// WithPartitionColumnsClause is "WITH PARTITION COLUMNS [(table elements)]" in
+// a CREATE EXTERNAL TABLE statement; see ASTWithPartitionColumnsClause in
+// googlesql/parser/parse_tree.h.
+type WithPartitionColumnsClause struct {
+	Span
+	TableElementList *TableElementList `json:"table_element_list,omitempty"`
+}
+
+func (n *WithPartitionColumnsClause) Children() []Node {
+	return children(n.TableElementList)
 }
 
 // CreateViewStatement is a CREATE [MATERIALIZED|APPROX] VIEW statement; see

@@ -441,6 +441,39 @@ func nodeString(n ast.Node) string {
 		return "ConnectionClause"
 	case *ast.DefaultLiteral:
 		return "DefaultLiteral"
+	case *ast.TableElementList:
+		return "TableElementList"
+	case *ast.ColumnDefinition:
+		return "ColumnDefinition"
+	case *ast.SimpleColumnSchema:
+		return "SimpleColumnSchema"
+	case *ast.ColumnAttributeList:
+		return "ColumnAttributeList"
+	case *ast.NotNullColumnAttribute:
+		return "NotNullColumnAttribute"
+	case *ast.PrimaryKey:
+		if t.Enforced {
+			return "PrimaryKey(ENFORCED)"
+		}
+		return "PrimaryKey(NOT ENFORCED)"
+	case *ast.PrimaryKeyElementList:
+		return "PrimaryKeyElementList"
+	case *ast.PrimaryKeyElement:
+		switch t.Ordering {
+		case "DESC":
+			return "PrimaryKeyElement(DESC)"
+		case "ASC":
+			return "PrimaryKeyElement(ASC EXPLICITLY)"
+		default:
+			return "PrimaryKeyElement(ASC)"
+		}
+	case *ast.CheckConstraint:
+		if t.Enforced {
+			return "CheckConstraint(ENFORCED)"
+		}
+		return "CheckConstraint(NOT ENFORCED)"
+	case *ast.WithPartitionColumnsClause:
+		return "WithPartitionColumnsClause"
 	case *ast.CallStatement:
 		return "CallStatement"
 	case *ast.ExecuteImmediateStatement:

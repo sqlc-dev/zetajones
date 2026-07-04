@@ -241,6 +241,12 @@ const FeatureCreateFunctionLanguageWithConnection Feature = "CREATE_FUNCTION_LAN
 // character".
 const FeatureAllowDashesInTableName Feature = "ALLOW_DASHES_IN_TABLE_NAME"
 
+// FeatureOrderedPrimaryKeys gates ASC/DESC and NULLS ordering in a PRIMARY KEY
+// element list (FEATURE_ORDERED_PRIMARY_KEYS); see primary_key_element in
+// googlesql.tm. When off, ordering reports "Ordering for primary keys is not
+// supported".
+const FeatureOrderedPrimaryKeys Feature = "ORDERED_PRIMARY_KEYS"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -256,6 +262,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureRemoteFunction:                       true,
 	FeatureCreateFunctionLanguageWithConnection: true,
 	FeatureAllowDashesInTableName:               true,
+	FeatureOrderedPrimaryKeys:                   false, // in_development
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -1584,6 +1591,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		p.advance()
 		scope = "PRIVATE"
 	}
+	// OR REPLACE must precede the scope modifier, so a scope followed by OR is
+	// reported as an unexpected OR keyword rather than a missing object type.
+	if scope != "" && !isOrReplace && isKeyword(p.peek(), "OR") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword OR")
+	}
 	// CREATE [OR REPLACE] [MATERIALIZED|APPROX] [RECURSIVE] VIEW ...; see
 	// create_view_statement in googlesql.tm. MATERIALIZED and APPROX views do
 	// not accept a scope modifier, so a scope followed by one is reported as
@@ -1605,6 +1617,8 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") && isKeyword(p.peekAt(2), "FUNCTION") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: CREATE EXTERNAL TABLE FUNCTION is not supported")
 	}
+	// CREATE [OR REPLACE] [scope] EXTERNAL TABLE ...; see
+	// create_external_table_statement in googlesql.tm.
 	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") {
 		return p.parseCreateExternalTableStatement(createTok, scope, isOrReplace)
 	}
@@ -1667,11 +1681,10 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	return stmt, nil
 }
 
-// parseCreateExternalTableStatement parses "CREATE [OR REPLACE] [scope]
-// EXTERNAL TABLE [IF NOT EXISTS] name [WITH CONNECTION connection] OPTIONS(...)";
-// see create_external_table_statement in googlesql.tm. The EXTERNAL and TABLE
-// keywords are not yet consumed. Table element lists, LIKE, COLLATE, and WITH
-// PARTITION COLUMNS clauses are not yet supported.
+// parseCreateExternalTableStatement parses the tail of "CREATE [OR REPLACE]
+// [scope] EXTERNAL TABLE [IF NOT EXISTS] name [(table elements)]
+// [WITH PARTITION COLUMNS [(...)]] [WITH CONNECTION conn] OPTIONS(...)"; see
+// create_external_table_statement in googlesql.tm. EXTERNAL is the next token.
 func (p *parser) parseCreateExternalTableStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
 	p.advance() // EXTERNAL
 	p.advance() // TABLE
@@ -1687,18 +1700,66 @@ func (p *parser) parseCreateExternalTableStatement(createTok token.Token, scope 
 		return nil, err
 	}
 	stmt.Name = name
-	// WITH CONNECTION connection (WITH PARTITION COLUMNS is not yet supported).
-	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "CONNECTION") {
-		wc, err := p.parseWithConnectionClause()
+	stmt.Stop = name.End()
+
+	hasTableElements := false
+	if p.peek().Kind == token.LPAREN {
+		tel, err := p.parseTableElementList()
 		if err != nil {
 			return nil, err
 		}
-		stmt.WithConnection = wc
+		stmt.TableElementList = tel
+		stmt.Stop = tel.End()
+		hasTableElements = true
 	}
-	// OPTIONS(...) is required; see the "options" rule in googlesql.tm.
-	if _, err := p.expectKeyword("OPTIONS"); err != nil {
-		return nil, err
+
+	// Optional WITH PARTITION COLUMNS then WITH CONNECTION, in that order,
+	// followed by the required OPTIONS clause.
+	for isKeyword(p.peek(), "WITH") {
+		next := p.peekAt(1)
+		switch {
+		case stmt.WithPartition == nil && stmt.WithConnection == nil && isKeyword(next, "PARTITION"):
+			wp, err := p.parseWithPartitionColumnsClause()
+			if err != nil {
+				return nil, err
+			}
+			stmt.WithPartition = wp
+			stmt.Stop = wp.End()
+		case stmt.WithConnection == nil && isKeyword(next, "CONNECTION"):
+			wc, err := p.parseWithConnectionClause()
+			if err != nil {
+				return nil, err
+			}
+			stmt.WithConnection = wc
+			stmt.Stop = wc.End()
+		case stmt.WithConnection != nil:
+			// A connection clause was already parsed; only OPTIONS may follow.
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword OPTIONS but got %s", describeToken(p.peek()))
+		case stmt.WithPartition != nil:
+			// PARTITION COLUMNS already parsed; only CONNECTION may follow.
+			return nil, p.errorf(next.Pos, "Syntax error: Expected keyword CONNECTION but got %s", describeToken(next))
+		default:
+			// No WITH clause parsed yet; both PARTITION and CONNECTION are valid.
+			return nil, p.errorf(next.Pos, "Syntax error: Expected keyword CONNECTION or keyword PARTITION but got %s", describeToken(next))
+		}
 	}
+
+	if !isKeyword(p.peek(), "OPTIONS") {
+		tok := p.peek()
+		switch {
+		case stmt.WithConnection != nil:
+			// A WITH CONNECTION clause was consumed; only OPTIONS may follow.
+			return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword OPTIONS but got %s", describeToken(tok))
+		case stmt.WithPartition != nil:
+			// After WITH PARTITION COLUMNS, WITH CONNECTION or OPTIONS may follow.
+			return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword OPTIONS or keyword WITH but got %s", describeToken(tok))
+		case hasTableElements:
+			return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword DEFAULT or keyword LIKE or keyword OPTIONS or keyword WITH but got %s", describeToken(tok))
+		default:
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+	}
+	p.advance() // OPTIONS
 	opts, err := p.parseOptionsList()
 	if err != nil {
 		return nil, err
@@ -1706,6 +1767,272 @@ func (p *parser) parseCreateExternalTableStatement(createTok token.Token, scope 
 	stmt.Options = opts
 	stmt.Stop = opts.End()
 	return stmt, nil
+}
+
+// parseWithPartitionColumnsClause parses "WITH PARTITION COLUMNS
+// [(table elements)]"; see with_partition_columns_clause in googlesql.tm. WITH
+// is the next token.
+func (p *parser) parseWithPartitionColumnsClause() (*ast.WithPartitionColumnsClause, error) {
+	withTok := p.advance() // WITH
+	p.advance()            // PARTITION
+	columnsTok, err := p.expectKeyword("COLUMNS")
+	if err != nil {
+		return nil, err
+	}
+	clause := &ast.WithPartitionColumnsClause{Span: span(withTok.Pos, columnsTok.End)}
+	if p.peek().Kind == token.LPAREN {
+		tel, err := p.parseTableElementList()
+		if err != nil {
+			return nil, err
+		}
+		clause.TableElementList = tel
+		clause.Stop = tel.End()
+	}
+	return clause, nil
+}
+
+// parseTableElementList parses "(table_element [, table_element]...)"; see
+// table_element_list in googlesql.tm. The opening parenthesis is the next
+// token. An empty list "()" is an error unless FEATURE_SPANNER_LEGACY_DDL is
+// enabled (which the parser does not support).
+func (p *parser) parseTableElementList() (*ast.TableElementList, error) {
+	lparen := p.advance() // (
+	if p.peek().Kind == token.RPAREN {
+		rparen := p.peek()
+		return nil, p.errorf(rparen.Pos, "A table must define at least one column.")
+	}
+	list := &ast.TableElementList{Span: span(lparen.Pos, 0)}
+	for {
+		elem, err := p.parseTableElement()
+		if err != nil {
+			return nil, err
+		}
+		list.Elements = append(list.Elements, elem)
+		switch p.peek().Kind {
+		case token.COMMA:
+			p.advance()
+			// A trailing comma before ")" is allowed.
+			if p.peek().Kind == token.RPAREN {
+				rparen := p.advance()
+				list.Stop = rparen.End
+				return list, nil
+			}
+		case token.RPAREN:
+			rparen := p.advance()
+			list.Stop = rparen.End
+			return list, nil
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected \")\" or \",\" but got %s", describeToken(p.peek()))
+		}
+	}
+}
+
+// parseTableElement parses a single column definition or table constraint; see
+// table_element in googlesql.tm.
+func (p *parser) parseTableElement() (ast.Node, error) {
+	if isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY") {
+		return p.parsePrimaryKey()
+	}
+	if isKeyword(p.peek(), "CHECK") && p.peekAt(1).Kind == token.LPAREN {
+		return p.parseCheckConstraint()
+	}
+	return p.parseColumnDefinition()
+}
+
+// parseColumnDefinition parses "identifier column_schema [attributes]"; see
+// table_column_definition in googlesql.tm.
+func (p *parser) parseColumnDefinition() (*ast.ColumnDefinition, error) {
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	schema, err := p.parseTableColumnSchema()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ColumnDefinition{Span: span(name.Pos(), schema.End()), Name: name, Schema: schema}, nil
+}
+
+// parseTableColumnSchema parses a simple column schema: a type named by a path
+// expression, optionally followed by column attributes such as NOT NULL; see
+// table_column_schema and simple_column_schema_inner in googlesql.tm. The more
+// complex schema forms (arrays, structs, generated columns, collation, type
+// parameters, options) are not implemented yet.
+func (p *parser) parseTableColumnSchema() (ast.Node, error) {
+	// A column schema must begin with a type name (a path expression, in the
+	// forms currently supported). A non-identifier token here is reported as
+	// unexpected, matching the reference's generic error at this LR state.
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	typePath, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	schema := &ast.SimpleColumnSchema{Span: span(typePath.Pos(), typePath.End()), Type: typePath}
+	if attrs := p.tryParseColumnAttributes(); attrs != nil {
+		schema.Attributes = attrs
+		schema.Stop = attrs.End()
+	}
+	return schema, nil
+}
+
+// tryParseColumnAttributes parses a run of column attributes trailing a column
+// schema; see column_attributes in googlesql.tm. Only NOT NULL is implemented
+// (the sole attribute exercised by the external-table tests). It returns nil
+// when no attribute is present.
+func (p *parser) tryParseColumnAttributes() *ast.ColumnAttributeList {
+	if !(isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL")) {
+		return nil
+	}
+	list := &ast.ColumnAttributeList{}
+	for isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL") {
+		notTok := p.advance()  // NOT
+		nullTok := p.advance() // NULL
+		if len(list.Attributes) == 0 {
+			list.Start = notTok.Pos
+		}
+		list.Stop = nullTok.End
+		list.Attributes = append(list.Attributes, &ast.NotNullColumnAttribute{Span: span(notTok.Pos, nullTok.End)})
+	}
+	return list
+}
+
+// parsePrimaryKey parses "PRIMARY KEY (elements) [ENFORCED|NOT ENFORCED]
+// [OPTIONS(...)]"; see primary_key_spec in googlesql.tm. PRIMARY is the next
+// token.
+func (p *parser) parsePrimaryKey() (*ast.PrimaryKey, error) {
+	primaryTok := p.advance() // PRIMARY
+	p.advance()               // KEY
+	pk := &ast.PrimaryKey{Span: span(primaryTok.Pos, 0), Enforced: true}
+	list, closeEnd, err := p.parsePrimaryKeyElementList()
+	if err != nil {
+		return nil, err
+	}
+	pk.ElementList = list
+	pk.Stop = closeEnd
+	if enforced, endPos, ok, err := p.tryParseConstraintEnforcement(); err != nil {
+		return nil, err
+	} else if ok {
+		pk.Enforced = enforced
+		pk.Stop = endPos
+	}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		pk.Options = opts
+		pk.Stop = opts.End()
+	}
+	return pk, nil
+}
+
+// parsePrimaryKeyElementList parses "(primary_key_element [, ...])"; see
+// primary_key_element_list in googlesql.tm. It returns the list (nil for an
+// empty "()") and the offset just past the closing parenthesis.
+func (p *parser) parsePrimaryKeyElementList() (*ast.PrimaryKeyElementList, int, error) {
+	lparen, err := p.expect(token.LPAREN, "\"(\"")
+	if err != nil {
+		return nil, 0, err
+	}
+	if p.peek().Kind == token.RPAREN {
+		rparen := p.advance()
+		return nil, rparen.End, nil
+	}
+	list := &ast.PrimaryKeyElementList{Span: span(lparen.Pos, 0)}
+	for {
+		elem, err := p.parsePrimaryKeyElement()
+		if err != nil {
+			return nil, 0, err
+		}
+		list.Elements = append(list.Elements, elem)
+		switch p.peek().Kind {
+		case token.COMMA:
+			p.advance()
+		case token.RPAREN:
+			rparen := p.advance()
+			list.Stop = rparen.End
+			return list, rparen.End, nil
+		default:
+			return nil, 0, p.errorf(p.peek().Pos, "Syntax error: Expected \")\" or \",\" but got %s", describeToken(p.peek()))
+		}
+	}
+}
+
+// parsePrimaryKeyElement parses "identifier [ASC|DESC]"; see
+// primary_key_element in googlesql.tm. Ordering requires
+// FEATURE_ORDERED_PRIMARY_KEYS; without it, an explicit ordering is an error.
+func (p *parser) parsePrimaryKeyElement() (*ast.PrimaryKeyElement, error) {
+	col, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	elem := &ast.PrimaryKeyElement{Span: span(col.Pos(), col.End()), Column: col}
+	ordering := ""
+	orderPos := -1
+	if isKeyword(p.peek(), "ASC") {
+		ordering = "ASC"
+		orderPos = p.peek().Pos
+		elem.Stop = p.advance().End
+	} else if isKeyword(p.peek(), "DESC") {
+		ordering = "DESC"
+		orderPos = p.peek().Pos
+		elem.Stop = p.advance().End
+	}
+	if ordering != "" && !p.features.Enabled(FeatureOrderedPrimaryKeys) {
+		return nil, p.errorf(orderPos, "Ordering for primary keys is not supported")
+	}
+	elem.Ordering = ordering
+	return elem, nil
+}
+
+// parseCheckConstraint parses "CHECK (expression) [ENFORCED|NOT ENFORCED]
+// [OPTIONS(...)]"; see table_constraint_spec in googlesql.tm. CHECK is the
+// next token.
+func (p *parser) parseCheckConstraint() (*ast.CheckConstraint, error) {
+	checkTok := p.advance() // CHECK
+	p.advance()             // (
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, "\")\"")
+	if err != nil {
+		return nil, err
+	}
+	cc := &ast.CheckConstraint{Span: span(checkTok.Pos, rparen.End), Enforced: true, Expression: expr}
+	if enforced, endPos, ok, err := p.tryParseConstraintEnforcement(); err != nil {
+		return nil, err
+	} else if ok {
+		cc.Enforced = enforced
+		cc.Stop = endPos
+	}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		cc.Options = opts
+		cc.Stop = opts.End()
+	}
+	return cc, nil
+}
+
+// tryParseConstraintEnforcement parses an optional "ENFORCED" or "NOT ENFORCED"
+// clause; see constraint_enforcement in googlesql.tm. The third return value
+// reports whether a clause was present; the second is the offset just past it.
+func (p *parser) tryParseConstraintEnforcement() (bool, int, bool, error) {
+	if isKeyword(p.peek(), "ENFORCED") {
+		return true, p.advance().End, true, nil
+	}
+	if isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "ENFORCED") {
+		p.advance() // NOT
+		return false, p.advance().End, true, nil
+	}
+	return true, 0, false, nil
 }
 
 // parseCreateViewStatement parses the tail of "CREATE [OR REPLACE] [scope]
