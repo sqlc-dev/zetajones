@@ -1618,6 +1618,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "RECURSIVE") || isKeyword(p.peek(), "VIEW") {
 		return p.parseCreateViewStatement(createTok, scope, isOrReplace, "")
 	}
+	// CREATE [OR REPLACE] [scope] MODEL ...; see create_model_statement in
+	// googlesql.tm.
+	if isKeyword(p.peek(), "MODEL") {
+		return p.parseCreateModelStatement(createTok, scope, isOrReplace)
+	}
 	// CREATE [OR REPLACE] [scope] EXTERNAL TABLE FUNCTION is recognized only to
 	// diagnose it; see create_external_table_function_statement in
 	// googlesql.tm. The error points at the EXTERNAL keyword.
@@ -1628,6 +1633,13 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// create_external_table_statement in googlesql.tm.
 	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") {
 		return p.parseCreateExternalTableStatement(createTok, scope, isOrReplace)
+	}
+	// CREATE [OR REPLACE] [scope] EXTERNAL must be followed by SCHEMA or TABLE;
+	// there is no CREATE EXTERNAL MODEL. The error points at the token after
+	// EXTERNAL.
+	if isKeyword(p.peek(), "EXTERNAL") {
+		p.advance() // EXTERNAL
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword SCHEMA or keyword TABLE but got %s", describeToken(p.peek()))
 	}
 	// CREATE [OR REPLACE] [scope] [AGGREGATE] FUNCTION is a scalar/aggregate
 	// function; see create_function_statement in googlesql.tm.
@@ -2204,6 +2216,218 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 	stmt.Query = query
 	stmt.Stop = p.prevEnd()
 	return stmt, nil
+}
+
+// parseCreateModelStatement parses the tail of "CREATE [OR REPLACE] [scope]
+// MODEL [IF NOT EXISTS] name [INPUT(...) OUTPUT(...)] [TRANSFORM(...)]
+// [REMOTE] [WITH CONNECTION ...] [OPTIONS(...)] [AS query | AS
+// (aliased_query_list)]"; see create_model_statement in googlesql.tm. MODEL is
+// the next token.
+func (p *parser) parseCreateModelStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // MODEL
+	stmt := &ast.CreateModelStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+
+	// input_output_clause?: "INPUT (columns) OUTPUT (columns)".
+	if isKeyword(p.peek(), "INPUT") {
+		inputTok := p.advance() // INPUT
+		if p.peek().Kind != token.LPAREN {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected \"(\" but got %s", describeToken(p.peek()))
+		}
+		input, err := p.parseTableElementList()
+		if err != nil {
+			return nil, err
+		}
+		if tableElementListHasConstraints(input) {
+			return nil, p.errorf(input.Pos(), "Syntax error: Element list contains unexpected constraint")
+		}
+		if _, err := p.expectKeyword("OUTPUT"); err != nil {
+			return nil, err
+		}
+		if p.peek().Kind != token.LPAREN {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected \"(\" but got %s", describeToken(p.peek()))
+		}
+		output, err := p.parseTableElementList()
+		if err != nil {
+			return nil, err
+		}
+		if tableElementListHasConstraints(output) {
+			return nil, p.errorf(output.Pos(), "Syntax error: Element list contains unexpected constraint")
+		}
+		stmt.InputOutput = &ast.InputOutputClause{Span: span(inputTok.Pos, output.End()), Input: input, Output: output}
+		stmt.Stop = stmt.InputOutput.End()
+	}
+
+	// transform_clause?: "TRANSFORM ( select_list )".
+	if isKeyword(p.peek(), "TRANSFORM") {
+		transformTok := p.advance() // TRANSFORM
+		if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+			return nil, err
+		}
+		sl, err := p.parseSelectList()
+		if err != nil {
+			return nil, err
+		}
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		stmt.Transform = &ast.TransformClause{Span: span(transformTok.Pos, rparen.End), SelectList: sl}
+		stmt.Stop = stmt.Transform.End()
+	}
+
+	// remote_with_connection_clause?: "REMOTE [WITH CONNECTION ...]" or
+	// "WITH CONNECTION ...".
+	if isKeyword(p.peek(), "REMOTE") {
+		if !p.features.Enabled(FeatureRemoteFunction) {
+			return nil, p.errorf(p.peek().Pos, "Keyword REMOTE is not supported")
+		}
+		stmt.IsRemote = true
+		stmt.Stop = p.advance().End
+		if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "CONNECTION") {
+			wc, err := p.parseWithConnectionClause()
+			if err != nil {
+				return nil, err
+			}
+			stmt.WithConnection = wc
+			stmt.Stop = wc.End()
+		}
+	} else if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "CONNECTION") {
+		if !p.features.Enabled(FeatureRemoteFunction) && !p.features.Enabled(FeatureCreateFunctionLanguageWithConnection) {
+			return nil, p.errorf(p.peek().Pos, "WITH CONNECTION clause is not supported")
+		}
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+		stmt.Stop = wc.End()
+	}
+
+	// options?
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+
+	// as_query_or_aliased_query_list?: "AS query" or "AS (aliased_query_list)".
+	if isKeyword(p.peek(), "AS") {
+		p.advance() // AS
+		// "( identifier AS ..." begins an aliased query list; anything else is a
+		// plain (possibly parenthesized) query. A query can never start with an
+		// identifier, so this lookahead is unambiguous.
+		if p.peek().Kind == token.LPAREN && isAliasedQueryStart(p.peekAt(1), p.peekAt(2)) {
+			list, err := p.parseAliasedQueryList()
+			if err != nil {
+				return nil, err
+			}
+			stmt.AliasedQueries = list
+			stmt.Stop = p.prevEnd()
+		} else {
+			query, err := p.parseQuery()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Query = query
+			stmt.Stop = p.prevEnd()
+		}
+	}
+	return stmt, nil
+}
+
+// tableElementListHasConstraints reports whether the list holds any table
+// constraint element (as opposed to a plain column definition); see
+// ASTTableElementList::HasConstraints in parse_tree.cc.
+func tableElementListHasConstraints(list *ast.TableElementList) bool {
+	for _, elem := range list.Elements {
+		if _, ok := elem.(*ast.ColumnDefinition); !ok {
+			return true
+		}
+	}
+	return false
+}
+
+// isAliasedQueryStart reports whether the two tokens after an opening "(" begin
+// an aliased query ("identifier AS ..."); see aliased_query in googlesql.tm.
+func isAliasedQueryStart(first, second token.Token) bool {
+	if first.Kind != token.IDENT && first.Kind != token.QUOTED_IDENT {
+		return false
+	}
+	if isReserved(first) {
+		return false
+	}
+	return isKeyword(second, "AS")
+}
+
+// parseAliasedQueryList parses "( aliased_query [, aliased_query]... )"; see
+// aliased_query_list in googlesql.tm. The opening parenthesis is the next
+// token. The list's location spans the aliased queries, excluding the
+// surrounding parentheses.
+func (p *parser) parseAliasedQueryList() (*ast.AliasedQueryList, error) {
+	p.advance() // (
+	list := &ast.AliasedQueryList{}
+	for {
+		aq, err := p.parseAliasedQuery()
+		if err != nil {
+			return nil, err
+		}
+		if len(list.Queries) == 0 {
+			list.Start = aq.Pos()
+		}
+		list.Queries = append(list.Queries, aq)
+		list.Stop = aq.End()
+		if p.peek().Kind == token.COMMA {
+			p.advance()
+			continue
+		}
+		break
+	}
+	if _, err := p.expect(token.RPAREN, `")" or ","`); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// parseAliasedQuery parses "identifier AS ( query )"; see aliased_query in
+// googlesql.tm. The aliased query's location includes the parentheses.
+func (p *parser) parseAliasedQuery() (*ast.AliasedQuery, error) {
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	if isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	}
+	ident := p.parseIdentifierToken(p.advance())
+	if _, err := p.expectKeyword("AS"); err != nil {
+		return nil, err
+	}
+	lparen := p.peek()
+	if lparen.Kind != token.LPAREN {
+		return nil, p.errorf(lparen.Pos, "Syntax error: Expected \"(\" but got %s", describeToken(lparen))
+	}
+	query, parenEnd, err := p.parseParenthesizedQuery()
+	if err != nil {
+		return nil, err
+	}
+	query.Start, query.Stop = lparen.Pos, parenEnd
+	return &ast.AliasedQuery{Span: span(ident.Pos(), query.End()), Identifier: ident, Query: query}, nil
 }
 
 // parseColumnWithOptionsList parses "(" identifier [OPTIONS(...)] {","

@@ -2494,6 +2494,72 @@ func (n *CreateViewStatement) Children() []Node {
 	return children(n.Name, n.Columns, n.Options, n.Query)
 }
 
+// CreateModelStatement is a CREATE MODEL statement; see
+// ASTCreateModelStatement in googlesql/parser/parse_tree.h. Scope is "",
+// "TEMP", "PUBLIC", or "PRIVATE". The trailing query is either a single Query
+// (AS query) or an AliasedQueryList (AS (a AS (...), ...)). IsRemote is not
+// reflected in the debug string.
+type CreateModelStatement struct {
+	Span
+	Scope          string                `json:"scope,omitempty"`
+	IsOrReplace    bool                  `json:"is_or_replace,omitempty"`
+	IsIfNotExists  bool                  `json:"is_if_not_exists,omitempty"`
+	IsRemote       bool                  `json:"is_remote,omitempty"`
+	Name           *PathExpression       `json:"name"`
+	InputOutput    *InputOutputClause    `json:"input_output_clause,omitempty"`
+	Transform      *TransformClause      `json:"transform_clause,omitempty"`
+	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
+	Options        *OptionsList          `json:"options,omitempty"`
+	Query          *Query                `json:"query,omitempty"`
+	AliasedQueries *AliasedQueryList     `json:"aliased_query_list,omitempty"`
+}
+
+func (n *CreateModelStatement) statementNode() {}
+func (n *CreateModelStatement) Children() []Node {
+	return children(n.Name, n.InputOutput, n.Transform, n.WithConnection,
+		n.Options, n.Query, n.AliasedQueries)
+}
+
+// InputOutputClause is "INPUT (columns) OUTPUT (columns)" in a CREATE MODEL
+// statement; see ASTInputOutputClause in googlesql/parser/parse_tree.h.
+type InputOutputClause struct {
+	Span
+	Input  *TableElementList `json:"input"`
+	Output *TableElementList `json:"output"`
+}
+
+func (n *InputOutputClause) Children() []Node {
+	return children(n.Input, n.Output)
+}
+
+// TransformClause is "TRANSFORM (select_list)" in a CREATE MODEL statement;
+// see ASTTransformClause in googlesql/parser/parse_tree.h.
+type TransformClause struct {
+	Span
+	SelectList *SelectList `json:"select_list"`
+}
+
+func (n *TransformClause) Children() []Node {
+	return children(n.SelectList)
+}
+
+// AliasedQueryList is the comma-separated list of aliased queries in a
+// CREATE MODEL "AS (a AS (...), ...)" clause; see ASTAliasedQueryList in
+// googlesql/parser/parse_tree.h. The span excludes the surrounding
+// parentheses.
+type AliasedQueryList struct {
+	Span
+	Queries []*AliasedQuery `json:"queries,omitempty"`
+}
+
+func (n *AliasedQueryList) Children() []Node {
+	out := make([]Node, len(n.Queries))
+	for i, q := range n.Queries {
+		out[i] = q
+	}
+	return out
+}
+
 // ColumnWithOptionsList is the parenthesized column name list (each with an
 // optional OPTIONS clause) in a CREATE VIEW statement; see
 // ASTColumnWithOptionsList in googlesql/parser/parse_tree.h.
