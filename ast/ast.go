@@ -308,10 +308,15 @@ type TablePathExpression struct {
 	UnnestExpr *UnnestExpression `json:"unnest_expr,omitempty"`
 	Alias      *Alias            `json:"alias,omitempty"`
 	Offset     *WithOffset       `json:"offset,omitempty"`
+	// PostfixOperators holds trailing postfix table operators such as
+	// MATCH_RECOGNIZE(...); see ASTPostfixTableOperator in
+	// googlesql/parser/parse_tree.h.
+	PostfixOperators []Node `json:"postfix_operators,omitempty"`
 }
 
 func (n *TablePathExpression) Children() []Node {
-	return children(n.Path, n.UnnestExpr, n.Alias, n.Offset)
+	out := children(n.Path, n.UnnestExpr, n.Alias, n.Offset)
+	return append(out, n.PostfixOperators...)
 }
 
 // TableSubquery is a parenthesized query used as a table in a FROM clause,
@@ -325,10 +330,14 @@ type TableSubquery struct {
 	// IsLateral is true when the subquery is preceded by the LATERAL
 	// keyword; the span then includes the keyword.
 	IsLateral bool `json:"is_lateral,omitempty"`
+	// PostfixOperators holds trailing postfix table operators such as
+	// MATCH_RECOGNIZE(...).
+	PostfixOperators []Node `json:"postfix_operators,omitempty"`
 }
 
 func (n *TableSubquery) Children() []Node {
-	return children(n.Query, n.Alias)
+	out := children(n.Query, n.Alias)
+	return append(out, n.PostfixOperators...)
 }
 
 // TVF is a call to a table-valued function in a FROM clause, e.g.
@@ -342,6 +351,9 @@ type TVF struct {
 	// IsLateral is true when the call is preceded by the LATERAL keyword;
 	// the span then includes the keyword.
 	IsLateral bool `json:"is_lateral,omitempty"`
+	// PostfixOperators holds trailing postfix table operators such as
+	// MATCH_RECOGNIZE(...).
+	PostfixOperators []Node `json:"postfix_operators,omitempty"`
 }
 
 func (n *TVF) Children() []Node {
@@ -349,7 +361,8 @@ func (n *TVF) Children() []Node {
 	for _, a := range n.Args {
 		out = append(out, a)
 	}
-	return append(out, children(n.Alias)...)
+	out = append(out, children(n.Alias)...)
+	return append(out, n.PostfixOperators...)
 }
 
 // TVFArgument is a single argument to a table-valued function call; see
@@ -493,10 +506,14 @@ func (n *OnOrUsingClauseList) Children() []Node {
 type ParenthesizedJoin struct {
 	Span
 	Join Node `json:"join"`
+	// PostfixOperators holds trailing postfix table operators such as
+	// MATCH_RECOGNIZE(...).
+	PostfixOperators []Node `json:"postfix_operators,omitempty"`
 }
 
 func (n *ParenthesizedJoin) Children() []Node {
-	return children(n.Join)
+	out := children(n.Join)
+	return append(out, n.PostfixOperators...)
 }
 
 // PipeJoin is a |> JOIN pipe operator; see ASTPipeJoin in
@@ -1823,3 +1840,149 @@ type MaxLiteral struct {
 }
 
 func (n *MaxLiteral) Children() []Node { return nil }
+
+// MatchRecognizeClause is a "MATCH_RECOGNIZE(...)" postfix table operator;
+// see ASTMatchRecognizeClause in googlesql/parser/parse_tree.h. Child order
+// matches the reference node: options, partition by, order by, measures,
+// after match skip, pattern, definitions, alias.
+type MatchRecognizeClause struct {
+	Span
+	Options        *OptionsList          `json:"options,omitempty"`
+	PartitionBy    *PartitionBy          `json:"partition_by,omitempty"`
+	OrderBy        *OrderBy              `json:"order_by"`
+	Measures       *SelectList           `json:"measures"`
+	AfterMatchSkip *AfterMatchSkipClause `json:"after_match_skip,omitempty"`
+	Pattern        Node                  `json:"pattern"`
+	Definitions    *SelectList           `json:"definitions"`
+	Alias          *Alias                `json:"alias,omitempty"`
+}
+
+func (n *MatchRecognizeClause) Children() []Node {
+	return children(n.Options, n.PartitionBy, n.OrderBy, n.Measures,
+		n.AfterMatchSkip, n.Pattern, n.Definitions, n.Alias)
+}
+
+// AfterMatchSkipClause is the "AFTER MATCH SKIP ..." clause inside
+// MATCH_RECOGNIZE; see ASTAfterMatchSkipClause in
+// googlesql/parser/parse_tree.h. TargetType is "PAST_LAST_ROW" or
+// "TO_NEXT_ROW". Its span covers only the skip target (e.g. "TO NEXT ROW").
+type AfterMatchSkipClause struct {
+	Span
+	TargetType string `json:"target_type"`
+}
+
+func (n *AfterMatchSkipClause) Children() []Node { return nil }
+
+// PipeMatchRecognize is a |> MATCH_RECOGNIZE pipe operator; see
+// ASTPipeMatchRecognize in googlesql/parser/parse_tree.h.
+type PipeMatchRecognize struct {
+	Span
+	Clause *MatchRecognizeClause `json:"clause"`
+}
+
+func (n *PipeMatchRecognize) Children() []Node {
+	return children(n.Clause)
+}
+
+// RowPatternOperation is an alternation or concatenation of row pattern
+// expressions inside PATTERN(...); see ASTRowPatternOperation in
+// googlesql/parser/parse_tree.h. OpType is "ALTERNATE" or "CONCAT".
+type RowPatternOperation struct {
+	Span
+	OpType        string `json:"op_type"`
+	Parenthesized bool   `json:"parenthesized,omitempty"`
+	Operands      []Node `json:"operands"`
+}
+
+func (n *RowPatternOperation) Children() []Node {
+	return append([]Node(nil), n.Operands...)
+}
+
+// EmptyRowPattern is an empty row pattern, e.g. in "PATTERN ()" or between
+// alternation bars; see ASTEmptyRowPattern in googlesql/parser/parse_tree.h.
+type EmptyRowPattern struct {
+	Span
+	Parenthesized bool `json:"parenthesized,omitempty"`
+}
+
+func (n *EmptyRowPattern) Children() []Node { return nil }
+
+// RowPatternVariable is a pattern variable reference inside PATTERN(...);
+// see ASTRowPatternVariable in googlesql/parser/parse_tree.h.
+type RowPatternVariable struct {
+	Span
+	Name *Identifier `json:"name"`
+}
+
+func (n *RowPatternVariable) Children() []Node {
+	return children(n.Name)
+}
+
+// RowPatternAnchor is a "^" (START) or "$" (END) anchor inside
+// PATTERN(...); see ASTRowPatternAnchor in googlesql/parser/parse_tree.h.
+type RowPatternAnchor struct {
+	Span
+	Anchor string `json:"anchor"`
+}
+
+func (n *RowPatternAnchor) Children() []Node { return nil }
+
+// RowPatternQuantification is a quantified row pattern primary, e.g. "A+"
+// or "(A B){1,2}"; see ASTRowPatternQuantification in
+// googlesql/parser/parse_tree.h.
+type RowPatternQuantification struct {
+	Span
+	Primary    Node `json:"primary"`
+	Quantifier Node `json:"quantifier"`
+}
+
+func (n *RowPatternQuantification) Children() []Node {
+	return children(n.Primary, n.Quantifier)
+}
+
+// SymbolQuantifier is a "?", "+", or "*" quantifier; see ASTSymbolQuantifier
+// in googlesql/parser/parse_tree.h. Symbol is "QUESTION_MARK", "PLUS", or
+// "STAR".
+type SymbolQuantifier struct {
+	Span
+	Symbol      string `json:"symbol"`
+	IsReluctant bool   `json:"is_reluctant,omitempty"`
+}
+
+func (n *SymbolQuantifier) Children() []Node { return nil }
+
+// FixedQuantifier is a "{n}" quantifier; see ASTFixedQuantifier in
+// googlesql/parser/parse_tree.h.
+type FixedQuantifier struct {
+	Span
+	Bound Node `json:"bound"`
+}
+
+func (n *FixedQuantifier) Children() []Node {
+	return children(n.Bound)
+}
+
+// QuantifierBound is one bound of a bounded quantifier; its span covers the
+// whole "{lo,hi}" range and its child is the bound expression, if any. See
+// ASTQuantifierBound in googlesql/parser/parse_tree.h.
+type QuantifierBound struct {
+	Span
+	Bound Node `json:"bound,omitempty"`
+}
+
+func (n *QuantifierBound) Children() []Node {
+	return children(n.Bound)
+}
+
+// BoundedQuantifier is a "{lo,hi}" quantifier where either bound may be
+// omitted; see ASTBoundedQuantifier in googlesql/parser/parse_tree.h.
+type BoundedQuantifier struct {
+	Span
+	LowerBound  *QuantifierBound `json:"lower_bound"`
+	UpperBound  *QuantifierBound `json:"upper_bound"`
+	IsReluctant bool             `json:"is_reluctant,omitempty"`
+}
+
+func (n *BoundedQuantifier) Children() []Node {
+	return children(n.LowerBound, n.UpperBound)
+}

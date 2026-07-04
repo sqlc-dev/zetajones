@@ -171,6 +171,7 @@ var keywordNames = map[string]bool{
 	"macro":                true,
 	"map":                  true,
 	"match":                true,
+	"match_recognize":      true,
 	"matched":              true,
 	"materialized":         true,
 	"max":                  true,

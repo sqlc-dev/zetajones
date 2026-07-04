@@ -361,6 +361,41 @@ func nodeString(n ast.Node) string {
 		return "PipeLimitOffset"
 	case *ast.PipeDistinct:
 		return "PipeDistinct"
+	case *ast.PipeMatchRecognize:
+		return "PipeMatchRecognize"
+	case *ast.MatchRecognizeClause:
+		return "MatchRecognizeClause"
+	case *ast.AfterMatchSkipClause:
+		return "AfterMatchSkipClause"
+	case *ast.RowPatternOperation:
+		return "RowPatternOperation"
+	case *ast.EmptyRowPattern:
+		// See ASTEmptyRowPattern::SingleNodeDebugString.
+		if t.Parenthesized {
+			return "EmptyRowPattern(parenthesized=true)"
+		}
+		return "EmptyRowPattern"
+	case *ast.RowPatternVariable:
+		return "RowPatternVariable"
+	case *ast.RowPatternAnchor:
+		return "RowPatternAnchor"
+	case *ast.RowPatternQuantification:
+		return "RowPatternQuantification"
+	case *ast.SymbolQuantifier:
+		// See ASTQuantifier::SingleNodeDebugString.
+		if t.IsReluctant {
+			return "SymbolQuantifier(is_reluctant=true)"
+		}
+		return "SymbolQuantifier"
+	case *ast.FixedQuantifier:
+		return "FixedQuantifier"
+	case *ast.BoundedQuantifier:
+		if t.IsReluctant {
+			return "BoundedQuantifier(is_reluctant=true)"
+		}
+		return "BoundedQuantifier"
+	case *ast.QuantifierBound:
+		return "QuantifierBound"
 	case *ast.PipeAggregate:
 		return "PipeAggregate"
 	case *ast.PipeWhere:

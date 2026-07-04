@@ -48,6 +48,7 @@ const (
 	SEMICOLON  // ;
 	COLON      // :
 	QUESTION   // ?
+	DOLLAR     // $ (row pattern anchor)
 	ARROW      // ->
 	LAMBDA     // =>
 	PIPE_INPUT // |>

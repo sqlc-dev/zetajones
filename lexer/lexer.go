@@ -276,6 +276,7 @@ func (l *lexer) next() (token.Token, error) {
 		'(': token.LPAREN, ')': token.RPAREN, '[': token.LBRACKET, ']': token.RBRACKET,
 		'{': token.LBRACE, '}': token.RBRACE, ',': token.COMMA, '.': token.DOT,
 		';': token.SEMICOLON, ':': token.COLON, '?': token.QUESTION,
+		'$': token.DOLLAR,
 	}
 	if kind, ok := single[c]; ok {
 		l.pos++

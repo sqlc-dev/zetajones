@@ -352,6 +352,11 @@ type parser struct {
 	// table item, where "." followed by "(" reports the dedicated generalized
 	// field access error; see table_path_expression_base in googlesql.tm.
 	inTablePath bool
+	// quantifierQuestions records the byte positions of "?" tokens consumed
+	// as row pattern quantifiers (or reluctant markers) inside
+	// MATCH_RECOGNIZE patterns, so positional query parameter numbering
+	// skips them.
+	quantifierQuestions map[int]bool
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -459,7 +464,11 @@ var reservedKeywords = map[string]bool{
 	"INNER":     true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LATERAL": true, "LEFT": true,
 	"LIKE":  true,
-	"LIMIT": true, "LOOKUP": true, "NATURAL": true, "NOT": true, "NULL": true,
+	"LIMIT": true, "LOOKUP": true,
+	// MATCH_RECOGNIZE is conditionally reserved; the parser tests reserve it
+	// by default (see reserve_match_recognize in run_parser_test.cc).
+	"MATCH_RECOGNIZE": true,
+	"NATURAL":         true, "NOT": true, "NULL": true,
 	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
 	"RESPECT": true, "RIGHT": true, "SELECT": true, "SET": true, "STRUCT": true,
@@ -1470,6 +1479,12 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 	case isKeyword(tok, "DISTINCT"):
 		distinctTok := p.advance()
 		return &ast.PipeDistinct{Span: span(pipeTok.Pos, distinctTok.End)}, nil
+	case isKeyword(tok, "MATCH_RECOGNIZE"):
+		clause, err := p.parseMatchRecognizeClause()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.PipeMatchRecognize{Span: span(pipeTok.Pos, clause.End()), Clause: clause}, nil
 	case p.atSetOpMetadataStart():
 		return p.parsePipeSetOperation(pipeTok)
 	}
@@ -2064,6 +2079,14 @@ func (p *parser) parseFromClause() (*ast.FromClause, error) {
 // parenthesized query used as a table subquery, a parenthesized join, or a
 // table path expression; see table_primary in googlesql.tm.
 func (p *parser) parseTablePrimary() (ast.Node, error) {
+	node, err := p.parseTablePrimaryBase()
+	if err != nil {
+		return nil, err
+	}
+	return p.parsePostfixTableOperators(node)
+}
+
+func (p *parser) parseTablePrimaryBase() (ast.Node, error) {
 	if isKeyword(p.peek(), "LATERAL") {
 		return p.parseLateralTablePrimary()
 	}
@@ -4174,7 +4197,7 @@ func (p *parser) parseSystemVariableExpr() (ast.Node, error) {
 func (p *parser) positionalParameterOrdinal() int {
 	n := 0
 	for _, tok := range p.toks[:p.pos] {
-		if tok.Kind == token.QUESTION {
+		if tok.Kind == token.QUESTION && !p.quantifierQuestions[tok.Pos] {
 			n++
 		}
 	}
