@@ -79,6 +79,184 @@ func (n *CallStatement) Children() []Node {
 	return out
 }
 
+// HintedStatement wraps a statement preceded by a "@{...}" hint; see
+// ASTHintedStatement in googlesql/parser/parse_tree.h.
+type HintedStatement struct {
+	Span
+	Hint      *Hint     `json:"hint"`
+	Statement Statement `json:"statement"`
+}
+
+func (n *HintedStatement) statementNode() {}
+func (n *HintedStatement) Children() []Node {
+	return children(n.Hint, n.Statement)
+}
+
+// DeleteStatement is a DELETE statement; see ASTDeleteStatement in
+// googlesql/parser/parse_tree.h.
+type DeleteStatement struct {
+	Span
+	Target             *PathExpression     `json:"target"`
+	Offset             *WithOffset         `json:"offset,omitempty"`
+	Where              Node                `json:"where,omitempty"`
+	AssertRowsModified *AssertRowsModified `json:"assert_rows_modified,omitempty"`
+	Returning          *ReturningClause    `json:"returning,omitempty"`
+}
+
+func (n *DeleteStatement) statementNode() {}
+func (n *DeleteStatement) Children() []Node {
+	return children(n.Target, n.Offset, n.Where, n.AssertRowsModified, n.Returning)
+}
+
+// InsertStatement is an INSERT statement; see ASTInsertStatement in
+// googlesql/parser/parse_tree.h. InsertMode is "", "IGNORE", "REPLACE", or
+// "UPDATE".
+type InsertStatement struct {
+	Span
+	InsertMode         string               `json:"insert_mode,omitempty"`
+	Target             *PathExpression      `json:"target"`
+	Columns            *ColumnList          `json:"columns,omitempty"`
+	Rows               *InsertValuesRowList `json:"rows,omitempty"`
+	Query              *Query               `json:"query,omitempty"`
+	AssertRowsModified *AssertRowsModified  `json:"assert_rows_modified,omitempty"`
+	Returning          *ReturningClause     `json:"returning,omitempty"`
+}
+
+func (n *InsertStatement) statementNode() {}
+func (n *InsertStatement) Children() []Node {
+	out := children(n.Target, n.Columns)
+	if n.Rows != nil {
+		out = append(out, n.Rows)
+	}
+	if n.Query != nil {
+		out = append(out, n.Query)
+	}
+	return append(out, children(n.AssertRowsModified, n.Returning)...)
+}
+
+// InsertValuesRowList is the VALUES list of an INSERT statement; see
+// ASTInsertValuesRowList in googlesql/parser/parse_tree.h.
+type InsertValuesRowList struct {
+	Span
+	Rows []*InsertValuesRow `json:"rows"`
+}
+
+func (n *InsertValuesRowList) Children() []Node {
+	var out []Node
+	for _, r := range n.Rows {
+		out = append(out, r)
+	}
+	return out
+}
+
+// InsertValuesRow is a single "( expr, ... )" row in a VALUES list; see
+// ASTInsertValuesRow in googlesql/parser/parse_tree.h.
+type InsertValuesRow struct {
+	Span
+	Values []Node `json:"values"`
+}
+
+func (n *InsertValuesRow) Children() []Node {
+	return children(n.Values...)
+}
+
+// UpdateStatement is an UPDATE statement; see ASTUpdateStatement in
+// googlesql/parser/parse_tree.h.
+type UpdateStatement struct {
+	Span
+	Target             *PathExpression     `json:"target"`
+	Offset             *WithOffset         `json:"offset,omitempty"`
+	UpdateItemList     *UpdateItemList     `json:"update_item_list"`
+	From               *FromClause         `json:"from,omitempty"`
+	Where              Node                `json:"where,omitempty"`
+	AssertRowsModified *AssertRowsModified `json:"assert_rows_modified,omitempty"`
+	Returning          *ReturningClause    `json:"returning,omitempty"`
+}
+
+func (n *UpdateStatement) statementNode() {}
+func (n *UpdateStatement) Children() []Node {
+	return children(n.Target, n.Offset, n.UpdateItemList, n.From, n.Where, n.AssertRowsModified, n.Returning)
+}
+
+// UpdateItemList is the SET item list of an UPDATE statement; see
+// ASTUpdateItemList in googlesql/parser/parse_tree.h.
+type UpdateItemList struct {
+	Span
+	Items []*UpdateItem `json:"items"`
+}
+
+func (n *UpdateItemList) Children() []Node {
+	var out []Node
+	for _, it := range n.Items {
+		out = append(out, it)
+	}
+	return out
+}
+
+// UpdateItem is a single item in an UPDATE SET list: either a set-value
+// assignment or a nested INSERT/UPDATE/DELETE statement; see ASTUpdateItem in
+// googlesql/parser/parse_tree.h.
+type UpdateItem struct {
+	Span
+	SetValue  *UpdateSetValue `json:"set_value,omitempty"`
+	Statement Statement       `json:"statement,omitempty"`
+}
+
+func (n *UpdateItem) Children() []Node {
+	if n.SetValue != nil {
+		return children(n.SetValue)
+	}
+	return children(n.Statement)
+}
+
+// UpdateSetValue is a "path = value" assignment in an UPDATE SET list; see
+// ASTUpdateSetValue in googlesql/parser/parse_tree.h.
+type UpdateSetValue struct {
+	Span
+	Path  Node `json:"path"`
+	Value Node `json:"value"`
+}
+
+func (n *UpdateSetValue) Children() []Node {
+	return children(n.Path, n.Value)
+}
+
+// AssertRowsModified is the ASSERT_ROWS_MODIFIED clause on a DML statement;
+// see ASTAssertRowsModified in googlesql/parser/parse_tree.h.
+type AssertRowsModified struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *AssertRowsModified) Children() []Node {
+	return children(n.Value)
+}
+
+// ReturningClause is the THEN RETURN clause on a DML statement; see
+// ASTReturningClause in googlesql/parser/parse_tree.h. ActionAlias records the
+// "WITH ACTION [AS alias]" column name (defaulting to "ACTION").
+type ReturningClause struct {
+	Span
+	SelectList  *SelectList `json:"select_list"`
+	ActionAlias *Alias      `json:"action_alias,omitempty"`
+}
+
+func (n *ReturningClause) Children() []Node {
+	return children(n.SelectList, n.ActionAlias)
+}
+
+// DotGeneralizedField is "expression . ( path )" generalized field access;
+// see ASTDotGeneralizedField in googlesql/parser/parse_tree.h.
+type DotGeneralizedField struct {
+	Span
+	Expr Node            `json:"expr"`
+	Path *PathExpression `json:"path"`
+}
+
+func (n *DotGeneralizedField) Children() []Node {
+	return children(n.Expr, n.Path)
+}
+
 // Query is a query expression with an optional WITH clause, optional ORDER
 // BY and LIMIT/OFFSET, optionally followed by |> pipe operators.
 type Query struct {

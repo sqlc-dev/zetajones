@@ -57,6 +57,33 @@ func nodeString(n ast.Node) string {
 	switch t := n.(type) {
 	case *ast.QueryStatement:
 		return "QueryStatement"
+	case *ast.HintedStatement:
+		return "HintedStatement"
+	case *ast.DeleteStatement:
+		return "DeleteStatement"
+	case *ast.InsertStatement:
+		if t.InsertMode != "" {
+			return "InsertStatement(insert_mode=" + t.InsertMode + ")"
+		}
+		return "InsertStatement"
+	case *ast.InsertValuesRowList:
+		return "InsertValuesRowList"
+	case *ast.InsertValuesRow:
+		return "InsertValuesRow"
+	case *ast.UpdateStatement:
+		return "UpdateStatement"
+	case *ast.UpdateItemList:
+		return "UpdateItemList"
+	case *ast.UpdateItem:
+		return "UpdateItem"
+	case *ast.UpdateSetValue:
+		return "UpdateSetValue"
+	case *ast.AssertRowsModified:
+		return "AssertRowsModified"
+	case *ast.ReturningClause:
+		return "ReturningClause"
+	case *ast.DotGeneralizedField:
+		return "DotGeneralizedField"
 	case *ast.Query:
 		return "Query"
 	case *ast.WithClause:

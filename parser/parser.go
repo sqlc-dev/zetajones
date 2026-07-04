@@ -529,6 +529,19 @@ func span(start, end int) ast.Span { return ast.Span{Start: start, Stop: end} }
 
 func (p *parser) parseStatement() (ast.Statement, error) {
 	tok := p.peek()
+	// A statement may be preceded by a "@{...}" (or "@n{...}") hint; see
+	// hinted_statement in googlesql.tm.
+	if tok.Kind == token.ATSIGN && (p.peekAt(1).Kind == token.LBRACE || p.peekAt(1).Kind == token.INT) {
+		hint, err := p.parseOptionalHint()
+		if err != nil {
+			return nil, err
+		}
+		inner, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.HintedStatement{Span: span(hint.Pos(), inner.End()), Hint: hint, Statement: inner}, nil
+	}
 	switch {
 	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"),
 		isKeyword(tok, "TABLE"), tok.Kind == token.LPAREN:
@@ -546,8 +559,526 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseCallStatement()
 	case isKeyword(tok, "CREATE"):
 		return p.parseCreateStatement()
+	case isKeyword(tok, "DELETE"):
+		return p.parseDeleteStatement()
+	case isKeyword(tok, "INSERT"):
+		return p.parseInsertStatement()
+	case isKeyword(tok, "UPDATE"):
+		return p.parseUpdateStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseDMLTarget parses the target table path of a DML statement, allowing an
+// optional leading FROM/INTO keyword handled by the caller.
+func (p *parser) parseWithOffsetClause() (*ast.WithOffset, error) {
+	withTok := p.advance() // WITH
+	offsetTok, err := p.expectKeyword("OFFSET")
+	if err != nil {
+		return nil, err
+	}
+	offset := &ast.WithOffset{Span: span(withTok.Pos, offsetTok.End)}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		offset.Alias = alias
+		offset.Stop = alias.End()
+	}
+	return offset, nil
+}
+
+// parseAssertRowsModified parses "ASSERT_ROWS_MODIFIED <expression>"; see
+// opt_assert_rows_modified in googlesql.tm.
+func (p *parser) parseAssertRowsModified() (*ast.AssertRowsModified, error) {
+	kw := p.advance() // ASSERT_ROWS_MODIFIED
+	expr, err := p.parsePossiblyCastIntLiteralOrParameter()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.AssertRowsModified{Span: span(kw.Pos, p.extEnd(expr)), Value: expr}, nil
+}
+
+// parsePossiblyCastIntLiteralOrParameter parses an integer literal, a
+// parameter, or a CAST of one of those (recursively); see
+// possibly_cast_int_literal_or_parameter in googlesql.tm. Used for
+// ASSERT_ROWS_MODIFIED and LIMIT-style clauses that only accept a restricted
+// value.
+func (p *parser) parsePossiblyCastIntLiteralOrParameter() (ast.Node, error) {
+	if isKeyword(p.peek(), "CAST") || isKeyword(p.peek(), "SAFE_CAST") {
+		kw := p.advance()
+		isSafe := strings.EqualFold(kw.Image, "SAFE_CAST")
+		if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+			return nil, err
+		}
+		// The CAST argument is not recursive: only an integer literal or a
+		// parameter is allowed, not another cast.
+		inner, err := p.parseIntLiteralOrParameter()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("AS"); err != nil {
+			return nil, err
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		var format *ast.FormatClause
+		if isKeyword(p.peek(), "FORMAT") {
+			format, err = p.parseFormatClause()
+			if err != nil {
+				return nil, err
+			}
+		}
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.CastExpression{Span: span(kw.Pos, rparen.End), Expr: inner, Type: typ, Format: format, IsSafeCast: isSafe}, nil
+	}
+	tok := p.peek()
+	if tok.Kind == token.INT || tok.Kind == token.PARAM || tok.Kind == token.QUESTION || tok.Kind == token.SYSTEM_VARIABLE {
+		return p.parseIntLiteralOrParameter()
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseIntLiteralOrParameter parses an integer literal or a parameter; see
+// int_literal_or_parameter in googlesql.tm.
+func (p *parser) parseIntLiteralOrParameter() (ast.Node, error) {
+	tok := p.peek()
+	switch tok.Kind {
+	case token.INT:
+		p.advance()
+		return &ast.IntLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}, nil
+	case token.PARAM:
+		p.advance()
+		name := &ast.Identifier{Span: span(tok.Pos+1, tok.End), Name: tok.Image[1:]}
+		return &ast.ParameterExpr{Span: span(tok.Pos, tok.End), Name: name}, nil
+	case token.QUESTION:
+		p.advance()
+		return &ast.ParameterExpr{Span: span(tok.Pos, tok.End), Position: p.positionalParameterOrdinal()}, nil
+	case token.SYSTEM_VARIABLE:
+		return p.parseSystemVariableExpr()
+	}
+	return nil, p.errorf(tok.Pos, `Syntax error: Expected "@" or "@@" or integer literal but got %s`, describeToken(tok))
+}
+
+// parseReturningClause parses "THEN RETURN [WITH ACTION [AS alias]]
+// select_list"; see opt_returning_clause in googlesql.tm.
+func (p *parser) parseReturningClause() (*ast.ReturningClause, error) {
+	thenTok := p.advance() // THEN
+	if _, err := p.expectKeyword("RETURN"); err != nil {
+		return nil, err
+	}
+	rc := &ast.ReturningClause{Span: span(thenTok.Pos, 0)}
+	var actionAlias *ast.Alias
+	if isKeyword(p.peek(), "WITH") {
+		p.advance() // WITH
+		actionTok, err := p.expectKeyword("ACTION")
+		if err != nil {
+			return nil, err
+		}
+		// WITH ACTION [AS alias]: with no alias the column name defaults to
+		// "ACTION" and takes the location of the ACTION keyword.
+		alias := &ast.Alias{Identifier: &ast.Identifier{Span: span(actionTok.Pos, actionTok.End), Name: "ACTION"}}
+		if isKeyword(p.peek(), "AS") {
+			named, err := p.parseOptionalAlias()
+			if err != nil {
+				return nil, err
+			}
+			if named != nil {
+				alias.Identifier = named.Identifier
+			}
+		}
+		actionAlias = alias
+	}
+	list, err := p.parseSelectList()
+	if err != nil {
+		return nil, err
+	}
+	rc.SelectList = list
+	rc.Stop = list.End()
+	if actionAlias != nil {
+		// The action alias node spans the whole returning clause.
+		actionAlias.Span = span(rc.Pos(), rc.End())
+		rc.ActionAlias = actionAlias
+	}
+	return rc, nil
+}
+
+// parseDeleteStatement parses a DELETE statement; see delete_statement in
+// googlesql.tm.
+func (p *parser) parseDeleteStatement() (ast.Statement, error) {
+	deleteTok := p.advance() // DELETE
+	if isKeyword(p.peek(), "FROM") {
+		p.advance()
+	}
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.DeleteStatement{Span: span(deleteTok.Pos, p.extEnd(target)), Target: target}
+	if isKeyword(p.peek(), "WITH") {
+		offset, err := p.parseWithOffsetClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Offset = offset
+		stmt.Stop = offset.End()
+	}
+	if isKeyword(p.peek(), "WHERE") {
+		p.advance()
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Where = expr
+		stmt.Stop = p.extEnd(expr)
+	}
+	if isKeyword(p.peek(), "ASSERT_ROWS_MODIFIED") {
+		arm, err := p.parseAssertRowsModified()
+		if err != nil {
+			return nil, err
+		}
+		stmt.AssertRowsModified = arm
+		stmt.Stop = arm.End()
+	}
+	if isKeyword(p.peek(), "THEN") {
+		rc, err := p.parseReturningClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Returning = rc
+		stmt.Stop = rc.End()
+	}
+	return stmt, nil
+}
+
+// parseInsertStatement parses an INSERT statement; see insert_statement in
+// googlesql.tm.
+func (p *parser) parseInsertStatement() (ast.Statement, error) {
+	insertTok := p.advance() // INSERT
+	stmt := &ast.InsertStatement{Span: span(insertTok.Pos, 0)}
+	// INSERT [OR] {IGNORE|REPLACE|UPDATE]
+	if isKeyword(p.peek(), "OR") {
+		p.advance()
+	}
+	switch {
+	case isKeyword(p.peek(), "IGNORE"):
+		p.advance()
+		stmt.InsertMode = "IGNORE"
+	case isKeyword(p.peek(), "REPLACE"):
+		p.advance()
+		stmt.InsertMode = "REPLACE"
+	case isKeyword(p.peek(), "UPDATE"):
+		p.advance()
+		stmt.InsertMode = "UPDATE"
+	}
+	if isKeyword(p.peek(), "INTO") {
+		p.advance()
+	}
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Target = target
+	stmt.Stop = p.extEnd(target)
+	// Optional column list "( ident, ... )".
+	if p.peek().Kind == token.LPAREN {
+		cols, err := p.parseInsertColumnList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Columns = cols
+		stmt.Stop = cols.End()
+	}
+	// The rows source: VALUES ... or a query.
+	switch {
+	case isKeyword(p.peek(), "VALUES"):
+		rows, err := p.parseInsertValuesRowList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Rows = rows
+		stmt.Stop = rows.End()
+	default:
+		query, err := p.parseQuery()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Query = query
+		stmt.Stop = query.End()
+	}
+	if isKeyword(p.peek(), "ASSERT_ROWS_MODIFIED") {
+		arm, err := p.parseAssertRowsModified()
+		if err != nil {
+			return nil, err
+		}
+		stmt.AssertRowsModified = arm
+		stmt.Stop = arm.End()
+	}
+	if isKeyword(p.peek(), "THEN") {
+		rc, err := p.parseReturningClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Returning = rc
+		stmt.Stop = rc.End()
+	}
+	return stmt, nil
+}
+
+// parseInsertColumnList parses "( ident, ... )" with the opening parenthesis
+// as the next token; see column_list in googlesql.tm.
+func (p *parser) parseInsertColumnList() (*ast.ColumnList, error) {
+	lparen := p.advance() // (
+	list := &ast.ColumnList{Span: span(lparen.Pos, 0)}
+	for {
+		tok := p.peek()
+		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
+}
+
+// parseInsertValuesRowList parses "VALUES ( expr, ... ), ..."; see
+// insert_values_list in googlesql.tm.
+func (p *parser) parseInsertValuesRowList() (*ast.InsertValuesRowList, error) {
+	valuesTok := p.advance() // VALUES
+	list := &ast.InsertValuesRowList{Span: span(valuesTok.Pos, 0)}
+	for {
+		lparen, err := p.expect(token.LPAREN, `"("`)
+		if err != nil {
+			return nil, err
+		}
+		row := &ast.InsertValuesRow{Span: span(lparen.Pos, 0)}
+		for {
+			var value ast.Node
+			if isKeyword(p.peek(), "DEFAULT") {
+				def := p.advance()
+				value = &ast.DefaultLiteral{Span: span(def.Pos, def.End)}
+			} else {
+				value, err = p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+			}
+			row.Values = append(row.Values, value)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		row.Stop = rparen.End
+		list.Rows = append(list.Rows, row)
+		list.Stop = row.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	return list, nil
+}
+
+// parseUpdateStatement parses an UPDATE statement; see update_statement in
+// googlesql.tm.
+func (p *parser) parseUpdateStatement() (ast.Statement, error) {
+	updateTok := p.advance() // UPDATE
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.UpdateStatement{Span: span(updateTok.Pos, p.extEnd(target)), Target: target}
+	if isKeyword(p.peek(), "WITH") {
+		offset, err := p.parseWithOffsetClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Offset = offset
+		stmt.Stop = offset.End()
+	}
+	if _, err := p.expectKeyword("SET"); err != nil {
+		return nil, err
+	}
+	items, err := p.parseUpdateItemList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.UpdateItemList = items
+	stmt.Stop = items.End()
+	if isKeyword(p.peek(), "FROM") {
+		from, err := p.parseFromClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.From = from
+		stmt.Stop = from.End()
+	}
+	if isKeyword(p.peek(), "WHERE") {
+		p.advance()
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Where = expr
+		stmt.Stop = p.extEnd(expr)
+	}
+	if isKeyword(p.peek(), "ASSERT_ROWS_MODIFIED") {
+		arm, err := p.parseAssertRowsModified()
+		if err != nil {
+			return nil, err
+		}
+		stmt.AssertRowsModified = arm
+		stmt.Stop = arm.End()
+	}
+	if isKeyword(p.peek(), "THEN") {
+		rc, err := p.parseReturningClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Returning = rc
+		stmt.Stop = rc.End()
+	}
+	return stmt, nil
+}
+
+// parseUpdateItemList parses "update_item, ..." for an UPDATE SET clause; see
+// update_item_list in googlesql.tm.
+func (p *parser) parseUpdateItemList() (*ast.UpdateItemList, error) {
+	first, err := p.parseUpdateItem()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.UpdateItemList{Span: span(first.Pos(), first.End()), Items: []*ast.UpdateItem{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance()
+		item, err := p.parseUpdateItem()
+		if err != nil {
+			return nil, err
+		}
+		list.Items = append(list.Items, item)
+		list.Stop = item.End()
+	}
+	return list, nil
+}
+
+// parseUpdateItem parses a single UPDATE SET item: either a nested
+// "( INSERT|UPDATE|DELETE ... )" statement or a "path = value" assignment; see
+// update_item in googlesql.tm.
+func (p *parser) parseUpdateItem() (*ast.UpdateItem, error) {
+	if p.peek().Kind == token.LPAREN &&
+		(isKeyword(p.peekAt(1), "INSERT") || isKeyword(p.peekAt(1), "UPDATE") || isKeyword(p.peekAt(1), "DELETE")) {
+		lparen := p.advance() // (
+		inner, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.UpdateItem{Span: span(lparen.Pos, rparen.End), Statement: inner}, nil
+	}
+	path, err := p.parseGeneralizedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.EQ, `"="`); err != nil {
+		return nil, err
+	}
+	var value ast.Node
+	if isKeyword(p.peek(), "DEFAULT") {
+		def := p.advance()
+		value = &ast.DefaultLiteral{Span: span(def.Pos, def.End)}
+	} else {
+		value, err = p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+	}
+	setValue := &ast.UpdateSetValue{Span: span(path.Pos(), p.extEnd(value)), Path: path, Value: value}
+	return &ast.UpdateItem{Span: setValue.Span, SetValue: setValue}, nil
+}
+
+// parseGeneralizedPathExpression parses a path with optional "[expr]" array
+// element, ".ident", and ".(path)" generalized field access; see
+// generalized_path_expression in googlesql.tm.
+func (p *parser) parseGeneralizedPathExpression() (ast.Node, error) {
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+	}
+	if isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	}
+	first := p.parseIdentifierToken(p.advance())
+	var expr ast.Node = &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
+	for {
+		switch p.peek().Kind {
+		case token.LBRACKET:
+			lbracket := p.advance()
+			position, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			rbracket, err := p.expect(token.RBRACKET, `"]"`)
+			if err != nil {
+				return nil, err
+			}
+			expr = &ast.ArrayElement{
+				Span:            span(expr.Pos(), rbracket.End),
+				Array:           expr,
+				BracketLocation: &ast.Location{Span: span(lbracket.Pos, lbracket.End)},
+				Position:        position,
+			}
+		case token.DOT:
+			if p.peekAt(1).Kind == token.LPAREN {
+				p.advance() // .
+				p.advance() // (
+				inner, err := p.parsePathExpression()
+				if err != nil {
+					return nil, err
+				}
+				rparen, err := p.expect(token.RPAREN, `")"`)
+				if err != nil {
+					return nil, err
+				}
+				expr = &ast.DotGeneralizedField{Span: span(expr.Pos(), rparen.End), Expr: expr, Path: inner}
+				continue
+			}
+			if p.peekAt(1).Kind != token.IDENT && p.peekAt(1).Kind != token.QUOTED_IDENT {
+				return expr, nil
+			}
+			p.advance() // .
+			ident := p.parseIdentifierToken(p.advance())
+			if pe, ok := expr.(*ast.PathExpression); ok {
+				pe.Names = append(pe.Names, ident)
+				pe.Stop = ident.End()
+				continue
+			}
+			expr = &ast.DotIdentifier{Span: span(expr.Pos(), ident.End()), Expr: expr, Name: ident}
+		default:
+			return expr, nil
+		}
+	}
 }
 
 // parseCallStatement parses "CALL path ( [tvf_argument, ...] )"; see
