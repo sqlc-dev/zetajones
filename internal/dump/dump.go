@@ -123,6 +123,12 @@ func nodeString(n ast.Node) string {
 		return "SelectColumn"
 	case *ast.Alias:
 		return "Alias"
+	case *ast.IntoAlias:
+		return "IntoAlias"
+	case *ast.ImportStatement:
+		return "ImportStatement"
+	case *ast.ModuleStatement:
+		return "ModuleStatement"
 	case *ast.Star:
 		return fmt.Sprintf("Star(%s)", t.Image)
 	case *ast.StarWithModifiers:

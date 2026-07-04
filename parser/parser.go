@@ -667,12 +667,117 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseDropStatement()
 	case isKeyword(tok, "EXECUTE"):
 		return p.parseExecuteImmediateStatement()
+	case isKeyword(tok, "IMPORT"):
+		return p.parseImportStatement()
+	case isKeyword(tok, "MODULE"):
+		return p.parseModuleStatement()
 	case isKeyword(tok, "INSERT"):
 		return p.parseInsertStatement()
 	case isKeyword(tok, "MERGE"):
 		return p.parseMergeStatement()
 	case isKeyword(tok, "UPDATE"):
 		return p.parseUpdateStatement()
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseImportStatement parses "IMPORT MODULE|PROTO path_or_string
+// [AS/INTO alias] [OPTIONS(...)]"; see import_statement in googlesql.tm.
+func (p *parser) parseImportStatement() (ast.Statement, error) {
+	importTok := p.advance() // IMPORT
+	// import_type: MODULE or PROTO.
+	if !isKeyword(p.peek(), "MODULE") && !isKeyword(p.peek(), "PROTO") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword MODULE or keyword PROTO but got %s", describeToken(p.peek()))
+	}
+	p.advance() // MODULE / PROTO
+	// path_expression_or_string. The reference LALR parser accepts either an
+	// identifier or a string literal here, so a token that starts neither is
+	// reported generically as unexpected rather than "Expected identifier".
+	if k := p.peek().Kind; k != token.STRING && k != token.IDENT && k != token.QUOTED_IDENT {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	var name ast.Node
+	var err error
+	if p.peek().Kind == token.STRING {
+		name, err = p.parseStringLiteral()
+	} else {
+		name, err = p.parsePathExpression()
+	}
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.ImportStatement{Span: span(importTok.Pos, p.extEnd(name)), Name: name}
+	// opt_as_or_into_alias.
+	switch {
+	case isKeyword(p.peek(), "AS"):
+		alias, err := p.parseRequiredAsAlias()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Alias = alias
+		stmt.Stop = alias.End()
+	case isKeyword(p.peek(), "INTO"):
+		into, err := p.parseIntoAlias()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Into = into
+		stmt.Stop = into.End()
+	}
+	// opt_options_list.
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseModuleStatement parses "MODULE path_expression [OPTIONS(...)]"; see
+// module_statement in googlesql.tm.
+func (p *parser) parseModuleStatement() (ast.Statement, error) {
+	moduleTok := p.advance() // MODULE
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.ModuleStatement{Span: span(moduleTok.Pos, name.End()), Name: name}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseRequiredAsAlias parses "AS identifier". The AS keyword must be present;
+// the identifier may not be a reserved keyword.
+func (p *parser) parseRequiredAsAlias() (*ast.Alias, error) {
+	asTok := p.advance() // AS
+	tok := p.peek()
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+		ident := p.parseIdentifierToken(p.advance())
+		return &ast.Alias{Span: span(asTok.Pos, ident.End()), Identifier: ident}, nil
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseIntoAlias parses "INTO identifier"; see opt_as_or_into_alias in
+// googlesql.tm.
+func (p *parser) parseIntoAlias() (*ast.IntoAlias, error) {
+	intoTok := p.advance() // INTO
+	tok := p.peek()
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+		ident := p.parseIdentifierToken(p.advance())
+		return &ast.IntoAlias{Span: span(intoTok.Pos, ident.End()), Identifier: ident}, nil
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 }
@@ -1665,6 +1770,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// than a missing TABLE keyword.
 	if isKeyword(p.peek(), "POLICY") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	// MODULE is not a valid CREATE target; the reference parser reports it as
+	// an unexpected keyword rather than a missing TABLE keyword.
+	if isKeyword(p.peek(), "MODULE") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(p.peek().Image))
 	}
 	if _, err := p.expectKeyword("TABLE"); err != nil {
 		return nil, err

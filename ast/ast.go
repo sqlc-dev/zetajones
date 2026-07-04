@@ -79,6 +79,49 @@ func (n *CallStatement) Children() []Node {
 	return out
 }
 
+// ImportStatement is "IMPORT MODULE|PROTO path_or_string [AS/INTO alias]
+// [OPTIONS(...)]"; see ASTImportStatement in googlesql/parser/parse_tree.h.
+type ImportStatement struct {
+	Span
+	// Name is the imported path (PathExpression) or string literal.
+	Name    Node         `json:"name"`
+	Alias   *Alias       `json:"alias,omitempty"`
+	Into    *IntoAlias   `json:"into,omitempty"`
+	Options *OptionsList `json:"options,omitempty"`
+}
+
+func (n *ImportStatement) statementNode() {}
+func (n *ImportStatement) Children() []Node {
+	out := children(n.Name)
+	if n.Alias != nil {
+		out = append(out, n.Alias)
+	}
+	if n.Into != nil {
+		out = append(out, n.Into)
+	}
+	if n.Options != nil {
+		out = append(out, n.Options)
+	}
+	return out
+}
+
+// ModuleStatement is "MODULE path_expression [OPTIONS(...)]"; see
+// ASTModuleStatement in googlesql/parser/parse_tree.h.
+type ModuleStatement struct {
+	Span
+	Name    *PathExpression `json:"name"`
+	Options *OptionsList    `json:"options,omitempty"`
+}
+
+func (n *ModuleStatement) statementNode() {}
+func (n *ModuleStatement) Children() []Node {
+	out := children(n.Name)
+	if n.Options != nil {
+		out = append(out, n.Options)
+	}
+	return out
+}
+
 // ExecuteImmediateStatement is "EXECUTE IMMEDIATE <expr> [INTO ...] [USING ...]";
 // see ASTExecuteImmediateStatement in googlesql/parser/parse_tree.h.
 type ExecuteImmediateStatement struct {
@@ -529,6 +572,17 @@ type Alias struct {
 }
 
 func (n *Alias) Children() []Node {
+	return children(n.Identifier)
+}
+
+// IntoAlias is an "INTO name" alias; see ASTIntoAlias in
+// googlesql/parser/parse_tree.h.
+type IntoAlias struct {
+	Span
+	Identifier *Identifier `json:"identifier"`
+}
+
+func (n *IntoAlias) Children() []Node {
 	return children(n.Identifier)
 }
 
