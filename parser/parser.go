@@ -654,7 +654,7 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 	var lockMode *ast.LockMode
 	end := primaryEnd
 	if isKeyword(p.peek(), "ORDER") {
-		ob, err := p.parseOrderBy()
+		ob, err := p.parseOrderBy(false)
 		if err != nil {
 			return nil, err
 		}
@@ -894,17 +894,11 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		}
 		return &ast.PipeWhere{Span: span(pipeTok.Pos, where.End()), Where: where}, nil
 	case isKeyword(tok, "ORDER"):
-		orderBy, err := p.parseOrderBy()
+		orderBy, err := p.parseOrderBy(true)
 		if err != nil {
 			return nil, err
 		}
-		node := &ast.PipeOrderBy{Span: span(pipeTok.Pos, orderBy.End()), OrderBy: orderBy}
-		// Pipe ORDER BY allows a trailing comma.
-		if p.peek().Kind == token.COMMA {
-			comma := p.advance()
-			node.Stop = comma.End
-		}
-		return node, nil
+		return &ast.PipeOrderBy{Span: span(pipeTok.Pos, orderBy.End()), OrderBy: orderBy}, nil
 	case isKeyword(tok, "SET"):
 		return p.parsePipeSet(pipeTok)
 	case isKeyword(tok, "LOG"):
@@ -1535,7 +1529,11 @@ func (p *parser) parseGroupBy() (*ast.GroupBy, error) {
 	return groupBy, nil
 }
 
-func (p *parser) parseOrderBy() (*ast.OrderBy, error) {
+// parseOrderBy parses "ORDER [hint] BY ordering_expression, ...". When
+// allowTrailingComma is true (pipe ORDER BY), a trailing comma is accepted
+// and included in the clause's location; see order_by_clause and
+// order_by_clause_with_opt_comma in googlesql.tm.
+func (p *parser) parseOrderBy(allowTrailingComma bool) (*ast.OrderBy, error) {
 	orderTok, err := p.expectKeyword("ORDER")
 	if err != nil {
 		return nil, err
@@ -1558,7 +1556,12 @@ func (p *parser) parseOrderBy() (*ast.OrderBy, error) {
 		if p.peek().Kind != token.COMMA {
 			break
 		}
-		p.advance()
+		comma := p.advance()
+		if allowTrailingComma && !startsExpression(p.peek()) {
+			// Trailing comma; it is included in the clause's location.
+			orderBy.Stop = comma.End
+			break
+		}
 	}
 	return orderBy, nil
 }
@@ -2271,7 +2274,7 @@ func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 		windowSpec.PartitionBy = partitionBy
 	}
 	if isKeyword(p.peek(), "ORDER") {
-		orderBy, err := p.parseOrderBy()
+		orderBy, err := p.parseOrderBy(false)
 		if err != nil {
 			return nil, err
 		}
