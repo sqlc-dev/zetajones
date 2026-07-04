@@ -629,6 +629,26 @@ func nodeString(n ast.Node) string {
 			return "CreateTableStatement"
 		}
 		return fmt.Sprintf("CreateTableStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateExternalTableStatement:
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreateExternalTableStatement"
+		}
+		return fmt.Sprintf("CreateExternalTableStatement(%s)", strings.Join(mods, ", "))
 	case *ast.CreateViewStatement:
 		// The modifier order matches ASTCreateViewStatementBase::CollectModifiers
 		// in parse_tree.cc: scope, is_or_replace, is_if_not_exists (from the

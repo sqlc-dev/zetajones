@@ -2165,6 +2165,24 @@ func (n *CreateTableStatement) Children() []Node {
 	return children(n.Name, n.Query)
 }
 
+// CreateExternalTableStatement is a CREATE EXTERNAL TABLE statement; see
+// ASTCreateExternalTableStatement in googlesql/parser/parse_tree.h. Scope is
+// "", "TEMP", "PUBLIC", or "PRIVATE".
+type CreateExternalTableStatement struct {
+	Span
+	Scope          string                `json:"scope,omitempty"`
+	IsOrReplace    bool                  `json:"is_or_replace,omitempty"`
+	IsIfNotExists  bool                  `json:"is_if_not_exists,omitempty"`
+	Name           *PathExpression       `json:"name"`
+	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
+	Options        *OptionsList          `json:"options"`
+}
+
+func (n *CreateExternalTableStatement) statementNode() {}
+func (n *CreateExternalTableStatement) Children() []Node {
+	return children(n.Name, n.WithConnection, n.Options)
+}
+
 // CreateViewStatement is a CREATE [MATERIALIZED|APPROX] VIEW statement; see
 // ASTCreateViewStatement, ASTCreateMaterializedViewStatement, and
 // ASTCreateApproxViewStatement in googlesql/parser/parse_tree.h. ViewKind is

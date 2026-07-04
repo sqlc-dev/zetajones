@@ -1605,6 +1605,9 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") && isKeyword(p.peekAt(2), "FUNCTION") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: CREATE EXTERNAL TABLE FUNCTION is not supported")
 	}
+	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") {
+		return p.parseCreateExternalTableStatement(createTok, scope, isOrReplace)
+	}
 	// CREATE [OR REPLACE] [scope] [AGGREGATE] FUNCTION is a scalar/aggregate
 	// function; see create_function_statement in googlesql.tm.
 	isAggregate := false
@@ -1661,6 +1664,47 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		// query inside the parentheses.
 		stmt.Stop = p.prevEnd()
 	}
+	return stmt, nil
+}
+
+// parseCreateExternalTableStatement parses "CREATE [OR REPLACE] [scope]
+// EXTERNAL TABLE [IF NOT EXISTS] name [WITH CONNECTION connection] OPTIONS(...)";
+// see create_external_table_statement in googlesql.tm. The EXTERNAL and TABLE
+// keywords are not yet consumed. Table element lists, LIKE, COLLATE, and WITH
+// PARTITION COLUMNS clauses are not yet supported.
+func (p *parser) parseCreateExternalTableStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // EXTERNAL
+	p.advance() // TABLE
+	stmt := &ast.CreateExternalTableStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	// WITH CONNECTION connection (WITH PARTITION COLUMNS is not yet supported).
+	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "CONNECTION") {
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+	}
+	// OPTIONS(...) is required; see the "options" rule in googlesql.tm.
+	if _, err := p.expectKeyword("OPTIONS"); err != nil {
+		return nil, err
+	}
+	opts, err := p.parseOptionsList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Options = opts
+	stmt.Stop = opts.End()
 	return stmt, nil
 }
 
