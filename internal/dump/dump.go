@@ -99,6 +99,8 @@ func nodeString(n ast.Node) string {
 		return "Limit"
 	case *ast.LimitAll:
 		return "LimitAll"
+	case *ast.LockMode:
+		return "LockMode"
 	case *ast.AlterStatement:
 		if t.IsIfExists {
 			return t.NodeName + "(is_if_exists)"

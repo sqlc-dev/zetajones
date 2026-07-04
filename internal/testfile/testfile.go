@@ -119,27 +119,40 @@ func parseCase(lines []string, defaults *[]string) *Case {
 
 	c := &Case{}
 
-	// First part: comments, options, SQL.
-	var sqlLines []string
-	inHeader := true
-	for _, line := range parts[0] {
-		if inHeader {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			if opts, ok := parseOptionsLine(trimmed); ok {
-				for _, opt := range opts {
-					if rest, isDefault := strings.CutPrefix(opt, "default "); isDefault {
-						*defaults = append(*defaults, rest)
-					} else {
-						c.Options = append(c.Options, opt)
-					}
-				}
-				continue
-			}
-			inHeader = false
+	// First part: comments, options, SQL. The test driver strips the leading
+	// comment block (blank and "#" lines); the framework then extracts option
+	// lines plus surrounding blank lines. Comment lines after the options are
+	// part of the input: expected byte offsets index into them.
+	part := parts[0]
+	i := 0
+	for i < len(part) {
+		trimmed := strings.TrimSpace(part[i])
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			break
 		}
+		i++
+	}
+	for i < len(part) {
+		trimmed := strings.TrimSpace(part[i])
+		if trimmed == "" {
+			i++
+			continue
+		}
+		opts, ok := parseOptionsLine(trimmed)
+		if !ok {
+			break
+		}
+		for _, opt := range opts {
+			if rest, isDefault := strings.CutPrefix(opt, "default "); isDefault {
+				*defaults = append(*defaults, rest)
+			} else {
+				c.Options = append(c.Options, opt)
+			}
+		}
+		i++
+	}
+	var sqlLines []string
+	for _, line := range part[i:] {
 		sqlLines = append(sqlLines, unescapeLine(line))
 	}
 	// Strip trailing blank lines from the SQL payload.

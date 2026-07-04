@@ -69,13 +69,22 @@ type Query struct {
 	QueryExpr     Node         `json:"query_expr"` // *Select, *SetOperation, or parenthesized *Query
 	OrderBy       *OrderBy     `json:"order_by,omitempty"`
 	Limit         *LimitOffset `json:"limit,omitempty"`
+	LockMode      *LockMode    `json:"lock_mode,omitempty"`
 	PipeOperators []Node       `json:"pipe_operators,omitempty"`
 }
 
 func (n *Query) Children() []Node {
-	out := children(n.QueryExpr, n.OrderBy, n.Limit)
+	out := children(n.QueryExpr, n.OrderBy, n.Limit, n.LockMode)
 	return append(out, n.PipeOperators...)
 }
+
+// LockMode is a FOR UPDATE locking clause on a query; see ASTLockMode in
+// googlesql/parser/parse_tree.h. The only strength is UPDATE.
+type LockMode struct {
+	Span
+}
+
+func (n *LockMode) Children() []Node { return nil }
 
 // Select is a SELECT clause with its associated clauses.
 type Select struct {

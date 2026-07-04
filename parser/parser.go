@@ -219,7 +219,8 @@ func isKeyword(tok token.Token, kw string) bool {
 var reservedKeywords = map[string]bool{
 	"ALL": true, "AND": true, "AS": true, "ASC": true, "BETWEEN": true,
 	"BY": true, "CASE": true, "CROSS": true, "DESC": true, "DISTINCT": true,
-	"ELSE": true, "END": true, "EXCEPT": true, "FALSE": true, "FROM": true,
+	"ELSE": true, "END": true, "EXCEPT": true, "FALSE": true, "FOR": true,
+	"FROM": true,
 	"FULL": true, "GROUP": true, "HAVING": true, "IN": true, "INNER": true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LEFT": true, "LIKE": true,
 	"LIMIT": true, "NOT": true, "NULL": true, "ON": true, "OR": true,
@@ -496,6 +497,15 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 		query.Limit = limit
 		query.Stop = limit.End()
 	}
+	// FOR UPDATE lock mode clause; the reference lexer only produces
+	// KW_FOR_BEFORE_LOCK_MODE when FOR is immediately followed by UPDATE
+	// (see the lookahead transformer), so require both keywords here.
+	if isKeyword(p.peek(), "FOR") && isKeyword(p.peekAt(1), "UPDATE") {
+		forTok := p.advance()    // FOR
+		updateTok := p.advance() // UPDATE
+		query.LockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
+		query.Stop = query.LockMode.End()
+	}
 	for p.peek().Kind == token.PIPE_INPUT {
 		op, err := p.parsePipeOperator()
 		if err != nil {
@@ -637,12 +647,12 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		sel.Stop = groupBy.End()
 	}
 	if isKeyword(p.peek(), "HAVING") {
-		p.advance()
+		havingTok := p.advance()
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
-		sel.Having = &ast.Having{Span: span(expr.Pos(), expr.End()), Expr: expr}
+		sel.Having = &ast.Having{Span: span(havingTok.Pos, expr.End()), Expr: expr}
 		sel.Stop = expr.End()
 	}
 	return sel, nil
