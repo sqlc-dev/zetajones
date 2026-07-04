@@ -297,6 +297,30 @@ func nodeString(n ast.Node) string {
 			return "FunctionCall(distinct=true)"
 		}
 		return "FunctionCall"
+	case *ast.CastExpression:
+		// See ASTCastExpression::SingleNodeDebugString in parse_tree.cc.
+		if t.IsSafeCast {
+			return "CastExpression(return_null_on_error=true)"
+		}
+		return "CastExpression"
+	case *ast.FormatClause:
+		return "FormatClause"
+	case *ast.SimpleType:
+		return "SimpleType"
+	case *ast.ArrayType:
+		return "ArrayType"
+	case *ast.StructType:
+		return "StructType"
+	case *ast.StructField:
+		return "StructField"
+	case *ast.RangeType:
+		return "RangeType"
+	case *ast.TypeParameterList:
+		return "TypeParameterList"
+	case *ast.MaxLiteral:
+		// ASTMaxLiteral is a printable leaf with an empty image, so the
+		// reference prints an empty parenthesized detail.
+		return "MaxLiteral()"
 	case *ast.ExpressionSubquery:
 		if t.Modifier != "" {
 			return fmt.Sprintf("ExpressionSubquery(modifier=%s)", t.Modifier)

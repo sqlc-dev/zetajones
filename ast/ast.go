@@ -453,11 +453,12 @@ func (n *PipeJoinLhsPlaceholder) Children() []Node { return nil }
 // googlesql/parser/parse_tree.h.
 type ArrayConstructor struct {
 	Span
-	Elements []Node `json:"elements"`
+	Type     *ArrayType `json:"type,omitempty"`
+	Elements []Node     `json:"elements"`
 }
 
 func (n *ArrayConstructor) Children() []Node {
-	return append([]Node(nil), n.Elements...)
+	return append(children(n.Type), n.Elements...)
 }
 
 // WhereClause holds the WHERE clause expression.
@@ -1273,3 +1274,118 @@ func (n *PipeSetOperation) Children() []Node {
 	out := children(n.Metadata)
 	return append(out, n.Inputs...)
 }
+
+// CastExpression is "CAST(expr AS type [FORMAT ...])" or "SAFE_CAST(...)";
+// see ASTCastExpression in googlesql/parser/parse_tree.h.
+type CastExpression struct {
+	Span
+	Expr       Node          `json:"expr"`
+	Type       Node          `json:"type"`
+	Format     *FormatClause `json:"format,omitempty"`
+	IsSafeCast bool          `json:"is_safe_cast,omitempty"`
+}
+
+func (n *CastExpression) Children() []Node {
+	return children(n.Expr, n.Type, n.Format)
+}
+
+// FormatClause is the "FORMAT expr [AT TIME ZONE expr]" clause of a cast;
+// see ASTFormatClause in googlesql/parser/parse_tree.h.
+type FormatClause struct {
+	Span
+	Format   Node `json:"format"`
+	TimeZone Node `json:"time_zone,omitempty"`
+}
+
+func (n *FormatClause) Children() []Node {
+	return children(n.Format, n.TimeZone)
+}
+
+// SimpleType is a named type like "int64" or "a.b.c"; see ASTSimpleType in
+// googlesql/parser/parse_tree.h.
+type SimpleType struct {
+	Span
+	Name           *PathExpression    `json:"name"`
+	TypeParameters *TypeParameterList `json:"type_parameters,omitempty"`
+	Collate        *Collate           `json:"collate,omitempty"`
+}
+
+func (n *SimpleType) Children() []Node {
+	return children(n.Name, n.TypeParameters, n.Collate)
+}
+
+// ArrayType is "ARRAY<type>"; see ASTArrayType in
+// googlesql/parser/parse_tree.h.
+type ArrayType struct {
+	Span
+	ElementType    Node               `json:"element_type"`
+	TypeParameters *TypeParameterList `json:"type_parameters,omitempty"`
+	Collate        *Collate           `json:"collate,omitempty"`
+}
+
+func (n *ArrayType) Children() []Node {
+	return children(n.ElementType, n.TypeParameters, n.Collate)
+}
+
+// StructType is "STRUCT<field, ...>"; see ASTStructType in
+// googlesql/parser/parse_tree.h.
+type StructType struct {
+	Span
+	Fields         []*StructField     `json:"fields"`
+	TypeParameters *TypeParameterList `json:"type_parameters,omitempty"`
+	Collate        *Collate           `json:"collate,omitempty"`
+}
+
+func (n *StructType) Children() []Node {
+	var out []Node
+	for _, f := range n.Fields {
+		out = append(out, f)
+	}
+	return append(out, children(n.TypeParameters, n.Collate)...)
+}
+
+// StructField is one "[name] type" entry in a STRUCT type; see
+// ASTStructField in googlesql/parser/parse_tree.h.
+type StructField struct {
+	Span
+	Name *Identifier `json:"name,omitempty"`
+	Type Node        `json:"type"`
+}
+
+func (n *StructField) Children() []Node {
+	return children(n.Name, n.Type)
+}
+
+// RangeType is "RANGE<type>"; see ASTRangeType in
+// googlesql/parser/parse_tree.h.
+type RangeType struct {
+	Span
+	ElementType    Node               `json:"element_type"`
+	TypeParameters *TypeParameterList `json:"type_parameters,omitempty"`
+	Collate        *Collate           `json:"collate,omitempty"`
+}
+
+func (n *RangeType) Children() []Node {
+	return children(n.ElementType, n.TypeParameters, n.Collate)
+}
+
+// TypeParameterList is the "(param, ...)" suffix of a parameterized type
+// like STRING(10); see ASTTypeParameterList in
+// googlesql/parser/parse_tree.h. Its span covers "(" through the last
+// parameter, excluding the closing ")", matching the reference grammar.
+type TypeParameterList struct {
+	Span
+	Parameters []Node `json:"parameters"`
+}
+
+func (n *TypeParameterList) Children() []Node {
+	return append([]Node(nil), n.Parameters...)
+}
+
+// MaxLiteral is the special "MAX" type parameter, e.g. NUMERIC(MAX); see
+// ASTMaxLiteral in googlesql/parser/parse_tree.h.
+type MaxLiteral struct {
+	Span
+}
+
+func (n *MaxLiteral) Children() []Node { return nil }

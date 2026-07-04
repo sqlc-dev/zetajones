@@ -2673,9 +2673,20 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isKeyword(tok, "TRUE"), isKeyword(tok, "FALSE"):
 			p.advance()
 			return &ast.BooleanLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image, Value: isKeyword(tok, "TRUE")}, nil
+		case isKeyword(tok, "CAST"),
+			isKeyword(tok, "SAFE_CAST") && p.peekAt(1).Kind == token.LPAREN:
+			// SAFE_CAST is non-reserved: it is only the cast keyword when
+			// followed by "(" (see keywords.cc); otherwise it falls through
+			// to the identifier cases below.
+			return p.parseCastExpression()
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACKET:
 			p.advance() // ARRAY; the constructor's span starts at the keyword.
 			return p.parseArrayConstructor(tok.Pos)
+		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LT:
+			// "ARRAY<type>[...]" is an array constructor with an explicit
+			// element type; see array_constructor_prefix_no_expressions in
+			// googlesql.tm.
+			return p.parseTypedArrayConstructor()
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LPAREN:
 			p.advance() // ARRAY; the subquery's span starts at the keyword.
 			return p.parseModifiedSubquery(tok.Pos, "ARRAY")
@@ -3018,4 +3029,342 @@ func (p *parser) parseBytesLiteral() (ast.Node, error) {
 		lit.Stop = tok.End
 	}
 	return lit, nil
+}
+
+// parseCastExpression parses "CAST(expr AS type [FORMAT ...])" or
+// "SAFE_CAST(...)"; see cast_expression in googlesql.tm.
+func (p *parser) parseCastExpression() (ast.Node, error) {
+	kw := p.advance() // CAST or SAFE_CAST
+	isSafe := strings.EqualFold(kw.Image, "SAFE_CAST")
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "SELECT") {
+		name := "CAST"
+		if isSafe {
+			name = "SAFE_CAST"
+		}
+		// Dedicated error without the "Syntax error: " prefix, matching the
+		// reference grammar rule.
+		return nil, p.errorf(p.peek().Pos, "The argument to %s is an expression, not a query; to use a query as an expression, the query must be wrapped with additional parentheses to make it a scalar subquery expression", name)
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("AS"); err != nil {
+		return nil, err
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	var format *ast.FormatClause
+	if isKeyword(p.peek(), "FORMAT") {
+		format, err = p.parseFormatClause()
+		if err != nil {
+			return nil, err
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CastExpression{
+		Span:       span(kw.Pos, rparen.End),
+		Expr:       expr,
+		Type:       typ,
+		Format:     format,
+		IsSafeCast: isSafe,
+	}, nil
+}
+
+// parseFormatClause parses "FORMAT expr [AT TIME ZONE expr]"; see format and
+// at_time_zone in googlesql.tm.
+func (p *parser) parseFormatClause() (*ast.FormatClause, error) {
+	formatTok := p.advance() // FORMAT
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	fc := &ast.FormatClause{Span: span(formatTok.Pos, expr.End()), Format: expr}
+	if isKeyword(p.peek(), "AT") {
+		p.advance() // AT
+		if _, err := p.expectKeyword("TIME"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("ZONE"); err != nil {
+			return nil, err
+		}
+		tz, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		fc.TimeZone = tz
+		fc.Stop = tz.End()
+	}
+	return fc, nil
+}
+
+// startsType reports whether tok can begin a type; used to disambiguate
+// "name type" from a bare type in struct fields.
+func startsType(tok token.Token) bool {
+	if tok.Kind == token.QUOTED_IDENT {
+		return true
+	}
+	if tok.Kind != token.IDENT {
+		return false
+	}
+	if !isReserved(tok) {
+		return true
+	}
+	return isKeyword(tok, "ARRAY") || isKeyword(tok, "STRUCT") ||
+		isKeyword(tok, "RANGE") || isKeyword(tok, "INTERVAL")
+}
+
+// parseType parses a type with optional type parameters and collation; see
+// the type rule in googlesql.tm: raw_type type_parameters? collate_clause?.
+func (p *parser) parseType() (ast.Node, error) {
+	raw, err := p.parseRawType()
+	if err != nil {
+		return nil, err
+	}
+	var params *ast.TypeParameterList
+	if p.peek().Kind == token.LPAREN {
+		params, err = p.parseTypeParameterList()
+		if err != nil {
+			return nil, err
+		}
+	}
+	var collate *ast.Collate
+	if isKeyword(p.peek(), "COLLATE") {
+		collate, err = p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if params == nil && collate == nil {
+		return raw, nil
+	}
+	// The reference extends the raw type node through the type parameters
+	// and collation (ExtendNodeRight with @$.end() in the type rule), so
+	// the closing ")" of the parameter list is included in the type's span
+	// even though TypeParameterList itself excludes it. prevEnd is only
+	// valid here because a parameter list or collation was consumed; right
+	// after a split ">>" token the previous token's end would be stale.
+	end := p.prevEnd()
+	switch t := raw.(type) {
+	case *ast.SimpleType:
+		t.TypeParameters, t.Collate, t.Stop = params, collate, end
+	case *ast.ArrayType:
+		t.TypeParameters, t.Collate, t.Stop = params, collate, end
+	case *ast.StructType:
+		t.TypeParameters, t.Collate, t.Stop = params, collate, end
+	case *ast.RangeType:
+		t.TypeParameters, t.Collate, t.Stop = params, collate, end
+	}
+	return raw, nil
+}
+
+// parseRawType parses a type without parameters or collation; see raw_type
+// in googlesql.tm.
+func (p *parser) parseRawType() (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "ARRAY"):
+		return p.parseArrayType()
+	case isKeyword(tok, "STRUCT"):
+		return p.parseStructType()
+	case isKeyword(tok, "RANGE"):
+		return p.parseRangeType()
+	case isKeyword(tok, "INTERVAL"):
+		// INTERVAL is a reserved keyword but still names a type; see
+		// type_name in googlesql.tm.
+		id := p.parseIdentifierToken(p.advance())
+		path := &ast.PathExpression{Span: span(tok.Pos, tok.End), Names: []*ast.Identifier{id}}
+		return &ast.SimpleType{Span: span(tok.Pos, tok.End), Name: path}, nil
+	}
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.SimpleType{Span: span(path.Pos(), path.End()), Name: path}, nil
+}
+
+// expectTemplateOpen consumes the "<" opening a template type.
+func (p *parser) expectTemplateOpen() (token.Token, error) {
+	return p.expect(token.LT, `"<"`)
+}
+
+// expectTemplateClose consumes the ">" closing a template type. A ">>" token
+// (as in "ARRAY<STRUCT<int64>>") is split so its second ">" can close the
+// enclosing template type; the reference lexer does this with lookback
+// overrides (see template_type_close in googlesql.tm).
+func (p *parser) expectTemplateClose() (token.Token, error) {
+	tok := p.peek()
+	if tok.Kind == token.RSHIFT {
+		p.toks[p.pos] = token.Token{Kind: token.GT, Image: ">", Pos: tok.Pos + 1, End: tok.End}
+		return token.Token{Kind: token.GT, Image: ">", Pos: tok.Pos, End: tok.Pos + 1}, nil
+	}
+	return p.expect(token.GT, `">"`)
+}
+
+// parseArrayType parses "ARRAY<type>"; see array_type in googlesql.tm.
+func (p *parser) parseArrayType() (*ast.ArrayType, error) {
+	arrayTok := p.advance() // ARRAY
+	if _, err := p.expectTemplateOpen(); err != nil {
+		return nil, err
+	}
+	elem, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ArrayType{Span: span(arrayTok.Pos, closeTok.End), ElementType: elem}, nil
+}
+
+// parseRangeType parses "RANGE<type>"; see range_type in googlesql.tm.
+func (p *parser) parseRangeType() (*ast.RangeType, error) {
+	rangeTok := p.advance() // RANGE
+	if _, err := p.expectTemplateOpen(); err != nil {
+		return nil, err
+	}
+	elem, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RangeType{Span: span(rangeTok.Pos, closeTok.End), ElementType: elem}, nil
+}
+
+// parseStructType parses "STRUCT<field, ...>" (possibly empty); see
+// struct_type in googlesql.tm.
+func (p *parser) parseStructType() (*ast.StructType, error) {
+	structTok := p.advance() // STRUCT
+	if _, err := p.expectTemplateOpen(); err != nil {
+		return nil, err
+	}
+	st := &ast.StructType{Span: span(structTok.Pos, 0)}
+	if p.peek().Kind != token.GT && p.peek().Kind != token.RSHIFT {
+		for {
+			field, err := p.parseStructField()
+			if err != nil {
+				return nil, err
+			}
+			st.Fields = append(st.Fields, field)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	st.Stop = closeTok.End
+	return st, nil
+}
+
+// parseStructField parses one "[name] type" struct field; see struct_field
+// in googlesql.tm.
+func (p *parser) parseStructField() (*ast.StructField, error) {
+	tok := p.peek()
+	named := (tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))) &&
+		startsType(p.peekAt(1))
+	var name *ast.Identifier
+	if named {
+		name = p.parseIdentifierToken(p.advance())
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	start := typ.Pos()
+	if name != nil {
+		start = name.Pos()
+	}
+	return &ast.StructField{Span: span(start, typ.End()), Name: name, Type: typ}, nil
+}
+
+// parseTypeParameterList parses "(param, ...)" after a type name; see
+// type_parameters in googlesql.tm. The node's span excludes the closing ")".
+func (p *parser) parseTypeParameterList() (*ast.TypeParameterList, error) {
+	lparen := p.advance() // (
+	list := &ast.TypeParameterList{Span: span(lparen.Pos, 0)}
+	for {
+		param, err := p.parseTypeParameter()
+		if err != nil {
+			return nil, err
+		}
+		list.Parameters = append(list.Parameters, param)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		if p.peek().Kind == token.RPAREN {
+			return nil, p.errorf(comma.Pos, "Syntax error: Trailing comma in type parameter list is not allowed.")
+		}
+	}
+	list.Stop = list.Parameters[len(list.Parameters)-1].End()
+	if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// parseTypeParameter parses one literal type parameter; see type_parameter
+// in googlesql.tm.
+func (p *parser) parseTypeParameter() (ast.Node, error) {
+	tok := p.peek()
+	switch tok.Kind {
+	case token.INT:
+		p.advance()
+		return &ast.IntLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}, nil
+	case token.FLOAT:
+		p.advance()
+		return &ast.FloatLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}, nil
+	case token.STRING:
+		return p.parseStringLiteral()
+	case token.BYTES:
+		return p.parseBytesLiteral()
+	}
+	switch {
+	case isKeyword(tok, "MAX"):
+		p.advance()
+		return &ast.MaxLiteral{Span: span(tok.Pos, tok.End)}, nil
+	case isKeyword(tok, "TRUE"), isKeyword(tok, "FALSE"):
+		p.advance()
+		return &ast.BooleanLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image, Value: isKeyword(tok, "TRUE")}, nil
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseTypedArrayConstructor parses "ARRAY<type>[...]"; the ArrayType
+// becomes the constructor's first child (see array_constructor_prefix_...
+// in googlesql.tm).
+func (p *parser) parseTypedArrayConstructor() (ast.Node, error) {
+	start := p.peek().Pos
+	typ, err := p.parseArrayType()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.LBRACKET {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "[" but got %s`, describeToken(p.peek()))
+	}
+	arr, err := p.parseArrayConstructor(start)
+	if err != nil {
+		return nil, err
+	}
+	arr.(*ast.ArrayConstructor).Type = typ
+	return arr, nil
 }
