@@ -1073,14 +1073,40 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 	case token.BYTES:
 		return p.parseBytesLiteral()
 	case token.LPAREN:
-		p.advance()
+		lparen := p.advance()
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
-		if _, err := p.expect(token.RPAREN, `")"`); err != nil {
-			return nil, err
+		// "(expr, expr, ...)" is a struct constructor; see struct_constructor
+		// in googlesql.tm.
+		if p.peek().Kind == token.COMMA {
+			s := &ast.StructConstructorWithParens{
+				Span:             span(lparen.Pos, 0),
+				FieldExpressions: []ast.Node{expr},
+			}
+			for p.peek().Kind == token.COMMA {
+				p.advance()
+				field, err := p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+				s.FieldExpressions = append(s.FieldExpressions, field)
+			}
+			rparen, err := p.expect(token.RPAREN, `")" or ","`)
+			if err != nil {
+				return nil, err
+			}
+			s.Stop = rparen.End
+			return s, nil
 		}
+		// After "( expression", the reference LALR parser's only live item on
+		// an unexpected token is the struct constructor's "," continuation, so
+		// its error suggests "," rather than ")".
+		if p.peek().Kind != token.RPAREN {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," but got %s`, describeToken(p.peek()))
+		}
+		p.advance()
 		// Parenthesized expressions keep the span of the inner expression in
 		// ZetaSQL's parse tree; the parentheses only affect grouping.
 		return expr, nil

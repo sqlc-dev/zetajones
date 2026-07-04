@@ -422,6 +422,18 @@ func (n *BetweenExpression) Children() []Node {
 	return children(n.Lhs, n.BetweenLocation, n.Low, n.High)
 }
 
+// StructConstructorWithParens is "(expr1, expr2 [, ... ])" with at least two
+// expressions; see ASTStructConstructorWithParens in parse_tree.h. The
+// single-expression form is a parenthesized expression, not a struct.
+type StructConstructorWithParens struct {
+	Span
+	FieldExpressions []Node `json:"field_expressions"`
+}
+
+func (n *StructConstructorWithParens) Children() []Node {
+	return children(n.FieldExpressions...)
+}
+
 // PipeWhere is a |> WHERE pipe operator.
 type PipeWhere struct {
 	Span

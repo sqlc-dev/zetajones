@@ -150,6 +150,8 @@ func nodeString(n ast.Node) string {
 			return "BetweenExpression(NOT BETWEEN)"
 		}
 		return "BetweenExpression(BETWEEN)"
+	case *ast.StructConstructorWithParens:
+		return "StructConstructorWithParens"
 	case *ast.PipeWhere:
 		return "PipeWhere"
 	case *ast.PipeOrderBy:
