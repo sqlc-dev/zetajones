@@ -2219,9 +2219,13 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 		table.Stop = alias.End()
 	}
 	// WITH OFFSET [[AS] alias]; see with_offset_and_alias in googlesql.tm.
-	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "OFFSET") {
-		withTok := p.advance()   // WITH
-		offsetTok := p.advance() // OFFSET
+	// A bare WITH in this position must be followed by OFFSET.
+	if isKeyword(p.peek(), "WITH") {
+		withTok := p.advance() // WITH
+		offsetTok, err := p.expectKeyword("OFFSET")
+		if err != nil {
+			return nil, err
+		}
 		offset := &ast.WithOffset{Span: span(withTok.Pos, offsetTok.End)}
 		offsetAlias, err := p.parseOptionalAlias()
 		if err != nil {
@@ -2233,6 +2237,36 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 		}
 		table.Offset = offset
 		table.Stop = offset.End()
+	}
+	// FOR SYSTEM TIME AS OF <expression>; see at_system_time in googlesql.tm.
+	// FOR is only consumed here when followed by SYSTEM/SYSTEM_TIME; a bare
+	// FOR (e.g. FOR UPDATE lock mode) belongs to a higher-level rule.
+	if isKeyword(p.peek(), "FOR") &&
+		(isKeyword(p.peekAt(1), "SYSTEM") || isKeyword(p.peekAt(1), "SYSTEM_TIME")) {
+		forTok := p.advance() // FOR
+		if isKeyword(p.peek(), "SYSTEM_TIME") {
+			p.advance()
+		} else {
+			if _, err := p.expectKeyword("SYSTEM"); err != nil {
+				return nil, err
+			}
+			if _, err := p.expectKeyword("TIME"); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := p.expectKeyword("AS"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("OF"); err != nil {
+			return nil, err
+		}
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		fst := &ast.ForSystemTime{Span: span(forTok.Pos, expr.End()), Expr: expr}
+		table.ForSystemTime = fst
+		table.Stop = fst.End()
 	}
 	return table, nil
 }

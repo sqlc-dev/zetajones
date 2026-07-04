@@ -308,6 +308,8 @@ type TablePathExpression struct {
 	UnnestExpr *UnnestExpression `json:"unnest_expr,omitempty"`
 	Alias      *Alias            `json:"alias,omitempty"`
 	Offset     *WithOffset       `json:"offset,omitempty"`
+	// ForSystemTime is the optional FOR SYSTEM TIME AS OF clause.
+	ForSystemTime *ForSystemTime `json:"for_system_time,omitempty"`
 	// PostfixOperators holds trailing postfix table operators such as
 	// MATCH_RECOGNIZE(...); see ASTPostfixTableOperator in
 	// googlesql/parser/parse_tree.h.
@@ -315,7 +317,7 @@ type TablePathExpression struct {
 }
 
 func (n *TablePathExpression) Children() []Node {
-	out := children(n.Path, n.UnnestExpr, n.Alias, n.Offset)
+	out := children(n.Path, n.UnnestExpr, n.Alias, n.Offset, n.ForSystemTime)
 	return append(out, n.PostfixOperators...)
 }
 
@@ -413,6 +415,18 @@ type WithOffset struct {
 
 func (n *WithOffset) Children() []Node {
 	return children(n.Alias)
+}
+
+// ForSystemTime is a FOR SYSTEM TIME AS OF <expression> clause on a
+// FROM-clause table expression; see ASTForSystemTime in
+// googlesql/parser/parse_tree.h.
+type ForSystemTime struct {
+	Span
+	Expr Node `json:"expr"`
+}
+
+func (n *ForSystemTime) Children() []Node {
+	return children(n.Expr)
 }
 
 // Join is a JOIN between two table expressions, including comma joins; see

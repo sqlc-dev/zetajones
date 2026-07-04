@@ -111,6 +111,8 @@ func nodeString(n ast.Node) string {
 		return "ExpressionWithOptAlias"
 	case *ast.WithOffset:
 		return "WithOffset"
+	case *ast.ForSystemTime:
+		return "ForSystemTime"
 	case *ast.ArrayConstructor:
 		return "ArrayConstructor"
 	case *ast.Join:
