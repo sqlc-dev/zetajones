@@ -234,6 +234,13 @@ const FeatureRemoteFunction Feature = "REMOTE_FUNCTION"
 // (FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION).
 const FeatureCreateFunctionLanguageWithConnection Feature = "CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION"
 
+// FeatureAllowDashesInTableName gates dashes in the first component of a
+// multi-part table name (e.g. crafty-tractor-287.dataset.table); see
+// FEATURE_ALLOW_DASHES_IN_TABLE_NAME and maybe_dashed_path_expression in
+// googlesql.tm. When off, such a name reports "Table name contains '-'
+// character".
+const FeatureAllowDashesInTableName Feature = "ALLOW_DASHES_IN_TABLE_NAME"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -248,6 +255,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureForUpdate:                            true,
 	FeatureRemoteFunction:                       true,
 	FeatureCreateFunctionLanguageWithConnection: true,
+	FeatureAllowDashesInTableName:               true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -414,6 +422,10 @@ type parser struct {
 	// handled by the postfix layer rather than an error; see the "." "("
 	// path_expression ")" rule in googlesql.tm.
 	allowGeneralizedField bool
+	// allowDashes is set while parsing a table-name path expression, where the
+	// first component may be a "dashed identifier" like my-project; see
+	// maybe_dashed_path_expression in googlesql.tm.
+	allowDashes bool
 	// quantifierQuestions records the byte positions of "?" tokens consumed
 	// as row pattern quantifiers (or reluctant markers) inside
 	// MATCH_RECOGNIZE patterns, so positional query parameter numbering
@@ -798,7 +810,7 @@ func (p *parser) parseDeleteStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "FROM") {
 		p.advance()
 	}
-	target, err := p.parsePathExpression()
+	target, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -862,7 +874,7 @@ func (p *parser) parseInsertStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "INTO") {
 		p.advance()
 	}
-	target, err := p.parsePathExpression()
+	target, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -984,7 +996,7 @@ func (p *parser) parseInsertValuesRowList() (*ast.InsertValuesRowList, error) {
 // googlesql.tm.
 func (p *parser) parseUpdateStatement() (ast.Statement, error) {
 	updateTok := p.advance() // UPDATE
-	target, err := p.parsePathExpression()
+	target, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -1107,7 +1119,7 @@ func (p *parser) parseMergeStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "INTO") {
 		p.advance()
 	}
-	target, err := p.parsePathExpression()
+	target, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -1631,7 +1643,7 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		p.advance()
 		stmt.IsIfNotExists = true
 	}
-	name, err := p.parsePathExpression()
+	name, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -1673,7 +1685,7 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 		p.advance()
 		stmt.IsIfNotExists = true
 	}
-	name, err := p.parsePathExpression()
+	name, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -2554,6 +2566,7 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 	var objectKind string
 	parsesDropMode := true
 	isSchema := false
+	dashedName := false
 
 	switch {
 	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "TABLE") && isKeyword(third, "FUNCTION"):
@@ -2575,6 +2588,7 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		consumeSecond()
 		nodeName = "DropSnapshotTableStatement"
 		parsesDropMode = false
+		dashedName = true
 	case isKeyword(kindTok, "TABLE") && isKeyword(second, "FUNCTION"):
 		consumeSecond()
 		nodeName = "DropTableFunctionStatement"
@@ -2594,6 +2608,7 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		p.advance()
 		objectKind = "TABLE"
 		parsesDropMode = false
+		dashedName = true
 	case isKeyword(kindTok, "SEQUENCE"), isKeyword(kindTok, "CONNECTION"),
 		isKeyword(kindTok, "CONSTANT"), isKeyword(kindTok, "DATABASE"),
 		isKeyword(kindTok, "INDEX"), isKeyword(kindTok, "MODEL"),
@@ -2629,7 +2644,13 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	path, err := p.parsePathExpression()
+	var path *ast.PathExpression
+	var err error
+	if dashedName {
+		path, err = p.parseMaybeDashedPathExpression()
+	} else {
+		path, err = p.parsePathExpression()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -2747,7 +2768,15 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	path, err := p.parsePathExpression()
+	var path *ast.PathExpression
+	var err error
+	if nodeName == "AlterTableStatement" {
+		// Only ALTER TABLE uses a maybe-dashed table name; see
+		// alter_statement in googlesql.tm.
+		path, err = p.parseMaybeDashedPathExpression()
+	} else {
+		path, err = p.parsePathExpression()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -4593,7 +4622,7 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
 		p.inTablePath = true
-		path, err := p.parsePathExpression()
+		path, err := p.parseMaybeDashedPathExpression()
 		p.inTablePath = false
 		if err != nil {
 			return nil, err
@@ -6987,6 +7016,17 @@ func (p *parser) parsePartitionBy() (*ast.PartitionBy, error) {
 	return partitionBy, nil
 }
 
+// parseMaybeDashedPathExpression parses a table-name path expression whose
+// first component may be a dashed identifier (e.g. my-project.dataset.table);
+// see maybe_dashed_path_expression in googlesql.tm.
+func (p *parser) parseMaybeDashedPathExpression() (*ast.PathExpression, error) {
+	prev := p.allowDashes
+	p.allowDashes = true
+	path, err := p.parsePathExpression()
+	p.allowDashes = prev
+	return path, err
+}
+
 func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 	tok := p.peek()
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
@@ -6996,7 +7036,19 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	first := p.parseIdentifierToken(p.advance())
-	path := &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
+	names := []*ast.Identifier{first}
+	dashed := false
+	if p.allowDashes && tok.Kind == token.IDENT {
+		ids, err := p.extendDashedIdentifier(first)
+		if err != nil {
+			return nil, err
+		}
+		if ids != nil {
+			names = ids
+			dashed = true
+		}
+	}
+	path := &ast.PathExpression{Span: span(names[0].Pos(), names[len(names)-1].End()), Names: names}
 	for p.peek().Kind == token.DOT {
 		// In a select column a path may stop before a ".*"; parsePostfix
 		// records it as the dot-star target. A path that is not the whole
@@ -7025,7 +7077,109 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 		path.Names = append(path.Names, ident)
 		path.Stop = ident.End()
 	}
+	if dashed && !p.features.Enabled(FeatureAllowDashesInTableName) {
+		// See maybe_dashed_path_expression in googlesql.tm: without the
+		// feature, a dashed table name must be quoted. The error points at the
+		// first (dashed) component and names it as the part to quote.
+		target := "It "
+		if len(path.Names) > 1 {
+			target = "The dashed identifier part of the table name "
+		}
+		return nil, p.errorf(path.Names[0].Pos(), "Syntax error: Table name contains '-' character. %sneeds to be quoted: %s", target, toIdentifierLiteral(path.Names[0].Name))
+	}
 	return path, nil
+}
+
+// extendDashedIdentifier consumes a "dashed identifier" continuation following
+// first, per the dashed_identifier rules in googlesql.tm: a chain of adjacent
+// "- identifier" or "- integer". A floating-point literal arises when the
+// lexer folds a path "." into the number (e.g. "123." in "foo-123.bar"); its
+// trailing "." is really a path separator, so the digits complete the dashed
+// run and the adjacent following identifier becomes a fresh path component.
+//
+// It returns nil (having consumed nothing) when first is not followed by an
+// adjacent dash. Otherwise it returns the leading path components: one
+// dash-joined identifier, plus a second component when a float folded in a
+// separator. first must be an unquoted identifier.
+func (p *parser) extendDashedIdentifier(first *ast.Identifier) ([]*ast.Identifier, error) {
+	dash := p.peek()
+	if dash.Kind != token.MINUS || dash.Pos != first.End() {
+		return nil, nil
+	}
+	name := first.Name
+	start := first.Pos()
+	end := first.End()
+	for {
+		dash := p.peek()
+		if dash.Kind != token.MINUS || dash.Pos != end {
+			break
+		}
+		next := p.peekAt(1)
+		if next.Pos != dash.End {
+			// Non-adjacent: the "-" is not part of a dashed identifier.
+			return nil, p.errorf(dash.Pos, "Syntax error: Unexpected \"-\"")
+		}
+		switch next.Kind {
+		case token.IDENT, token.INT:
+			p.advance() // -
+			p.advance() // ident or int
+			name += "-" + next.Image
+			end = next.End
+		case token.FLOAT:
+			img := next.Image
+			ident := p.peekAt(2)
+			if !strings.HasSuffix(img, ".") || ident.Kind != token.IDENT || ident.Pos != next.End {
+				return nil, p.errorf(dash.Pos, "Syntax error: Unexpected \"-\"")
+			}
+			p.advance() // -
+			p.advance() // float ("N.")
+			p.advance() // trailing identifier
+			name += "-" + strings.TrimSuffix(img, ".")
+			// The float's "." was the path separator; the dashed run ends at
+			// the last digit and the trailing identifier is a new component.
+			dashedID := &ast.Identifier{Span: span(start, next.End-1), Name: name}
+			tailID := &ast.Identifier{Span: span(ident.Pos, ident.End), Name: ident.Image}
+			return []*ast.Identifier{dashedID, tailID}, nil
+		default:
+			return nil, p.errorf(dash.Pos, "Syntax error: Unexpected \"-\"")
+		}
+	}
+	return []*ast.Identifier{{Span: span(start, end), Name: name}}, nil
+}
+
+// toIdentifierLiteral renders name the way ZetaSQL's ToIdentifierLiteral does
+// for diagnostics: valid unquoted identifiers print as-is, everything else is
+// backquoted. Ported minimally for the dashed-table-name error.
+func toIdentifierLiteral(name string) string {
+	valid := name != ""
+	if valid {
+		for i := 0; i < len(name); i++ {
+			c := name[i]
+			isStart := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			if i == 0 {
+				if !isStart {
+					valid = false
+					break
+				}
+			} else if !isStart && !(c >= '0' && c <= '9') {
+				valid = false
+				break
+			}
+		}
+	}
+	if valid && !token.IsReservableKeyword(name) && !token.NonReservedIdentifierMustBeBackquoted(name) {
+		return name
+	}
+	var b strings.Builder
+	b.WriteByte('`')
+	for i := 0; i < len(name); i++ {
+		if name[i] == '`' || name[i] == '\\' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(name[i])
+	}
+	b.WriteByte('`')
+	return b.String()
 }
 
 // parseSystemVariableExpr parses a system variable reference "@@path"; see

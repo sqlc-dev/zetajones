@@ -1,10 +1,7 @@
 {
   "parse_todo": {
     "case_17": true,
-    "case_37.alt_1": true,
     "case_37.alt_2": true,
-    "case_38.alt_1": true,
-    "case_38.alt_2": true,
     "case_40": true
   }
 }
