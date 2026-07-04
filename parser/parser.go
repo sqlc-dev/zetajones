@@ -4284,6 +4284,10 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// "RANGE<type> '...'" is a range literal; see range_literal in
 			// googlesql.tm.
 			return p.parseRangeLiteral()
+		case isKeyword(tok, "INTERVAL"):
+			// "INTERVAL <expr> <datepart> [TO <datepart>]"; see
+			// interval_expression in googlesql.tm.
+			return p.parseIntervalExpr()
 		case isReserved(tok):
 			if err := p.exceptClashError(); err != nil {
 				return nil, err
@@ -5468,6 +5472,42 @@ func (p *parser) parseRangeLiteral() (ast.Node, error) {
 		return nil, err
 	}
 	return &ast.RangeLiteral{Span: span(typ.Pos(), value.End()), Type: typ, Value: value}, nil
+}
+
+// parseIntervalExpr parses "INTERVAL <expr> <datepart> [TO <datepart>]"; see
+// interval_expression in googlesql.tm.
+func (p *parser) parseIntervalExpr() (ast.Node, error) {
+	kw := p.advance() // INTERVAL
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	datePart, err := p.parseIntervalDatePart()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.IntervalExpr{Span: span(kw.Pos, datePart.End()), Value: value, DatePart: datePart}
+	if isKeyword(p.peek(), "TO") {
+		p.advance()
+		to, err := p.parseIntervalDatePart()
+		if err != nil {
+			return nil, err
+		}
+		node.DatePartTo = to
+		node.Stop = to.End()
+	}
+	return node, nil
+}
+
+// parseIntervalDatePart parses the date-part identifier of an INTERVAL
+// expression. The grammar rule is a plain identifier, so any non-reserved
+// identifier (e.g. HOUR, MINUTE) is accepted.
+func (p *parser) parseIntervalDatePart() (*ast.Identifier, error) {
+	tok := p.peek()
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+		return p.parseIdentifierToken(p.advance()), nil
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
 }
 
 // parseStructType parses "STRUCT<field, ...>" (possibly empty); see

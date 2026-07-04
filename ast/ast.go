@@ -1110,6 +1110,20 @@ type DateOrTimeLiteral struct {
 
 func (n *DateOrTimeLiteral) Children() []Node { return children(n.Value) }
 
+// IntervalExpr is an INTERVAL expression: INTERVAL <value> <datepart> with an
+// optional "TO <datepart>" range; see ASTIntervalExpr / interval_expression in
+// googlesql.tm.
+type IntervalExpr struct {
+	Span
+	Value      Node        `json:"value"`
+	DatePart   *Identifier `json:"date_part"`
+	DatePartTo *Identifier `json:"date_part_to,omitempty"`
+}
+
+func (n *IntervalExpr) Children() []Node {
+	return children(n.Value, n.DatePart, n.DatePartTo)
+}
+
 // RangeLiteral is a RANGE<type> typed literal: RANGE<DATE> '[a, b)'.
 type RangeLiteral struct {
 	Span

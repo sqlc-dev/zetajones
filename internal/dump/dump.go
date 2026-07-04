@@ -280,6 +280,8 @@ func nodeString(n ast.Node) string {
 		return fmt.Sprintf("DateOrTimeLiteral(%s)", t.TypeKind)
 	case *ast.RangeLiteral:
 		return "RangeLiteral"
+	case *ast.IntervalExpr:
+		return "IntervalExpr"
 	case *ast.UnaryExpression:
 		return fmt.Sprintf("UnaryExpression(%s)", t.Op)
 	case *ast.BinaryExpression:
