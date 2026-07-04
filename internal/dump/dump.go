@@ -93,6 +93,9 @@ func nodeString(n ast.Node) string {
 	case *ast.DotGeneralizedField:
 		return "DotGeneralizedField"
 	case *ast.Query:
+		if t.IsPivotInput {
+			return "Query (pivot input)"
+		}
 		return "Query"
 	case *ast.WithClause:
 		if t.Recursive {
@@ -449,6 +452,30 @@ func nodeString(n ast.Node) string {
 		return "RepeatableClause"
 	case *ast.AfterMatchSkipClause:
 		return "AfterMatchSkipClause"
+	case *ast.PathExpressionList:
+		return "PathExpressionList"
+	case *ast.PivotClause:
+		return "PivotClause"
+	case *ast.PivotExpressionList:
+		return "PivotExpressionList"
+	case *ast.PivotExpression:
+		return "PivotExpression"
+	case *ast.PivotValueList:
+		return "PivotValueList"
+	case *ast.PivotValue:
+		return "PivotValue"
+	case *ast.UnpivotClause:
+		// See ASTUnpivotClause::SingleNodeDebugString in parse_tree.cc.
+		if t.NullFilter != "" {
+			return fmt.Sprintf("UnpivotClause(%s)", t.NullFilter)
+		}
+		return "UnpivotClause"
+	case *ast.UnpivotInItemList:
+		return "UnpivotInItemList"
+	case *ast.UnpivotInItem:
+		return "UnpivotInItem"
+	case *ast.UnpivotInItemLabel:
+		return "UnpivotInItemLabel"
 	case *ast.RowPatternOperation:
 		return "RowPatternOperation"
 	case *ast.EmptyRowPattern:

@@ -29,6 +29,39 @@ func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
 		}
 		return nil, p.errorf(qualifyTok.Pos, "QUALIFY clause must be used in conjunction with WHERE or GROUP BY or HAVING clause")
 	}
+	// A single optional PIVOT or UNPIVOT clause may follow the table primary
+	// (and its alias), before any MATCH_RECOGNIZE or TABLESAMPLE operators;
+	// see the pivot_or_unpivot_clause references in the table_path_expression,
+	// table_subquery, and tvf rules in googlesql.tm. It is not allowed on a
+	// parenthesized join (which falls through to an "Expected end of input"
+	// error at the enclosing level).
+	switch node.(type) {
+	case *ast.TablePathExpression, *ast.TableSubquery, *ast.TVF:
+		if isKeyword(p.peek(), "PIVOT") || isKeyword(p.peek(), "UNPIVOT") {
+			clause, err := p.parsePivotOrUnpivotClause()
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := clause.(*ast.PivotClause); ok {
+				if sub, ok := node.(*ast.TableSubquery); ok {
+					sub.Query.IsPivotInput = true
+				}
+			}
+			// A PIVOT/UNPIVOT clause and FOR SYSTEM TIME AS OF cannot be
+			// combined on a table path expression; see table_path_expression
+			// in googlesql.tm.
+			if _, ok := node.(*ast.TablePathExpression); ok &&
+				isKeyword(p.peek(), "FOR") &&
+				(isKeyword(p.peekAt(1), "SYSTEM") || isKeyword(p.peekAt(1), "SYSTEM_TIME")) {
+				kind := "PIVOT"
+				if _, ok := clause.(*ast.UnpivotClause); ok {
+					kind = "UNPIVOT"
+				}
+				return nil, p.errorf(p.peek().Pos, "Syntax error: %s and FOR SYSTEM TIME AS OF may not be combined", kind)
+			}
+			node = attachPostfixOperator(node, clause)
+		}
+	}
 	for {
 		var clause ast.Node
 		var err error
@@ -43,23 +76,33 @@ func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		switch t := node.(type) {
-		case *ast.TablePathExpression:
-			t.PostfixOperators = append(t.PostfixOperators, clause)
-			t.Stop = clause.End()
-		case *ast.TableSubquery:
-			t.PostfixOperators = append(t.PostfixOperators, clause)
-			t.Stop = clause.End()
-		case *ast.TVF:
-			t.PostfixOperators = append(t.PostfixOperators, clause)
-			t.Stop = clause.End()
-		case *ast.ParenthesizedJoin:
-			t.PostfixOperators = append(t.PostfixOperators, clause)
-			t.Stop = clause.End()
-		default:
+		if attachPostfixOperator(node, clause) == nil {
 			return node, nil
 		}
 	}
+}
+
+// attachPostfixOperator appends a postfix table operator to a table primary
+// and extends its span, returning the node (or nil for a node kind that
+// cannot carry postfix operators).
+func attachPostfixOperator(node ast.Node, clause ast.Node) ast.Node {
+	switch t := node.(type) {
+	case *ast.TablePathExpression:
+		t.PostfixOperators = append(t.PostfixOperators, clause)
+		t.Stop = clause.End()
+	case *ast.TableSubquery:
+		t.PostfixOperators = append(t.PostfixOperators, clause)
+		t.Stop = clause.End()
+	case *ast.TVF:
+		t.PostfixOperators = append(t.PostfixOperators, clause)
+		t.Stop = clause.End()
+	case *ast.ParenthesizedJoin:
+		t.PostfixOperators = append(t.PostfixOperators, clause)
+		t.Stop = clause.End()
+	default:
+		return nil
+	}
+	return node
 }
 
 // parseSampleClause parses "TABLESAMPLE <method> ( <size> ) [<suffix>]"; the
@@ -639,4 +682,356 @@ func (p *parser) markQuantifierQuestion(tok token.Token) {
 		p.quantifierQuestions = map[int]bool{}
 	}
 	p.quantifierQuestions[tok.Pos] = true
+}
+
+// parsePivotOrUnpivotClause parses one PIVOT or UNPIVOT postfix table
+// operator, including its optional output alias; see pivot_clause,
+// unpivot_clause, and pivot_or_unpivot_clause in googlesql.tm.
+func (p *parser) parsePivotOrUnpivotClause() (ast.Node, error) {
+	if isKeyword(p.peek(), "UNPIVOT") {
+		return p.parseUnpivotClause()
+	}
+	return p.parsePivotClause()
+}
+
+// parsePivotClause parses "PIVOT ( pivot_expression_list FOR expr IN (
+// pivot_value_list ) ) [[AS] alias]"; the PIVOT keyword is the next token.
+// See pivot_clause in googlesql.tm.
+func (p *parser) parsePivotClause() (ast.Node, error) {
+	pivotTok := p.advance() // PIVOT
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	exprs, err := p.parsePivotExpressionList()
+	if err != nil {
+		return nil, err
+	}
+	// After the pivot expression list, the grammar continues with a "," (more
+	// expressions) or FOR.
+	if !isKeyword(p.peek(), "FOR") {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," or keyword FOR but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // FOR
+	// The FOR expression is an expression_higher_prec_than_and; the following
+	// IN introduces the pivot value list, so it must not be consumed as an IN
+	// expression.
+	p.suppressTopLevelIn = true
+	forExpr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	// After the FOR expression, IN introduces the value list; any other token
+	// is an unexpected continuation of the expression.
+	if !isKeyword(p.peek(), "IN") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	p.advance() // IN
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	values, err := p.parsePivotValueList()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	clause := &ast.PivotClause{
+		Span:        span(pivotTok.Pos, rparen.End),
+		Expressions: exprs,
+		ForExpr:     forExpr,
+		Values:      values,
+	}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		clause.Alias = alias
+		clause.Stop = alias.End()
+	}
+	return clause, nil
+}
+
+// parsePivotExpressionList parses a comma-separated list of pivot
+// expressions; see pivot_expression_list in googlesql.tm.
+func (p *parser) parsePivotExpressionList() (*ast.PivotExpressionList, error) {
+	list := &ast.PivotExpressionList{Span: span(p.peek().Pos, 0)}
+	for {
+		expr, err := p.parsePivotExpression()
+		if err != nil {
+			return nil, err
+		}
+		list.Expressions = append(list.Expressions, expr)
+		list.Stop = expr.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	return list, nil
+}
+
+// parsePivotExpression parses "expression [[AS] alias]"; see pivot_expression
+// in googlesql.tm.
+func (p *parser) parsePivotExpression() (*ast.PivotExpression, error) {
+	start := p.peek().Pos
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	pe := &ast.PivotExpression{Span: span(start, p.extEnd(expr)), Expr: expr}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		pe.Alias = alias
+		pe.Stop = alias.End()
+	}
+	return pe, nil
+}
+
+// parsePivotValueList parses a comma-separated list of pivot values; see
+// pivot_value_list in googlesql.tm.
+func (p *parser) parsePivotValueList() (*ast.PivotValueList, error) {
+	list := &ast.PivotValueList{Span: span(p.peek().Pos, 0)}
+	for {
+		value, err := p.parsePivotValue()
+		if err != nil {
+			return nil, err
+		}
+		list.Values = append(list.Values, value)
+		list.Stop = value.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	return list, nil
+}
+
+// parsePivotValue parses "expression [[AS] alias]"; see pivot_value in
+// googlesql.tm.
+func (p *parser) parsePivotValue() (*ast.PivotValue, error) {
+	start := p.peek().Pos
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	pv := &ast.PivotValue{Span: span(start, p.extEnd(expr)), Value: expr}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		pv.Alias = alias
+		pv.Stop = alias.End()
+	}
+	return pv, nil
+}
+
+// parseUnpivotClause parses "UNPIVOT [EXCLUDE|INCLUDE NULLS] (
+// path_expression_list_with_opt_parens FOR path_expression IN
+// unpivot_in_item_list ) [[AS] alias]"; the UNPIVOT keyword is the next
+// token. See unpivot_clause in googlesql.tm.
+func (p *parser) parseUnpivotClause() (ast.Node, error) {
+	unpivotTok := p.advance() // UNPIVOT
+	nullFilter := ""
+	switch {
+	case isKeyword(p.peek(), "EXCLUDE"):
+		p.advance()
+		if _, err := p.expectKeyword("NULLS"); err != nil {
+			return nil, err
+		}
+		nullFilter = "EXCLUDE NULLS"
+	case isKeyword(p.peek(), "INCLUDE"):
+		p.advance()
+		if _, err := p.expectKeyword("NULLS"); err != nil {
+			return nil, err
+		}
+		nullFilter = "INCLUDE NULLS"
+	}
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	columns, err := p.parsePathExpressionListWithOptParens()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("FOR"); err != nil {
+		return nil, err
+	}
+	forExpr, err := p.parseUnpivotPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	// After the FOR path expression, the grammar can extend the path with a
+	// "." or reduce and expect IN; report both when neither follows.
+	if !isKeyword(p.peek(), "IN") {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "." or keyword IN but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // IN
+	inItems, err := p.parseUnpivotInItemList()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	clause := &ast.UnpivotClause{
+		Span:       span(unpivotTok.Pos, rparen.End),
+		NullFilter: nullFilter,
+		Columns:    columns,
+		ForExpr:    forExpr,
+		InItems:    inItems,
+	}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		clause.Alias = alias
+		clause.Stop = alias.End()
+	}
+	return clause, nil
+}
+
+// parseUnpivotPathExpression parses a required path expression in an UNPIVOT
+// clause, reporting the reference parser's generic "Unexpected" error (rather
+// than "Expected identifier") when the next token cannot start a path.
+func (p *parser) parseUnpivotPathExpression() (*ast.PathExpression, error) {
+	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	return p.parsePathExpression()
+}
+
+// parsePathExpressionList parses a comma-separated list of path expressions;
+// see path_expression_list in googlesql.tm.
+func (p *parser) parsePathExpressionList() (*ast.PathExpressionList, error) {
+	list := &ast.PathExpressionList{Span: span(p.peek().Pos, 0)}
+	for {
+		path, err := p.parseUnpivotPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		list.Paths = append(list.Paths, path)
+		list.Stop = path.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	return list, nil
+}
+
+// parsePathExpressionListWithOptParens parses either "( path_expression_list
+// )" or a single bare path expression; the list's span excludes the optional
+// surrounding parentheses. See path_expression_list_with_opt_parens in
+// googlesql.tm.
+func (p *parser) parsePathExpressionListWithOptParens() (*ast.PathExpressionList, error) {
+	if p.peek().Kind == token.LPAREN {
+		p.advance() // (
+		list, err := p.parsePathExpressionList()
+		if err != nil {
+			return nil, err
+		}
+		// After each path the list continues with "," or closes with ")".
+		if p.peek().Kind != token.RPAREN {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or "," but got %s`, describeToken(p.peek()))
+		}
+		p.advance() // )
+		return list, nil
+	}
+	// The unparenthesized form is a single path expression, not a
+	// comma-separated list.
+	path, err := p.parseUnpivotPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.PathExpressionList{Span: span(path.Pos(), path.End()), Paths: []*ast.PathExpression{path}}, nil
+}
+
+// parseUnpivotInItemList parses "( unpivot_in_item , ... )"; its span
+// includes the parentheses. See unpivot_in_item_list in googlesql.tm.
+func (p *parser) parseUnpivotInItemList() (*ast.UnpivotInItemList, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.UnpivotInItemList{Span: span(lparen.Pos, 0)}
+	for {
+		item, err := p.parseUnpivotInItem()
+		if err != nil {
+			return nil, err
+		}
+		list.Items = append(list.Items, item)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
+}
+
+// parseUnpivotInItem parses "path_expression_list_with_opt_parens
+// [opt_as_string_or_integer]"; its span includes any parentheses around the
+// column list. See unpivot_in_item in googlesql.tm.
+func (p *parser) parseUnpivotInItem() (*ast.UnpivotInItem, error) {
+	start := p.peek().Pos
+	columns, err := p.parsePathExpressionListWithOptParens()
+	if err != nil {
+		return nil, err
+	}
+	item := &ast.UnpivotInItem{Span: span(start, p.prevEnd()), Columns: columns}
+	label, err := p.parseOptionalUnpivotInItemLabel()
+	if err != nil {
+		return nil, err
+	}
+	if label != nil {
+		item.Label = label
+		item.Stop = label.End()
+	}
+	return item, nil
+}
+
+// parseOptionalUnpivotInItemLabel parses "[AS] (integer_literal |
+// string_literal)"; see opt_as_string_or_integer in googlesql.tm. A label is
+// required after AS; without AS one is present only when a string or integer
+// literal directly follows.
+func (p *parser) parseOptionalUnpivotInItemLabel() (*ast.UnpivotInItemLabel, error) {
+	start := p.peek().Pos
+	hasAs := false
+	if isKeyword(p.peek(), "AS") {
+		p.advance()
+		hasAs = true
+	}
+	tok := p.peek()
+	switch tok.Kind {
+	case token.STRING:
+		lit, err := p.parseStringLiteral()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.UnpivotInItemLabel{Span: span(start, lit.End()), Label: lit}, nil
+	case token.INT:
+		p.advance()
+		lit := &ast.IntLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
+		return &ast.UnpivotInItemLabel{Span: span(start, lit.End()), Label: lit}, nil
+	}
+	if hasAs {
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected integer literal or string literal but got %s", describeToken(tok))
+	}
+	return nil, nil
 }

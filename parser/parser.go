@@ -371,6 +371,12 @@ type parser struct {
 	// MATCH_RECOGNIZE patterns, so positional query parameter numbering
 	// skips them.
 	quantifierQuestions map[int]bool
+	// suppressTopLevelIn tells the next (outermost) comparison parse not to
+	// consume a top-level IN operator. It is used for a PIVOT clause's FOR
+	// expression, where the following IN introduces the pivot value list
+	// rather than an IN expression; see the pivot_clause rule and
+	// expression_higher_prec_than_and in googlesql.tm.
+	suppressTopLevelIn bool
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -2772,6 +2778,23 @@ func (p *parser) isPostfixQualify() bool {
 	return isKeyword(p.peek(), "QUALIFY") && startsExpression(p.peekAt(1))
 }
 
+// atPivotOrUnpivotClauseStart reports whether the next tokens begin a PIVOT or
+// UNPIVOT postfix table operator rather than a table alias named PIVOT or
+// UNPIVOT. PIVOT and UNPIVOT are non-reserved keywords, so "t PIVOT" alone is
+// a table aliased PIVOT; only "PIVOT (" (or "UNPIVOT (", "UNPIVOT EXCLUDE",
+// "UNPIVOT INCLUDE") introduces the clause. See the pivot_or_unpivot_clause
+// disambiguation in lookahead_transformer.cc.
+func (p *parser) atPivotOrUnpivotClauseStart() bool {
+	switch {
+	case isKeyword(p.peek(), "PIVOT"):
+		return p.peekAt(1).Kind == token.LPAREN
+	case isKeyword(p.peek(), "UNPIVOT"):
+		next := p.peekAt(1)
+		return next.Kind == token.LPAREN || isKeyword(next, "EXCLUDE") || isKeyword(next, "INCLUDE")
+	}
+	return false
+}
+
 func (p *parser) parseSelectList() (*ast.SelectList, error) {
 	first, err := p.parseSelectColumn()
 	if err != nil {
@@ -3105,13 +3128,15 @@ func (p *parser) parseTableSubquery() (*ast.TableSubquery, error) {
 		return nil, err
 	}
 	node := &ast.TableSubquery{Span: span(lparen.Pos, parenEnd), Query: query}
-	alias, err := p.parseOptionalAlias()
-	if err != nil {
-		return nil, err
-	}
-	if alias != nil {
-		node.Alias = alias
-		node.Stop = alias.End()
+	if !p.atPivotOrUnpivotClauseStart() {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		if alias != nil {
+			node.Alias = alias
+			node.Stop = alias.End()
+		}
 	}
 	return node, nil
 }
@@ -3165,7 +3190,7 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 	// leave it for parsePostfixTableOperators (see qualify_clause_nonreserved
 	// in pivot_or_unpivot_clause in googlesql.tm). QUALIFY not followed by an
 	// expression (e.g. at end of input or before WHERE) is a plain alias.
-	if !p.isPostfixQualify() {
+	if !p.isPostfixQualify() && !p.atPivotOrUnpivotClauseStart() {
 		alias, err := p.parseOptionalAlias()
 		if err != nil {
 			return nil, err
@@ -3184,13 +3209,15 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 			return nil, err
 		}
 		offset := &ast.WithOffset{Span: span(withTok.Pos, offsetTok.End)}
-		offsetAlias, err := p.parseOptionalAlias()
-		if err != nil {
-			return nil, err
-		}
-		if offsetAlias != nil {
-			offset.Alias = offsetAlias
-			offset.Stop = offsetAlias.End()
+		if !p.atPivotOrUnpivotClauseStart() {
+			offsetAlias, err := p.parseOptionalAlias()
+			if err != nil {
+				return nil, err
+			}
+			if offsetAlias != nil {
+				offset.Alias = offsetAlias
+				offset.Stop = offsetAlias.End()
+			}
 		}
 		table.Offset = offset
 		table.Stop = offset.End()
@@ -3253,13 +3280,15 @@ func (p *parser) parseTVFRest(path *ast.PathExpression) (*ast.TVF, error) {
 		return nil, err
 	}
 	tvf.Stop = rparen.End
-	alias, err := p.parseOptionalAlias()
-	if err != nil {
-		return nil, err
-	}
-	if alias != nil {
-		tvf.Alias = alias
-		tvf.Stop = alias.End()
+	if !p.atPivotOrUnpivotClauseStart() {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		if alias != nil {
+			tvf.Alias = alias
+			tvf.Stop = alias.End()
+		}
 	}
 	return tvf, nil
 }
@@ -3769,6 +3798,13 @@ func (p *parser) parseNot() (ast.Node, error) {
 }
 
 func (p *parser) parseComparison() (ast.Node, error) {
+	// A PIVOT clause's FOR expression must not consume a following top-level
+	// IN operator (it introduces the pivot value list). Capture and clear the
+	// flag so only this outermost comparison is affected; nested sub-parses
+	// proceed normally.
+	suppressIn := p.suppressTopLevelIn
+	p.suppressTopLevelIn = false
+
 	lhs, err := p.parseBitwiseOr()
 	if err != nil {
 		return nil, err
@@ -3783,6 +3819,8 @@ func (p *parser) parseComparison() (ast.Node, error) {
 	if isKeyword(p.peek(), "NOT") {
 		next := p.peekAt(1)
 		switch {
+		case isKeyword(next, "IN") && suppressIn:
+			// Leave "NOT IN" for the enclosing PIVOT clause to reject.
 		case isKeyword(next, "BETWEEN"), isKeyword(next, "IN"), isKeyword(next, "LIKE"):
 			notTok = p.advance()
 		case isKeyword(next, "DISTINCT"):
@@ -3826,7 +3864,7 @@ func (p *parser) parseComparison() (ast.Node, error) {
 
 	// [NOT] IN; see the in_operator alternatives of
 	// expression_higher_prec_than_and in googlesql.tm.
-	if isKeyword(p.peek(), "IN") {
+	if isKeyword(p.peek(), "IN") && !suppressIn {
 		inTok := p.advance()
 		in := &ast.InExpression{
 			IsNot:      notTok.Pos >= 0,

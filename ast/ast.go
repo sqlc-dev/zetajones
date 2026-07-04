@@ -407,6 +407,10 @@ type Query struct {
 	// It does not appear in the debug output but affects how trailing pipe
 	// operators nest; see the query rule in googlesql.tm.
 	Parenthesized bool `json:"parenthesized,omitempty"`
+	// IsPivotInput records that this query is the input to a PIVOT clause; it
+	// renders as " (pivot input)" in the debug string (see ASTQuery in
+	// parse_tree.cc).
+	IsPivotInput bool `json:"is_pivot_input,omitempty"`
 }
 
 func (n *Query) Children() []Node {
@@ -814,6 +818,149 @@ type RepeatableClause struct {
 
 func (n *RepeatableClause) Children() []Node {
 	return children(n.Value)
+}
+
+// PathExpressionList is a comma-separated list of path expressions; see
+// ASTPathExpressionList in googlesql/parser/parse_tree.h.
+type PathExpressionList struct {
+	Span
+	Paths []*PathExpression `json:"paths"`
+}
+
+func (n *PathExpressionList) Children() []Node {
+	out := make([]Node, 0, len(n.Paths))
+	for _, p := range n.Paths {
+		out = append(out, p)
+	}
+	return out
+}
+
+// PivotClause is a "PIVOT(...)" postfix table operator; see ASTPivotClause in
+// googlesql/parser/parse_tree.h. Child order matches the reference:
+// PivotExpressionList, the FOR expression, PivotValueList, then an optional
+// output alias.
+type PivotClause struct {
+	Span
+	Expressions *PivotExpressionList `json:"expressions"`
+	ForExpr     Node                 `json:"for_expr"`
+	Values      *PivotValueList      `json:"values"`
+	Alias       *Alias               `json:"alias,omitempty"`
+}
+
+func (n *PivotClause) Children() []Node {
+	return children(n.Expressions, n.ForExpr, n.Values, n.Alias)
+}
+
+// PivotExpressionList is the list of pivot expressions in a PIVOT clause; see
+// ASTPivotExpressionList in googlesql/parser/parse_tree.h.
+type PivotExpressionList struct {
+	Span
+	Expressions []*PivotExpression `json:"expressions"`
+}
+
+func (n *PivotExpressionList) Children() []Node {
+	out := make([]Node, 0, len(n.Expressions))
+	for _, e := range n.Expressions {
+		out = append(out, e)
+	}
+	return out
+}
+
+// PivotExpression is a single pivot expression with an optional alias; see
+// ASTPivotExpression in googlesql/parser/parse_tree.h.
+type PivotExpression struct {
+	Span
+	Expr  Node   `json:"expr"`
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *PivotExpression) Children() []Node {
+	return children(n.Expr, n.Alias)
+}
+
+// PivotValueList is the list of pivot values in a PIVOT clause; see
+// ASTPivotValueList in googlesql/parser/parse_tree.h.
+type PivotValueList struct {
+	Span
+	Values []*PivotValue `json:"values"`
+}
+
+func (n *PivotValueList) Children() []Node {
+	out := make([]Node, 0, len(n.Values))
+	for _, v := range n.Values {
+		out = append(out, v)
+	}
+	return out
+}
+
+// PivotValue is a single pivot value with an optional alias; see
+// ASTPivotValue in googlesql/parser/parse_tree.h.
+type PivotValue struct {
+	Span
+	Value Node   `json:"value"`
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *PivotValue) Children() []Node {
+	return children(n.Value, n.Alias)
+}
+
+// UnpivotClause is an "UNPIVOT(...)" postfix table operator; see
+// ASTUnpivotClause in googlesql/parser/parse_tree.h. Child order matches the
+// reference: the unpivot column list, the FOR path expression, the IN item
+// list, then an optional output alias.
+type UnpivotClause struct {
+	Span
+	// NullFilter is "", "EXCLUDE NULLS", or "INCLUDE NULLS".
+	NullFilter string              `json:"null_filter,omitempty"`
+	Columns    *PathExpressionList `json:"columns"`
+	ForExpr    *PathExpression     `json:"for_expr"`
+	InItems    *UnpivotInItemList  `json:"in_items"`
+	Alias      *Alias              `json:"alias,omitempty"`
+}
+
+func (n *UnpivotClause) Children() []Node {
+	return children(n.Columns, n.ForExpr, n.InItems, n.Alias)
+}
+
+// UnpivotInItemList is the list of IN items in an UNPIVOT clause; see
+// ASTUnpivotInItemList in googlesql/parser/parse_tree.h. Its span includes
+// the surrounding parentheses.
+type UnpivotInItemList struct {
+	Span
+	Items []*UnpivotInItem `json:"items"`
+}
+
+func (n *UnpivotInItemList) Children() []Node {
+	out := make([]Node, 0, len(n.Items))
+	for _, it := range n.Items {
+		out = append(out, it)
+	}
+	return out
+}
+
+// UnpivotInItem is a single IN item in an UNPIVOT clause: a column list with
+// an optional label; see ASTUnpivotInItem in googlesql/parser/parse_tree.h.
+type UnpivotInItem struct {
+	Span
+	Columns *PathExpressionList `json:"columns"`
+	Label   *UnpivotInItemLabel `json:"label,omitempty"`
+}
+
+func (n *UnpivotInItem) Children() []Node {
+	return children(n.Columns, n.Label)
+}
+
+// UnpivotInItemLabel is the "[AS] (string|integer) literal" label of an
+// UNPIVOT IN item; see ASTUnpivotInItemLabel in
+// googlesql/parser/parse_tree.h.
+type UnpivotInItemLabel struct {
+	Span
+	Label Node `json:"label"`
+}
+
+func (n *UnpivotInItemLabel) Children() []Node {
+	return children(n.Label)
 }
 
 // Join is a JOIN between two table expressions, including comma joins; see
