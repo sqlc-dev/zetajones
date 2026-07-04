@@ -2047,6 +2047,96 @@ func (n *CreateTableStatement) Children() []Node {
 	return children(n.Name, n.Query)
 }
 
+// CreateTableFunctionStatement is a CREATE TABLE FUNCTION statement; see
+// ASTCreateTableFunctionStatement in googlesql/parser/parse_tree.h. Scope is
+// "", "TEMP", "PUBLIC", or "PRIVATE" (TEMPORARY normalizes to "TEMP").
+// SqlSecurity ("", "INVOKER", or "DEFINER") is parsed but, matching the
+// reference, is not shown in the debug tree. Children appear in a fixed order
+// regardless of the source order of the options and language clauses.
+type CreateTableFunctionStatement struct {
+	Span
+	Scope         string               `json:"scope,omitempty"`
+	IsOrReplace   bool                 `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool                 `json:"is_if_not_exists,omitempty"`
+	SqlSecurity   string               `json:"sql_security,omitempty"`
+	Declaration   *FunctionDeclaration `json:"declaration"`
+	Returns       *TVFSchema           `json:"returns,omitempty"`
+	Options       *OptionsList         `json:"options,omitempty"`
+	Language      *Identifier          `json:"language,omitempty"`
+	Query         *Query               `json:"query,omitempty"`
+}
+
+func (n *CreateTableFunctionStatement) statementNode() {}
+func (n *CreateTableFunctionStatement) Children() []Node {
+	return children(n.Declaration, n.Returns, n.Options, n.Language, n.Query)
+}
+
+// FunctionDeclaration is "path(params)" in a CREATE FUNCTION-family statement;
+// see ASTFunctionDeclaration in googlesql/parser/parse_tree.h.
+type FunctionDeclaration struct {
+	Span
+	Name       *PathExpression     `json:"name"`
+	Parameters *FunctionParameters `json:"parameters"`
+}
+
+func (n *FunctionDeclaration) Children() []Node {
+	return children(n.Name, n.Parameters)
+}
+
+// FunctionParameters is the parenthesized parameter list of a function
+// declaration; see ASTFunctionParameters in googlesql/parser/parse_tree.h.
+type FunctionParameters struct {
+	Span
+	Parameters []*FunctionParameter `json:"parameters,omitempty"`
+}
+
+func (n *FunctionParameters) Children() []Node {
+	var out []Node
+	for _, p := range n.Parameters {
+		out = append(out, p)
+	}
+	return out
+}
+
+// FunctionParameter is a single "[name] type" function parameter; see
+// ASTFunctionParameter in googlesql/parser/parse_tree.h.
+type FunctionParameter struct {
+	Span
+	Name *Identifier `json:"name,omitempty"`
+	Type Node        `json:"type,omitempty"`
+}
+
+func (n *FunctionParameter) Children() []Node {
+	return children(n.Name, n.Type)
+}
+
+// TVFSchema is the "TABLE<col, ...>" return schema of a table-valued function;
+// see ASTTVFSchema in googlesql/parser/parse_tree.h.
+type TVFSchema struct {
+	Span
+	Columns []*TVFSchemaColumn `json:"columns"`
+}
+
+func (n *TVFSchema) Children() []Node {
+	var out []Node
+	for _, c := range n.Columns {
+		out = append(out, c)
+	}
+	return out
+}
+
+// TVFSchemaColumn is a single "[name] type" column in a TVFSchema; see
+// ASTTVFSchemaColumn in googlesql/parser/parse_tree.h.
+type TVFSchemaColumn struct {
+	Span
+	Name *Identifier `json:"name,omitempty"`
+	Type Node        `json:"type"`
+}
+
+func (n *TVFSchemaColumn) Children() []Node {
+	return children(n.Name, n.Type)
+}
+
 // FunctionCall is a function call expression.
 type FunctionCall struct {
 	Span

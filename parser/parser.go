@@ -1490,26 +1490,37 @@ func (p *parser) parseExecuteUsingArgument() (*ast.ExecuteUsingArgument, error) 
 // are not implemented yet.
 func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	createTok := p.advance() // CREATE
-	stmt := &ast.CreateTableStatement{Span: span(createTok.Pos, 0)}
+	var isOrReplace bool
 	if isKeyword(p.peek(), "OR") && isKeyword(p.peekAt(1), "REPLACE") {
 		p.advance()
 		p.advance()
-		stmt.IsOrReplace = true
+		isOrReplace = true
 	}
+	var scope string
 	switch {
 	case isKeyword(p.peek(), "TEMP"), isKeyword(p.peek(), "TEMPORARY"):
 		p.advance()
-		stmt.Scope = "TEMP"
+		scope = "TEMP"
 	case isKeyword(p.peek(), "PUBLIC"):
 		p.advance()
-		stmt.Scope = "PUBLIC"
+		scope = "PUBLIC"
 	case isKeyword(p.peek(), "PRIVATE"):
 		p.advance()
-		stmt.Scope = "PRIVATE"
+		scope = "PRIVATE"
+	}
+	// CREATE [OR REPLACE] [scope] EXTERNAL TABLE FUNCTION is recognized only to
+	// diagnose it; see create_external_table_function_statement in
+	// googlesql.tm. The error points at the EXTERNAL keyword.
+	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") && isKeyword(p.peekAt(2), "FUNCTION") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: CREATE EXTERNAL TABLE FUNCTION is not supported")
 	}
 	if _, err := p.expectKeyword("TABLE"); err != nil {
 		return nil, err
 	}
+	if isKeyword(p.peek(), "FUNCTION") {
+		return p.parseCreateTableFunctionStatement(createTok, scope, isOrReplace)
+	}
+	stmt := &ast.CreateTableStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
 	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
 		p.advance()
 		p.advance()
@@ -1539,6 +1550,214 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 
 // prevEnd returns the end offset of the most recently consumed token.
 func (p *parser) prevEnd() int { return p.toks[p.pos-1].End }
+
+// parseCreateTableFunctionStatement parses the tail of "CREATE [OR REPLACE]
+// [scope] TABLE FUNCTION [IF NOT EXISTS] path(params) [RETURNS TABLE<...>]
+// [SQL SECURITY {INVOKER|DEFINER}] [<language>|<options>...] [AS query]"; see
+// create_table_function_statement in googlesql.tm. The FUNCTION keyword is the
+// next token. The debug tree lists children in the fixed grammar order
+// (declaration, returns, options, language, body) regardless of whether the
+// source used LANGUAGE before OPTIONS or vice versa.
+func (p *parser) parseCreateTableFunctionStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // FUNCTION
+	stmt := &ast.CreateTableFunctionStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	params, err := p.parseFunctionParameters()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Declaration = &ast.FunctionDeclaration{
+		Span:       span(name.Pos(), params.End()),
+		Name:       name,
+		Parameters: params,
+	}
+	stmt.Stop = stmt.Declaration.End()
+
+	// RETURNS type_or_tvf_schema. For a table function this must be a TVF
+	// schema; a plain type is diagnosed as "Expected keyword TABLE".
+	if isKeyword(p.peek(), "RETURNS") {
+		p.advance()
+		if !isKeyword(p.peek(), "TABLE") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword TABLE but got %s", describeToken(p.peek()))
+		}
+		schema, err := p.parseTVFSchema()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Returns = schema
+		stmt.Stop = schema.End()
+	}
+
+	// SQL SECURITY {INVOKER|DEFINER}. Parsed but not shown in the debug tree.
+	if isKeyword(p.peek(), "SQL") && isKeyword(p.peekAt(1), "SECURITY") {
+		p.advance() // SQL
+		p.advance() // SECURITY
+		switch {
+		case isKeyword(p.peek(), "INVOKER"):
+			stmt.SqlSecurity = "INVOKER"
+		case isKeyword(p.peek(), "DEFINER"):
+			stmt.SqlSecurity = "DEFINER"
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword DEFINER or keyword INVOKER but got %s", describeToken(p.peek()))
+		}
+		sec := p.advance()
+		stmt.Stop = sec.End
+	}
+
+	// unordered_language_options: at most one LANGUAGE and one OPTIONS clause,
+	// in either order. A second OPTIONS (or LANGUAGE) is left unconsumed so the
+	// top-level "Expected end of input" check reports it.
+	for {
+		if isKeyword(p.peek(), "LANGUAGE") && stmt.Language == nil {
+			p.advance() // LANGUAGE
+			tok := p.peek()
+			if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+				return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+			}
+			stmt.Language = p.parseIdentifierToken(p.advance())
+			stmt.Stop = stmt.Language.End()
+			continue
+		}
+		if isKeyword(p.peek(), "OPTIONS") && stmt.Options == nil {
+			p.advance() // OPTIONS
+			opts, err := p.parseOptionsList()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Options = opts
+			stmt.Stop = opts.End()
+			continue
+		}
+		break
+	}
+
+	// AS query (the string-literal body form is not exercised here).
+	if isKeyword(p.peek(), "AS") {
+		p.advance()
+		query, err := p.parseQuery()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Query = query
+		stmt.Stop = p.prevEnd()
+	}
+	return stmt, nil
+}
+
+// parseFunctionParameters parses "( [function_parameter [, ...]] )"; see
+// function_parameters in googlesql.tm. The opening parenthesis is the next
+// token.
+func (p *parser) parseFunctionParameters() (*ast.FunctionParameters, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	fp := &ast.FunctionParameters{Span: span(lparen.Pos, 0)}
+	if p.peek().Kind != token.RPAREN {
+		for {
+			param, err := p.parseFunctionParameter()
+			if err != nil {
+				return nil, err
+			}
+			fp.Parameters = append(fp.Parameters, param)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	fp.Stop = rparen.End
+	return fp, nil
+}
+
+// parseFunctionParameter parses "[name] type"; see function_parameter in
+// googlesql.tm. Only the common named/unnamed simple forms are handled.
+func (p *parser) parseFunctionParameter() (*ast.FunctionParameter, error) {
+	var name *ast.Identifier
+	if (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && p.beginsType(p.peekAt(1)) {
+		name = p.parseIdentifierToken(p.advance())
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	start := typ.Pos()
+	if name != nil {
+		start = name.Pos()
+	}
+	return &ast.FunctionParameter{Span: span(start, typ.End()), Name: name, Type: typ}, nil
+}
+
+// parseTVFSchema parses "TABLE< column [, ...] >"; see tvf_schema in
+// googlesql.tm. The TABLE keyword is the next token.
+func (p *parser) parseTVFSchema() (*ast.TVFSchema, error) {
+	tableTok := p.advance() // TABLE
+	if _, err := p.expectTemplateOpen(); err != nil {
+		return nil, err
+	}
+	schema := &ast.TVFSchema{Span: span(tableTok.Pos, 0)}
+	for {
+		col, err := p.parseTVFSchemaColumn()
+		if err != nil {
+			return nil, err
+		}
+		schema.Columns = append(schema.Columns, col)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	schema.Stop = closeTok.End
+	return schema, nil
+}
+
+// parseTVFSchemaColumn parses "[name] type"; see tvf_schema_column in
+// googlesql.tm. A leading identifier names the column only when it is followed
+// by another token that can begin a type.
+func (p *parser) parseTVFSchemaColumn() (*ast.TVFSchemaColumn, error) {
+	var name *ast.Identifier
+	if (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && p.beginsType(p.peekAt(1)) {
+		name = p.parseIdentifierToken(p.advance())
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	start := typ.Pos()
+	if name != nil {
+		start = name.Pos()
+	}
+	return &ast.TVFSchemaColumn{Span: span(start, typ.End()), Name: name, Type: typ}, nil
+}
+
+// beginsType reports whether tok can begin a type; see raw_type in
+// googlesql.tm.
+func (p *parser) beginsType(tok token.Token) bool {
+	switch {
+	case tok.Kind == token.IDENT, tok.Kind == token.QUOTED_IDENT:
+		return true
+	case isKeyword(tok, "ARRAY"), isKeyword(tok, "STRUCT"), isKeyword(tok, "RANGE"), isKeyword(tok, "INTERVAL"):
+		return true
+	}
+	return false
+}
 
 // parseAlterStatement parses ALTER <schema object kind> [IF EXISTS] <path>
 // <alter action list>; see alter_statement in googlesql.tm. Object kinds the

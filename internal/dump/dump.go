@@ -571,6 +571,39 @@ func nodeString(n ast.Node) string {
 			return "CreateTableStatement"
 		}
 		return fmt.Sprintf("CreateTableStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateTableFunctionStatement:
+		// The SQL SECURITY clause is parsed but, matching the reference's
+		// ASTCreateTableFunctionStatement::SingleNodeDebugString (which defers
+		// to the plain create-statement modifier list), is not shown.
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreateTableFunctionStatement"
+		}
+		return fmt.Sprintf("CreateTableFunctionStatement(%s)", strings.Join(mods, ", "))
+	case *ast.FunctionDeclaration:
+		return "FunctionDeclaration"
+	case *ast.FunctionParameters:
+		return "FunctionParameters"
+	case *ast.FunctionParameter:
+		return "FunctionParameter"
+	case *ast.TVFSchema:
+		return "TVFSchema"
+	case *ast.TVFSchemaColumn:
+		return "TVFSchemaColumn"
 	default:
 		return fmt.Sprintf("UNKNOWN_NODE(%T)", n)
 	}
