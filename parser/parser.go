@@ -385,6 +385,11 @@ func describeToken(tok token.Token) string {
 		return "string literal " + escapeTokenNewlines(tok.Image)
 	case token.BYTES:
 		return "bytes literal " + escapeTokenNewlines(tok.Image)
+	case token.SYSTEM_VARIABLE:
+		// The lexer folds "@@name" into one token, but the reference lexes
+		// "@@" separately and reports just that; see MakeSyntaxErrorAtToken
+		// in googlesql/parser/parser_internal.cc.
+		return `"@@"`
 	}
 	return fmt.Sprintf("%q", tok.Image)
 }
@@ -2644,38 +2649,63 @@ func (p *parser) parseUnary() (ast.Node, error) {
 	return p.parsePostfix()
 }
 
-// parsePostfix parses a primary expression followed by postfix operators,
-// currently ". identifier" (generalized field access); see the
-// expression_higher_prec_than_and "." rules in googlesql.tm.
+// parsePostfix parses a primary expression followed by postfix operators:
+// ". identifier" (generalized field access) and "[ expression ]" (array
+// element access); see the expression_higher_prec_than_and rules in
+// googlesql.tm.
 func (p *parser) parsePostfix() (ast.Node, error) {
 	expr, err := p.parsePrimary()
 	if err != nil {
 		return nil, err
 	}
-	for p.peek().Kind == token.DOT {
-		next := p.peekAt(1)
-		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
-			break
-		}
-		p.advance() // .
-		ident := p.parseIdentifierToken(p.advance())
-		// A non-parenthesized path expression is extended in place; anything
-		// else becomes a generalized DotIdentifier (see the
-		// expression_higher_prec_than_and "." identifier rule in googlesql.tm).
-		if path, ok := expr.(*ast.PathExpression); ok {
-			if _, parenthesized := p.extents[path]; !parenthesized {
-				path.Names = append(path.Names, ident)
-				path.Stop = ident.End()
-				continue
+	for {
+		switch p.peek().Kind {
+		case token.DOT:
+			next := p.peekAt(1)
+			if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+				return expr, nil
 			}
-		}
-		expr = &ast.DotIdentifier{
-			Span: span(p.extStart(expr), ident.End()),
-			Expr: expr,
-			Name: ident,
+			p.advance() // .
+			ident := p.parseIdentifierToken(p.advance())
+			// A non-parenthesized path expression is extended in place;
+			// anything else becomes a generalized DotIdentifier (see the
+			// expression_higher_prec_than_and "." identifier rule in
+			// googlesql.tm).
+			if path, ok := expr.(*ast.PathExpression); ok {
+				if _, parenthesized := p.extents[path]; !parenthesized {
+					path.Names = append(path.Names, ident)
+					path.Stop = ident.End()
+					continue
+				}
+			}
+			expr = &ast.DotIdentifier{
+				Span: span(p.extStart(expr), ident.End()),
+				Expr: expr,
+				Name: ident,
+			}
+		case token.LBRACKET:
+			// "expression [ expression ]" is array element access; the
+			// Location child covers the "[" token (see the
+			// expression_higher_prec_than_and "[" rule in googlesql.tm).
+			lbracket := p.advance()
+			position, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			rbracket, err := p.expect(token.RBRACKET, `"]"`)
+			if err != nil {
+				return nil, err
+			}
+			expr = &ast.ArrayElement{
+				Span:            span(p.extStart(expr), rbracket.End),
+				Array:           expr,
+				BracketLocation: &ast.Location{Span: span(lbracket.Pos, lbracket.End)},
+				Position:        position,
+			}
+		default:
+			return expr, nil
 		}
 	}
-	return expr, nil
 }
 
 // parseCaseExpression parses "CASE [value] WHEN expr THEN expr ...
@@ -3084,7 +3114,7 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 		p.advance()
 		tok := p.peek()
 		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
-			return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier after \".\" but got %s", describeToken(tok))
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
 		ident := p.parseIdentifierToken(p.advance())
 		path.Names = append(path.Names, ident)
@@ -3105,7 +3135,7 @@ func (p *parser) parseSystemVariableExpr() (ast.Node, error) {
 		p.advance()
 		next := p.peek()
 		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
-			return nil, p.errorf(next.Pos, "Syntax error: Expected identifier after \".\" but got %s", describeToken(next))
+			return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
 		}
 		ident := p.parseIdentifierToken(p.advance())
 		path.Names = append(path.Names, ident)

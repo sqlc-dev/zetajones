@@ -266,6 +266,8 @@ func nodeString(n ast.Node) string {
 		return "CaseNoValueExpression"
 	case *ast.DotIdentifier:
 		return "DotIdentifier"
+	case *ast.ArrayElement:
+		return "ArrayElement"
 	case *ast.ParameterExpr:
 		// Positional parameters show their 1-based position; see
 		// ASTParameterExpr::SingleNodeDebugString.

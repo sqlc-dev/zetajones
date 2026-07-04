@@ -1052,6 +1052,19 @@ func (n *DotIdentifier) Children() []Node {
 	return children(n.Expr, n.Name)
 }
 
+// ArrayElement is "expression [ position ]"; see ASTArrayElement in
+// googlesql/parser/parse_tree.h. BracketLocation covers the "[" token.
+type ArrayElement struct {
+	Span
+	Array           Node      `json:"array"`
+	BracketLocation *Location `json:"bracket_location"`
+	Position        Node      `json:"position"`
+}
+
+func (n *ArrayElement) Children() []Node {
+	return children(n.Array, n.BracketLocation, n.Position)
+}
+
 // CreateTableStatement is a CREATE TABLE statement, optionally with an AS
 // query; see ASTCreateTableStatement in googlesql/parser/parse_tree.h.
 // Scope is "", "TEMP", "PUBLIC", or "PRIVATE" (TEMPORARY normalizes to
