@@ -62,20 +62,65 @@ func (n *QueryStatement) Children() []Node {
 	return children(n.Query)
 }
 
-// Query is a query expression with optional ORDER BY and LIMIT/OFFSET,
-// optionally followed by |> pipe operators.
+// Query is a query expression with an optional WITH clause, optional ORDER
+// BY and LIMIT/OFFSET, optionally followed by |> pipe operators.
 type Query struct {
 	Span
-	QueryExpr     Node         `json:"query_expr"` // *Select, *SetOperation, or parenthesized *Query
+	WithClause    *WithClause  `json:"with_clause,omitempty"`
+	QueryExpr     Node         `json:"query_expr"` // *Select, *FromQuery, *SetOperation, or parenthesized *Query
 	OrderBy       *OrderBy     `json:"order_by,omitempty"`
 	Limit         *LimitOffset `json:"limit,omitempty"`
 	LockMode      *LockMode    `json:"lock_mode,omitempty"`
 	PipeOperators []Node       `json:"pipe_operators,omitempty"`
+	// Parenthesized records that the query was written inside parentheses.
+	// It does not appear in the debug output but affects how trailing pipe
+	// operators nest; see the query rule in googlesql.tm.
+	Parenthesized bool `json:"parenthesized,omitempty"`
 }
 
 func (n *Query) Children() []Node {
-	out := children(n.QueryExpr, n.OrderBy, n.Limit, n.LockMode)
+	out := children(n.WithClause, n.QueryExpr, n.OrderBy, n.Limit, n.LockMode)
 	return append(out, n.PipeOperators...)
+}
+
+// WithClause is a WITH clause holding one or more common table expression
+// entries; see ASTWithClause in googlesql/parser/parse_tree.h.
+type WithClause struct {
+	Span
+	Recursive bool               `json:"recursive,omitempty"`
+	Entries   []*WithClauseEntry `json:"entries"`
+}
+
+func (n *WithClause) Children() []Node {
+	var out []Node
+	for _, e := range n.Entries {
+		out = append(out, e)
+	}
+	return out
+}
+
+// WithClauseEntry is a single entry in a WITH clause, wrapping an aliased
+// query; see ASTWithClauseEntry in googlesql/parser/parse_tree.h.
+type WithClauseEntry struct {
+	Span
+	AliasedQuery *AliasedQuery `json:"aliased_query"`
+}
+
+func (n *WithClauseEntry) Children() []Node {
+	return children(n.AliasedQuery)
+}
+
+// AliasedQuery is "name AS ( query )"; see ASTAliasedQuery in
+// googlesql/parser/parse_tree.h. The query's location includes the
+// parentheses.
+type AliasedQuery struct {
+	Span
+	Identifier *Identifier `json:"identifier"`
+	Query      *Query      `json:"query"`
+}
+
+func (n *AliasedQuery) Children() []Node {
+	return children(n.Identifier, n.Query)
 }
 
 // LockMode is a FOR UPDATE locking clause on a query; see ASTLockMode in

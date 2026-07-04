@@ -254,23 +254,24 @@ func span(start, end int) ast.Span { return ast.Span{Start: start, Stop: end} }
 func (p *parser) parseStatement() (ast.Statement, error) {
 	tok := p.peek()
 	switch {
-	case isKeyword(tok, "SELECT") || tok.Kind == token.LPAREN:
+	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"),
+		tok.Kind == token.LPAREN:
 		query, err := p.parseQuery()
 		if err != nil {
 			return nil, err
 		}
-		return &ast.QueryStatement{Span: span(query.Pos(), query.End()), Query: query}, nil
-	case isKeyword(tok, "FROM"):
-		query, err := p.parseFromQuery()
-		if err != nil {
-			return nil, err
-		}
-		return &ast.QueryStatement{Span: span(query.Pos(), query.End()), Query: query}, nil
+		// The statement's location covers all consumed tokens, which can
+		// exceed the query node's own location: a parenthesized query keeps
+		// the location of the query inside the parentheses.
+		return &ast.QueryStatement{Span: span(tok.Pos, p.prevEnd()), Query: query}, nil
 	case isKeyword(tok, "ALTER"):
 		return p.parseAlterStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 }
+
+// prevEnd returns the end offset of the most recently consumed token.
+func (p *parser) prevEnd() int { return p.toks[p.pos-1].End }
 
 // parseAlterStatement parses ALTER <schema object kind> [IF EXISTS] <path>
 // <alter action list>; see alter_statement in googlesql.tm. Object kinds the
@@ -482,28 +483,61 @@ func (p *parser) parseOptionsEntry() (*ast.OptionsEntry, error) {
 	return &ast.OptionsEntry{Span: span(name.Pos(), value.End()), Name: name, Op: op, Value: value}, nil
 }
 
+// parseQuery parses "[WITH ...] query_primary [ORDER BY] [LIMIT] [FOR
+// UPDATE]" followed by any pipe operators; see query and
+// query_without_pipe_operators in googlesql.tm.
 func (p *parser) parseQuery() (*ast.Query, error) {
-	sel, err := p.parseSelect()
-	if err != nil {
-		return nil, err
-	}
-	query := &ast.Query{Span: span(sel.Pos(), sel.End()), QueryExpr: sel}
-
-	if isKeyword(p.peek(), "ORDER") {
-		orderBy, err := p.parseOrderBy()
+	start := p.peek().Pos
+	var with *ast.WithClause
+	if isKeyword(p.peek(), "WITH") {
+		w, err := p.parseWithClause()
 		if err != nil {
 			return nil, err
 		}
-		query.OrderBy = orderBy
-		query.Stop = orderBy.End()
+		with = w
+	}
+
+	tok := p.peek()
+	var primary ast.Node
+	var primaryEnd int // end of the primary's tokens, including any parens
+	switch {
+	case isKeyword(tok, "FROM"):
+		return p.parseFromQueryTail(start, with)
+	case isKeyword(tok, "SELECT"):
+		sel, err := p.parseSelect()
+		if err != nil {
+			return nil, err
+		}
+		primary, primaryEnd = sel, sel.End()
+	case tok.Kind == token.LPAREN:
+		inner, parenEnd, err := p.parseParenthesizedQuery()
+		if err != nil {
+			return nil, err
+		}
+		primary, primaryEnd = inner, parenEnd
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+
+	var orderBy *ast.OrderBy
+	var limit *ast.LimitOffset
+	var lockMode *ast.LockMode
+	end := primaryEnd
+	if isKeyword(p.peek(), "ORDER") {
+		ob, err := p.parseOrderBy()
+		if err != nil {
+			return nil, err
+		}
+		orderBy = ob
+		end = ob.End()
 	}
 	if isKeyword(p.peek(), "LIMIT") {
-		limit, err := p.parseLimitOffset()
+		lo, err := p.parseLimitOffset()
 		if err != nil {
 			return nil, err
 		}
-		query.Limit = limit
-		query.Stop = limit.End()
+		limit = lo
+		end = lo.End()
 	}
 	// FOR UPDATE lock mode clause; the reference lexer only produces
 	// KW_FOR_BEFORE_LOCK_MODE when FOR is immediately followed by UPDATE
@@ -511,34 +545,140 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 	if isKeyword(p.peek(), "FOR") && isKeyword(p.peekAt(1), "UPDATE") {
 		forTok := p.advance()    // FOR
 		updateTok := p.advance() // UPDATE
-		query.LockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
-		query.Stop = query.LockMode.End()
+		lockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
+		end = lockMode.End()
 	}
-	if err := p.parsePipeOperators(query); err != nil {
+
+	var query *ast.Query
+	inner, isParenQuery := primary.(*ast.Query)
+	switch {
+	case with != nil:
+		query = &ast.Query{Span: span(start, end), WithClause: with, QueryExpr: primary,
+			OrderBy: orderBy, Limit: limit, LockMode: lockMode}
+	case isParenQuery && orderBy == nil && limit == nil && lockMode == nil:
+		// A parenthesized query with no trailing clauses: wrapping it would
+		// be semantically useless, so reuse the inner query node directly;
+		// see query_without_pipe_operators in googlesql.tm.
+		query = inner
+	default:
+		query = &ast.Query{Span: span(start, end), QueryExpr: primary,
+			OrderBy: orderBy, Limit: limit, LockMode: lockMode}
+	}
+	return p.parsePipeOperators(query, start)
+}
+
+// parseParenthesizedQuery parses "( query )" with the opening parenthesis as
+// the next token. The returned query keeps the location of the query inside
+// the parentheses; parenEnd is the end offset of the closing parenthesis for
+// callers that need the parenthesized range. See parenthesized_query in
+// googlesql.tm.
+func (p *parser) parseParenthesizedQuery() (query *ast.Query, parenEnd int, err error) {
+	p.advance() // (
+	query, err = p.parseQuery()
+	if err != nil {
+		return nil, 0, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, 0, err
+	}
+	query.Parenthesized = true
+	return query, rparen.End, nil
+}
+
+// parseWithClause parses "WITH [RECURSIVE] name AS ( query ) [, ...]"; see
+// with_clause in googlesql.tm.
+func (p *parser) parseWithClause() (*ast.WithClause, error) {
+	withTok := p.advance() // WITH
+	wc := &ast.WithClause{Span: span(withTok.Pos, withTok.End)}
+	if isKeyword(p.peek(), "RECURSIVE") {
+		p.advance()
+		wc.Recursive = true
+	}
+	for {
+		entry, err := p.parseWithClauseEntry()
+		if err != nil {
+			return nil, err
+		}
+		wc.Entries = append(wc.Entries, entry)
+		wc.Stop = entry.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+		next := p.peek()
+		if isKeyword(next, "SELECT") || isKeyword(next, "FROM") {
+			// See with_clause_with_trailing_comma in googlesql.tm.
+			return nil, p.errorf(next.Pos, "Syntax error: Trailing comma after the WITH clause before the main query is not allowed")
+		}
+	}
+	if p.peek().Kind == token.PIPE_INPUT {
+		// See the with_clause "|>" alternative of
+		// query_without_pipe_operators in googlesql.tm.
+		return nil, p.errorf(p.peek().Pos, "Syntax error: A pipe operator cannot follow the WITH clause before the main query; The main query usually starts with SELECT or FROM here")
+	}
+	return wc, nil
+}
+
+// parseWithClauseEntry parses "identifier AS ( query )"; see aliased_query
+// and with_clause_entry in googlesql.tm.
+func (p *parser) parseWithClauseEntry() (*ast.WithClauseEntry, error) {
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	if isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	}
+	ident := p.parseIdentifierToken(p.advance())
+	if _, err := p.expectKeyword("AS"); err != nil {
 		return nil, err
+	}
+	lparen := p.peek()
+	if lparen.Kind != token.LPAREN {
+		return nil, p.errorf(lparen.Pos, `Syntax error: Expected "(" but got %s`, describeToken(lparen))
+	}
+	query, parenEnd, err := p.parseParenthesizedQuery()
+	if err != nil {
+		return nil, err
+	}
+	// The aliased query's location includes the parentheses; see
+	// aliased_query_with_overridden_next_token_lookback in googlesql.tm.
+	query.Start, query.Stop = lparen.Pos, parenEnd
+	aq := &ast.AliasedQuery{Span: span(ident.Pos(), query.End()), Identifier: ident, Query: query}
+	return &ast.WithClauseEntry{Span: aq.Span, AliasedQuery: aq}, nil
+}
+
+// parsePipeOperators parses any trailing "|> operator" sequence onto query.
+// A pipe operator after a parenthesized query nests the query rather than
+// extending it, to represent how the pipes bind; see the query rule in
+// googlesql.tm. start is the offset of the query's first token (which can
+// precede query's own location when it is parenthesized).
+func (p *parser) parsePipeOperators(query *ast.Query, start int) (*ast.Query, error) {
+	for p.peek().Kind == token.PIPE_INPUT {
+		op, err := p.parsePipeOperator()
+		if err != nil {
+			return nil, err
+		}
+		if query.Parenthesized {
+			query.Parenthesized = false
+			query = &ast.Query{Span: span(start, op.End()), QueryExpr: query,
+				PipeOperators: []ast.Node{op}}
+		} else {
+			query.PipeOperators = append(query.PipeOperators, op)
+			query.Stop = op.End()
+		}
 	}
 	return query, nil
 }
 
-// parsePipeOperators parses any trailing "|> operator" sequence onto query.
-func (p *parser) parsePipeOperators(query *ast.Query) error {
-	for p.peek().Kind == token.PIPE_INPUT {
-		op, err := p.parsePipeOperator()
-		if err != nil {
-			return err
-		}
-		query.PipeOperators = append(query.PipeOperators, op)
-		query.Stop = op.End()
-	}
-	return nil
-}
-
-// parseFromQuery parses a standalone FROM clause used as a query, optionally
-// followed by a lock mode clause and pipe operators; see the from_clause
-// alternative of query_without_pipe_operators in googlesql.tm. Clauses that
-// would be valid after a FROM clause in a normal query produce dedicated
-// errors suggesting pipe operators.
-func (p *parser) parseFromQuery() (*ast.Query, error) {
+// parseFromQueryTail parses a standalone FROM clause used as a query,
+// optionally preceded by an already-parsed WITH clause (starting at start)
+// and optionally followed by a lock mode clause and pipe operators; see the
+// from_clause alternative of query_without_pipe_operators in googlesql.tm.
+// Clauses that would be valid after a FROM clause in a normal query produce
+// dedicated errors suggesting pipe operators.
+func (p *parser) parseFromQueryTail(start int, with *ast.WithClause) (*ast.Query, error) {
 	from, err := p.parseFromClause()
 	if err != nil {
 		return nil, err
@@ -565,17 +705,14 @@ func (p *parser) parseFromQuery() (*ast.Query, error) {
 		return nil, p.badKeywordAfterFromQuery(tok, "EXCEPT", "EXCEPT", true)
 	}
 	fromQuery := &ast.FromQuery{Span: span(from.Pos(), from.End()), From: from}
-	query := &ast.Query{Span: span(fromQuery.Pos(), fromQuery.End()), QueryExpr: fromQuery}
+	query := &ast.Query{Span: span(start, fromQuery.End()), WithClause: with, QueryExpr: fromQuery}
 	if isKeyword(p.peek(), "FOR") && isKeyword(p.peekAt(1), "UPDATE") {
 		forTok := p.advance()    // FOR
 		updateTok := p.advance() // UPDATE
 		query.LockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
 		query.Stop = query.LockMode.End()
 	}
-	if err := p.parsePipeOperators(query); err != nil {
-		return nil, err
-	}
-	return query, nil
+	return p.parsePipeOperators(query, start)
 }
 
 // badKeywordAfterFromQuery builds the error for a clause keyword that is not

@@ -58,6 +58,15 @@ func nodeString(n ast.Node) string {
 		return "QueryStatement"
 	case *ast.Query:
 		return "Query"
+	case *ast.WithClause:
+		if t.Recursive {
+			return "WithClause (recursive)"
+		}
+		return "WithClause"
+	case *ast.WithClauseEntry:
+		return "WithClauseEntry"
+	case *ast.AliasedQuery:
+		return "AliasedQuery"
 	case *ast.Select:
 		if t.Distinct {
 			return "Select(distinct=true)"
