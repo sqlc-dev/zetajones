@@ -2071,6 +2071,71 @@ func (n *CreateTableFunctionStatement) Children() []Node {
 	return children(n.Declaration, n.Returns, n.Options, n.Language, n.Query)
 }
 
+// CreateFunctionStatement is a CREATE FUNCTION statement (scalar or aggregate
+// function); see ASTCreateFunctionStatement in googlesql/parser/parse_tree.h.
+// Scope is "", "TEMP", "PUBLIC", or "PRIVATE" (TEMPORARY normalizes to
+// "TEMP"). Determinism is "", "DETERMINISTIC", "NOT DETERMINISTIC",
+// "IMMUTABLE", "STABLE", or "VOLATILE". SqlSecurity is "", "INVOKER", or
+// "DEFINER" and, unlike CreateTableFunctionStatement, IS shown in the debug
+// tree. IsRemote records the REMOTE keyword, which is parsed but not shown.
+// Children appear in a fixed order (declaration, return type, language,
+// with-connection, body, options) regardless of source order.
+type CreateFunctionStatement struct {
+	Span
+	Scope          string                `json:"scope,omitempty"`
+	IsOrReplace    bool                  `json:"is_or_replace,omitempty"`
+	IsIfNotExists  bool                  `json:"is_if_not_exists,omitempty"`
+	IsAggregate    bool                  `json:"is_aggregate,omitempty"`
+	Determinism    string                `json:"determinism,omitempty"`
+	SqlSecurity    string                `json:"sql_security,omitempty"`
+	IsRemote       bool                  `json:"is_remote,omitempty"`
+	Declaration    *FunctionDeclaration  `json:"declaration"`
+	ReturnType     Node                  `json:"return_type,omitempty"`
+	Language       *Identifier           `json:"language,omitempty"`
+	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
+	Body           Node                  `json:"body,omitempty"`
+	Options        *OptionsList          `json:"options,omitempty"`
+}
+
+func (n *CreateFunctionStatement) statementNode() {}
+func (n *CreateFunctionStatement) Children() []Node {
+	return children(n.Declaration, n.ReturnType, n.Language, n.WithConnection, n.Body, n.Options)
+}
+
+// SqlFunctionBody is the "(expression)" body of a SQL-defined function; see
+// ASTSqlFunctionBody in googlesql/parser/parse_tree.h. Its span includes the
+// enclosing parentheses; its single child is the body expression.
+type SqlFunctionBody struct {
+	Span
+	Expression Node `json:"expression"`
+}
+
+func (n *SqlFunctionBody) Children() []Node {
+	return children(n.Expression)
+}
+
+// TemplatedParameterType is a templated function-argument type such as
+// "ANY TYPE"; see ASTTemplatedParameterType in googlesql/parser/parse_tree.h.
+// It has no children.
+type TemplatedParameterType struct {
+	Span
+	Kind string `json:"kind,omitempty"`
+}
+
+func (n *TemplatedParameterType) Children() []Node { return nil }
+
+// WithConnectionClause is "WITH CONNECTION <connection>"; see
+// ASTWithConnectionClause in googlesql/parser/parse_tree.h. Its single child
+// is a ConnectionClause.
+type WithConnectionClause struct {
+	Span
+	Connection *ConnectionClause `json:"connection"`
+}
+
+func (n *WithConnectionClause) Children() []Node {
+	return children(n.Connection)
+}
+
 // FunctionDeclaration is "path(params)" in a CREATE FUNCTION-family statement;
 // see ASTFunctionDeclaration in googlesql/parser/parse_tree.h.
 type FunctionDeclaration struct {
@@ -2098,16 +2163,21 @@ func (n *FunctionParameters) Children() []Node {
 	return out
 }
 
-// FunctionParameter is a single "[name] type" function parameter; see
-// ASTFunctionParameter in googlesql/parser/parse_tree.h.
+// FunctionParameter is a single "[name] type [AS alias] [DEFAULT expr]
+// [NOT AGGREGATE]" function parameter; see ASTFunctionParameter in
+// googlesql/parser/parse_tree.h. DefaultValue and IsNotAggregate surface in
+// the node's debug string; Alias and DefaultValue are children.
 type FunctionParameter struct {
 	Span
-	Name *Identifier `json:"name,omitempty"`
-	Type Node        `json:"type,omitempty"`
+	Name           *Identifier `json:"name,omitempty"`
+	Type           Node        `json:"type,omitempty"`
+	Alias          *Alias      `json:"alias,omitempty"`
+	DefaultValue   Node        `json:"default_value,omitempty"`
+	IsNotAggregate bool        `json:"is_not_aggregate,omitempty"`
 }
 
 func (n *FunctionParameter) Children() []Node {
-	return children(n.Name, n.Type)
+	return children(n.Name, n.Type, n.Alias, n.DefaultValue)
 }
 
 // TVFSchema is the "TABLE<col, ...>" return schema of a table-valued function;
@@ -2588,6 +2658,32 @@ type RangeType struct {
 
 func (n *RangeType) Children() []Node {
 	return children(n.ElementType, n.TypeParameters, n.Collate)
+}
+
+// FunctionType is "FUNCTION<argtypes -> returntype>"; see ASTFunctionType in
+// googlesql/parser/parse_tree.h. Children are the argument list, the return
+// type, and then any trailing type parameters and collation.
+type FunctionType struct {
+	Span
+	ArgList        *FunctionTypeArgList `json:"arg_list"`
+	ReturnType     Node                 `json:"return_type"`
+	TypeParameters *TypeParameterList   `json:"type_parameters,omitempty"`
+	Collate        *Collate             `json:"collate,omitempty"`
+}
+
+func (n *FunctionType) Children() []Node {
+	return children(n.ArgList, n.ReturnType, n.TypeParameters, n.Collate)
+}
+
+// FunctionTypeArgList is the argument-type list of a FunctionType; see
+// ASTFunctionTypeArgList in googlesql/parser/parse_tree.h.
+type FunctionTypeArgList struct {
+	Span
+	Args []Node `json:"args,omitempty"`
+}
+
+func (n *FunctionTypeArgList) Children() []Node {
+	return append([]Node(nil), n.Args...)
 }
 
 // TypeParameterList is the "(param, ...)" suffix of a parameterized type

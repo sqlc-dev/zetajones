@@ -225,18 +225,29 @@ const FeatureQualify Feature = "QUALIFY"
 // (FEATURE_FOR_UPDATE).
 const FeatureForUpdate Feature = "FOR_UPDATE"
 
+// FeatureRemoteFunction gates the REMOTE keyword and the WITH CONNECTION
+// clause in CREATE FUNCTION statements (FEATURE_REMOTE_FUNCTION).
+const FeatureRemoteFunction Feature = "REMOTE_FUNCTION"
+
+// FeatureCreateFunctionLanguageWithConnection gates the WITH CONNECTION clause
+// on non-remote CREATE FUNCTION statements
+// (FEATURE_CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION).
+const FeatureCreateFunctionLanguageWithConnection Feature = "CREATE_FUNCTION_LANGUAGE_WITH_CONNECTION"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
 // language_feature_options annotations in googlesql/public/options.proto.
 var featureInMaximum = map[Feature]bool{
-	FeatureWithGroupRows:           false, // in_development
-	FeaturePipes:                   true,
-	FeatureAllowConsecutiveOn:      true,
-	FeatureIsDistinct:              true,
-	FeatureBracedProtoConstructors: true,
-	FeatureQualify:                 true,
-	FeatureForUpdate:               true,
+	FeatureWithGroupRows:                        false, // in_development
+	FeaturePipes:                                true,
+	FeatureAllowConsecutiveOn:                   true,
+	FeatureIsDistinct:                           true,
+	FeatureBracedProtoConstructors:              true,
+	FeatureQualify:                              true,
+	FeatureForUpdate:                            true,
+	FeatureRemoteFunction:                       true,
+	FeatureCreateFunctionLanguageWithConnection: true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -1514,6 +1525,16 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") && isKeyword(p.peekAt(2), "FUNCTION") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: CREATE EXTERNAL TABLE FUNCTION is not supported")
 	}
+	// CREATE [OR REPLACE] [scope] [AGGREGATE] FUNCTION is a scalar/aggregate
+	// function; see create_function_statement in googlesql.tm.
+	isAggregate := false
+	if isKeyword(p.peek(), "AGGREGATE") && isKeyword(p.peekAt(1), "FUNCTION") {
+		p.advance()
+		isAggregate = true
+	}
+	if isKeyword(p.peek(), "FUNCTION") {
+		return p.parseCreateFunctionStatement(createTok, scope, isOrReplace, isAggregate)
+	}
 	if _, err := p.expectKeyword("TABLE"); err != nil {
 		return nil, err
 	}
@@ -1653,6 +1674,180 @@ func (p *parser) parseCreateTableFunctionStatement(createTok token.Token, scope 
 	return stmt, nil
 }
 
+// parseCreateFunctionStatement parses the tail of "CREATE [OR REPLACE] [scope]
+// [AGGREGATE] FUNCTION [IF NOT EXISTS] path(params) [RETURNS type]
+// [determinism] [SQL SECURITY ...] [REMOTE] [LANGUAGE id] [WITH CONNECTION ...]
+// [OPTIONS ...] [AS body]"; see create_function_statement in googlesql.tm. The
+// FUNCTION keyword is the next token. The trailing clauses may appear in any
+// order (matching the reference's flexible grammar); the debug tree lists
+// children in a fixed order regardless.
+func (p *parser) parseCreateFunctionStatement(createTok token.Token, scope string, isOrReplace, isAggregate bool) (ast.Statement, error) {
+	p.advance() // FUNCTION
+	stmt := &ast.CreateFunctionStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace, IsAggregate: isAggregate}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	// A missing function name reports a generic "Unexpected" error rather than
+	// "Expected identifier"; see create_function_statement in googlesql.tm.
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	// After the path, the parameter list must open with "("; the path could
+	// also have continued with ".", so the error mentions both.
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or "." but got %s`, describeToken(p.peek()))
+	}
+	params, err := p.parseFunctionParameters()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Declaration = &ast.FunctionDeclaration{
+		Span:       span(name.Pos(), params.End()),
+		Name:       name,
+		Parameters: params,
+	}
+	stmt.Stop = stmt.Declaration.End()
+
+	// RETURNS type. Templated types (ANY ...) are rejected here.
+	if isKeyword(p.peek(), "RETURNS") {
+		p.advance()
+		if isKeyword(p.peek(), "ANY") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Templated types are not allowed in the RETURNS clause")
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		stmt.ReturnType = typ
+		stmt.Stop = typ.End()
+	}
+
+	// Trailing clauses, accepted in any order (each at most once).
+	for {
+		switch {
+		case stmt.Determinism == "" && isKeyword(p.peek(), "DETERMINISTIC"):
+			stmt.Determinism = "DETERMINISTIC"
+			stmt.Stop = p.advance().End
+		case stmt.Determinism == "" && isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "DETERMINISTIC"):
+			p.advance()
+			stmt.Determinism = "NOT DETERMINISTIC"
+			stmt.Stop = p.advance().End
+		case stmt.Determinism == "" && isKeyword(p.peek(), "IMMUTABLE"):
+			stmt.Determinism = "IMMUTABLE"
+			stmt.Stop = p.advance().End
+		case stmt.Determinism == "" && isKeyword(p.peek(), "STABLE"):
+			stmt.Determinism = "STABLE"
+			stmt.Stop = p.advance().End
+		case stmt.Determinism == "" && isKeyword(p.peek(), "VOLATILE"):
+			stmt.Determinism = "VOLATILE"
+			stmt.Stop = p.advance().End
+		case stmt.SqlSecurity == "" && isKeyword(p.peek(), "SQL") && isKeyword(p.peekAt(1), "SECURITY"):
+			p.advance() // SQL
+			p.advance() // SECURITY
+			switch {
+			case isKeyword(p.peek(), "INVOKER"):
+				stmt.SqlSecurity = "INVOKER"
+			case isKeyword(p.peek(), "DEFINER"):
+				stmt.SqlSecurity = "DEFINER"
+			default:
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword DEFINER or keyword INVOKER but got %s", describeToken(p.peek()))
+			}
+			stmt.Stop = p.advance().End
+		case !stmt.IsRemote && isKeyword(p.peek(), "REMOTE"):
+			if !p.features.Enabled(FeatureRemoteFunction) {
+				return nil, p.errorf(p.peek().Pos, "Keyword REMOTE is not supported")
+			}
+			stmt.IsRemote = true
+			stmt.Stop = p.advance().End
+		case stmt.Language == nil && isKeyword(p.peek(), "LANGUAGE"):
+			p.advance() // LANGUAGE
+			tok := p.peek()
+			if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+				return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+			}
+			stmt.Language = p.parseIdentifierToken(p.advance())
+			stmt.Stop = stmt.Language.End()
+		case stmt.WithConnection == nil && isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "CONNECTION"):
+			if !p.features.Enabled(FeatureRemoteFunction) && !p.features.Enabled(FeatureCreateFunctionLanguageWithConnection) {
+				return nil, p.errorf(p.peek().Pos, "WITH CONNECTION clause is not supported")
+			}
+			wc, err := p.parseWithConnectionClause()
+			if err != nil {
+				return nil, err
+			}
+			stmt.WithConnection = wc
+			stmt.Stop = wc.End()
+		case stmt.Options == nil && isKeyword(p.peek(), "OPTIONS"):
+			p.advance() // OPTIONS
+			opts, err := p.parseOptionsList()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Options = opts
+			stmt.Stop = opts.End()
+		case stmt.Body == nil && isKeyword(p.peek(), "AS"):
+			p.advance() // AS
+			body, err := p.parseSqlFunctionBodyOrString()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Body = body
+			stmt.Stop = body.End()
+		default:
+			return stmt, nil
+		}
+	}
+}
+
+// parseWithConnectionClause parses "WITH CONNECTION <connection>"; see
+// opt_with_connection_clause in googlesql.tm. WITH is the next token.
+func (p *parser) parseWithConnectionClause() (*ast.WithConnectionClause, error) {
+	withTok := p.advance() // WITH
+	connTok := p.advance() // CONNECTION
+	var path ast.Node
+	switch tok := p.peek(); {
+	case isKeyword(tok, "DEFAULT"):
+		p.advance()
+		path = &ast.DefaultLiteral{Span: span(tok.Pos, tok.End)}
+	case (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok):
+		pathExpr, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		path = pathExpr
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	conn := &ast.ConnectionClause{Span: span(connTok.Pos, path.End()), Path: path}
+	return &ast.WithConnectionClause{Span: span(withTok.Pos, conn.End()), Connection: conn}, nil
+}
+
+// parseSqlFunctionBodyOrString parses a function body following AS: either a
+// parenthesized SQL expression (SqlFunctionBody) or a string literal; see
+// as_sql_function_body_or_string in googlesql.tm.
+func (p *parser) parseSqlFunctionBodyOrString() (ast.Node, error) {
+	if p.peek().Kind == token.LPAREN {
+		lparen := p.advance() // (
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SqlFunctionBody{Span: span(lparen.Pos, rparen.End), Expression: expr}, nil
+	}
+	return p.parseStringLiteralValue()
+}
+
 // parseFunctionParameters parses "( [function_parameter [, ...]] )"; see
 // function_parameters in googlesql.tm. The opening parenthesis is the next
 // token.
@@ -1662,7 +1857,7 @@ func (p *parser) parseFunctionParameters() (*ast.FunctionParameters, error) {
 		return nil, err
 	}
 	fp := &ast.FunctionParameters{Span: span(lparen.Pos, 0)}
-	if p.peek().Kind != token.RPAREN {
+	if p.beginsFunctionParameter(p.peek()) {
 		for {
 			param, err := p.parseFunctionParameter()
 			if err != nil {
@@ -1683,14 +1878,43 @@ func (p *parser) parseFunctionParameters() (*ast.FunctionParameters, error) {
 	return fp, nil
 }
 
-// parseFunctionParameter parses "[name] type"; see function_parameter in
-// googlesql.tm. Only the common named/unnamed simple forms are handled.
+// beginsFunctionParameter reports whether tok can begin a function parameter:
+// a parameter name (identifier) or a type. The reserved keyword DEFAULT (used
+// for default-argument syntax) cannot; a leading DEFAULT is reported as a
+// missing ")".
+func (p *parser) beginsFunctionParameter(tok token.Token) bool {
+	if isKeyword(tok, "DEFAULT") {
+		return false
+	}
+	return tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT
+}
+
+// beginsParameterType reports whether tok can begin a function-parameter type,
+// including the templated "ANY ..." forms; see function_parameter and
+// templated_parameter_type in googlesql.tm. Unlike beginsType it excludes
+// reserved keywords (other than the type keywords ARRAY/STRUCT/RANGE/INTERVAL),
+// so that a following reserved keyword such as AS is not mistaken for a type
+// (which would wrongly make the preceding token a parameter name).
+func (p *parser) beginsParameterType(tok token.Token) bool {
+	switch {
+	case tok.Kind == token.QUOTED_IDENT:
+		return true
+	case tok.Kind == token.IDENT && !isReserved(tok):
+		return true
+	case isKeyword(tok, "ARRAY"), isKeyword(tok, "STRUCT"), isKeyword(tok, "RANGE"), isKeyword(tok, "INTERVAL"), isKeyword(tok, "ANY"):
+		return true
+	}
+	return false
+}
+
+// parseFunctionParameter parses "[name] type [AS alias] [DEFAULT expr]
+// [NOT AGGREGATE]"; see function_parameter in googlesql.tm.
 func (p *parser) parseFunctionParameter() (*ast.FunctionParameter, error) {
 	var name *ast.Identifier
-	if (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && p.beginsType(p.peekAt(1)) {
+	if (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && p.beginsParameterType(p.peekAt(1)) {
 		name = p.parseIdentifierToken(p.advance())
 	}
-	typ, err := p.parseType()
+	typ, err := p.parseFunctionParameterType()
 	if err != nil {
 		return nil, err
 	}
@@ -1698,7 +1922,69 @@ func (p *parser) parseFunctionParameter() (*ast.FunctionParameter, error) {
 	if name != nil {
 		start = name.Pos()
 	}
-	return &ast.FunctionParameter{Span: span(start, typ.End()), Name: name, Type: typ}, nil
+	param := &ast.FunctionParameter{Span: span(start, typ.End()), Name: name, Type: typ}
+
+	// Optional "AS alias" (the AS is required for the alias to bind here).
+	if isKeyword(p.peek(), "AS") {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		param.Alias = alias
+		param.Stop = alias.End()
+	}
+	// Optional "DEFAULT expr".
+	if isKeyword(p.peek(), "DEFAULT") {
+		p.advance()
+		def, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		param.DefaultValue = def
+		param.Stop = p.extEnd(def)
+	}
+	// Optional "NOT AGGREGATE".
+	if isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "AGGREGATE") {
+		p.advance()
+		param.IsNotAggregate = true
+		param.Stop = p.advance().End
+	}
+	return param, nil
+}
+
+// parseFunctionParameterType parses a function-parameter type, which may be a
+// templated "ANY ..." type; see function_parameter in googlesql.tm.
+func (p *parser) parseFunctionParameterType() (ast.Node, error) {
+	if isKeyword(p.peek(), "ANY") {
+		return p.parseTemplatedParameterType()
+	}
+	return p.parseType()
+}
+
+// parseTemplatedParameterType parses "ANY {TYPE|PROTO|ENUM|STRUCT|ARRAY|TABLE}";
+// see templated_parameter_type in googlesql.tm. ANY is the next token.
+func (p *parser) parseTemplatedParameterType() (*ast.TemplatedParameterType, error) {
+	anyTok := p.advance() // ANY
+	kindTok := p.peek()
+	var kind string
+	switch {
+	case isKeyword(kindTok, "TYPE"):
+		kind = "TYPE"
+	case isKeyword(kindTok, "PROTO"):
+		kind = "PROTO"
+	case isKeyword(kindTok, "ENUM"):
+		kind = "ENUM"
+	case isKeyword(kindTok, "STRUCT"):
+		kind = "STRUCT"
+	case isKeyword(kindTok, "ARRAY"):
+		kind = "ARRAY"
+	case isKeyword(kindTok, "TABLE"):
+		kind = "TABLE"
+	default:
+		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
+	}
+	p.advance()
+	return &ast.TemplatedParameterType{Span: span(anyTok.Pos, p.prevEnd()), Kind: kind}, nil
 }
 
 // parseTVFSchema parses "TABLE< column [, ...] >"; see tvf_schema in
@@ -5948,8 +6234,72 @@ func (p *parser) parseType() (ast.Node, error) {
 		t.TypeParameters, t.Collate, t.Stop = params, collate, end
 	case *ast.RangeType:
 		t.TypeParameters, t.Collate, t.Stop = params, collate, end
+	case *ast.FunctionType:
+		t.TypeParameters, t.Collate, t.Stop = params, collate, end
 	}
 	return raw, nil
+}
+
+// parseFunctionType parses "FUNCTION<arg_list -> return_type>"; see
+// function_type in googlesql.tm. FUNCTION is the next token.
+func (p *parser) parseFunctionType() (*ast.FunctionType, error) {
+	funcTok := p.advance() // FUNCTION
+	if _, err := p.expectTemplateOpen(); err != nil {
+		return nil, err
+	}
+	argList, err := p.parseFunctionTypeArgList(funcTok)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.ARROW, `"->"`); err != nil {
+		return nil, err
+	}
+	ret, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.FunctionType{Span: span(funcTok.Pos, closeTok.End), ArgList: argList, ReturnType: ret}, nil
+}
+
+// parseFunctionTypeArgList parses the argument-type list of a function type:
+// an empty "()", a parenthesized comma-separated list, or a single unadorned
+// type; see function_type_arg_list in googlesql.tm. The reference gives the
+// parenthesized non-empty form a location starting at the FUNCTION keyword,
+// while the empty "()" form spans just the parentheses and the bare-type form
+// spans just the type.
+func (p *parser) parseFunctionTypeArgList(funcTok token.Token) (*ast.FunctionTypeArgList, error) {
+	if p.peek().Kind == token.LPAREN {
+		lparen := p.advance() // (
+		if p.peek().Kind == token.RPAREN {
+			rparen := p.advance() // )
+			return &ast.FunctionTypeArgList{Span: span(lparen.Pos, rparen.End)}, nil
+		}
+		var args []ast.Node
+		for {
+			t, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, t)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+		if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+			return nil, err
+		}
+		return &ast.FunctionTypeArgList{Span: span(funcTok.Pos, args[len(args)-1].End()), Args: args}, nil
+	}
+	t, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.FunctionTypeArgList{Span: span(t.Pos(), t.End()), Args: []ast.Node{t}}, nil
 }
 
 // parseRawType parses a type without parameters or collation; see raw_type
@@ -5963,6 +6313,8 @@ func (p *parser) parseRawType() (ast.Node, error) {
 		return p.parseStructType()
 	case isKeyword(tok, "RANGE"):
 		return p.parseRangeType()
+	case isKeyword(tok, "FUNCTION"):
+		return p.parseFunctionType()
 	case isKeyword(tok, "INTERVAL"):
 		// INTERVAL is a reserved keyword but still names a type; see
 		// type_name in googlesql.tm.

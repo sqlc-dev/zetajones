@@ -540,6 +540,10 @@ func nodeString(n ast.Node) string {
 		return "StructField"
 	case *ast.RangeType:
 		return "RangeType"
+	case *ast.FunctionType:
+		return "FunctionType"
+	case *ast.FunctionTypeArgList:
+		return "FunctionTypeArgList"
 	case *ast.TypeParameterList:
 		return "TypeParameterList"
 	case *ast.MaxLiteral:
@@ -594,12 +598,63 @@ func nodeString(n ast.Node) string {
 			return "CreateTableFunctionStatement"
 		}
 		return fmt.Sprintf("CreateTableFunctionStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateFunctionStatement:
+		// The base create-statement modifiers come first as one group; the
+		// function-specific aggregate, determinism, and SQL SECURITY modifiers
+		// follow as their own parenthesized groups (matching
+		// ASTCreateFunctionStmtBase::SingleNodeDebugString in
+		// googlesql/parser/parse_tree.cc).
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		out := "CreateFunctionStatement"
+		if len(mods) > 0 {
+			out += "(" + strings.Join(mods, ", ") + ")"
+		}
+		if t.IsAggregate {
+			out += "(is_aggregate=true)"
+		}
+		if t.Determinism != "" {
+			out += "(" + t.Determinism + ")"
+		}
+		if t.SqlSecurity != "" {
+			out += "(SQL SECURITY " + t.SqlSecurity + ")"
+		}
+		return out
+	case *ast.SqlFunctionBody:
+		return "SqlFunctionBody"
+	case *ast.TemplatedParameterType:
+		return "TemplatedParameterType"
+	case *ast.WithConnectionClause:
+		return "WithConnectionClause"
 	case *ast.FunctionDeclaration:
 		return "FunctionDeclaration"
 	case *ast.FunctionParameters:
 		return "FunctionParameters"
 	case *ast.FunctionParameter:
-		return "FunctionParameter"
+		var mods []string
+		if t.DefaultValue != nil {
+			mods = append(mods, "default_value=("+nodeString(t.DefaultValue)+")")
+		}
+		if t.IsNotAggregate {
+			mods = append(mods, "is_not_aggregate=true")
+		}
+		if len(mods) == 0 {
+			return "FunctionParameter"
+		}
+		return "FunctionParameter(" + strings.Join(mods, ", ") + ")"
 	case *ast.TVFSchema:
 		return "TVFSchema"
 	case *ast.TVFSchemaColumn:
