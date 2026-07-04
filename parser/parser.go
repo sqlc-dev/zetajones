@@ -307,6 +307,40 @@ type parser struct {
 	toks     []token.Token
 	pos      int
 	features *FeatureSet
+	// extents records the full token extent of expressions that were
+	// parenthesized. In ZetaSQL's parse tree a parenthesized expression
+	// keeps the location of the inner expression, but any enclosing
+	// production's location (@$ in the LALR grammar) spans all consumed
+	// tokens, including the parentheses. Keys are the inner expression
+	// nodes; values are the [start, end) offsets including parentheses.
+	extents map[ast.Node][2]int
+}
+
+// setExtent records that node n's full token extent is [start, end), wider
+// than its own location because of wrapping parentheses.
+func (p *parser) setExtent(n ast.Node, start, end int) {
+	if p.extents == nil {
+		p.extents = make(map[ast.Node][2]int)
+	}
+	p.extents[n] = [2]int{start, end}
+}
+
+// extStart returns the start offset of n's full token extent, including any
+// wrapping parentheses not covered by the node's own location.
+func (p *parser) extStart(n ast.Node) int {
+	if ext, ok := p.extents[n]; ok {
+		return ext[0]
+	}
+	return n.Pos()
+}
+
+// extEnd returns the end offset of n's full token extent, including any
+// wrapping parentheses not covered by the node's own location.
+func (p *parser) extEnd(n ast.Node) int {
+	if ext, ok := p.extents[n]; ok {
+		return ext[1]
+	}
+	return n.End()
 }
 
 func (p *parser) peek() token.Token { return p.toks[p.pos] }
@@ -1440,7 +1474,7 @@ func (p *parser) parsePipeSet(pipeTok token.Token) (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		item := &ast.PipeSetItem{Span: span(ident.Pos(), expr.End()), Column: ident, Expr: expr}
+		item := &ast.PipeSetItem{Span: span(ident.Pos(), p.extEnd(expr)), Column: ident, Expr: expr}
 		node.Items = append(node.Items, item)
 		node.Stop = item.End()
 		if p.peek().Kind != token.COMMA {
@@ -1585,7 +1619,7 @@ func (p *parser) parseSelectColumnExpr() (*ast.SelectColumn, error) {
 	if err := p.checkAttachedAlias(); err != nil {
 		return nil, err
 	}
-	col := &ast.SelectColumn{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	col := &ast.SelectColumn{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
 	alias, err := p.parseOptionalAlias()
 	if err != nil {
 		return nil, err
@@ -1627,7 +1661,7 @@ func (p *parser) parseWhereClause() (*ast.WhereClause, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.WhereClause{Span: span(whereTok.Pos, expr.End()), Expr: expr}, nil
+	return &ast.WhereClause{Span: span(whereTok.Pos, p.extEnd(expr)), Expr: expr}, nil
 }
 
 // parseSelectClause parses "SELECT [ALL|DISTINCT] select_list" with none of
@@ -1691,8 +1725,8 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		if err != nil {
 			return nil, err
 		}
-		sel.Having = &ast.Having{Span: span(havingTok.Pos, expr.End()), Expr: expr}
-		sel.Stop = expr.End()
+		sel.Having = &ast.Having{Span: span(havingTok.Pos, p.extEnd(expr)), Expr: expr}
+		sel.Stop = p.extEnd(expr)
 	}
 	return sel, nil
 }
@@ -1737,7 +1771,7 @@ func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {
 	if err := p.checkAttachedAlias(); err != nil {
 		return nil, err
 	}
-	col := &ast.SelectColumn{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	col := &ast.SelectColumn{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
 	alias, err := p.parseOptionalAlias()
 	if err != nil {
 		return nil, err
@@ -2033,7 +2067,7 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.TVFArgument{Span: span(expr.Pos(), expr.End()), Expr: expr}, nil
+	return &ast.TVFArgument{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}, nil
 }
 
 // parseUnnestExpression parses "UNNEST ( expression [AS alias] [, ...] )";
@@ -2075,7 +2109,7 @@ func (p *parser) parseExpressionWithOptAlias() (*ast.ExpressionWithOptAlias, err
 	if err != nil {
 		return nil, err
 	}
-	node := &ast.ExpressionWithOptAlias{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	node := &ast.ExpressionWithOptAlias{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
 	if isKeyword(p.peek(), "AS") {
 		asTok := p.advance()
 		tok := p.peek()
@@ -2103,7 +2137,7 @@ func (p *parser) parseGroupBy() (*ast.GroupBy, error) {
 		if err != nil {
 			return nil, err
 		}
-		item := &ast.GroupingItem{Span: span(expr.Pos(), expr.End()), Expr: expr}
+		item := &ast.GroupingItem{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
 		groupBy.Items = append(groupBy.Items, item)
 		groupBy.Stop = item.End()
 		if p.peek().Kind != token.COMMA {
@@ -2158,7 +2192,7 @@ func (p *parser) parseOrderingExpression() (*ast.OrderingExpression, error) {
 	if err != nil {
 		return nil, err
 	}
-	item := &ast.OrderingExpression{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	item := &ast.OrderingExpression{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
 	if isKeyword(p.peek(), "COLLATE") {
 		collate, err := p.parseCollate()
 		if err != nil {
@@ -2359,7 +2393,7 @@ func (p *parser) parseOr() (ast.Node, error) {
 		disjuncts = append(disjuncts, next)
 	}
 	return &ast.OrExpr{
-		Span:      span(first.Pos(), disjuncts[len(disjuncts)-1].End()),
+		Span:      span(p.extStart(first), p.extEnd(disjuncts[len(disjuncts)-1])),
 		Disjuncts: disjuncts,
 	}, nil
 }
@@ -2382,7 +2416,7 @@ func (p *parser) parseAnd() (ast.Node, error) {
 		conjuncts = append(conjuncts, next)
 	}
 	return &ast.AndExpr{
-		Span:      span(first.Pos(), conjuncts[len(conjuncts)-1].End()),
+		Span:      span(p.extStart(first), p.extEnd(conjuncts[len(conjuncts)-1])),
 		Conjuncts: conjuncts,
 	}, nil
 }
@@ -2395,7 +2429,7 @@ func (p *parser) parseNot() (ast.Node, error) {
 			return nil, err
 		}
 		return &ast.UnaryExpression{
-			Span:    span(notTok.Pos, operand.End()),
+			Span:    span(notTok.Pos, p.extEnd(operand)),
 			Op:      "NOT",
 			Operand: operand,
 		}, nil
@@ -2431,7 +2465,7 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Expression in BETWEEN must be parenthesized")
 		}
 		return &ast.BetweenExpression{
-			Span:            span(lhs.Pos(), high.End()),
+			Span:            span(p.extStart(lhs), p.extEnd(high)),
 			IsNot:           notTok.Pos >= 0,
 			Lhs:             lhs,
 			BetweenLocation: &ast.Location{Span: span(betweenTok.Pos, betweenTok.End)},
@@ -2464,7 +2498,7 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Expected NULL, TRUE, or FALSE after IS")
 		}
 		return &ast.BinaryExpression{
-			Span:  span(lhs.Pos(), rhs.End()),
+			Span:  span(p.extStart(lhs), p.extEnd(rhs)),
 			Op:    "IS",
 			IsNot: isNot,
 			Left:  lhs,
@@ -2496,7 +2530,7 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		return nil, err
 	}
 	return &ast.BinaryExpression{
-		Span:  span(lhs.Pos(), rhs.End()),
+		Span:  span(p.extStart(lhs), p.extEnd(rhs)),
 		Op:    op,
 		Left:  lhs,
 		Right: rhs,
@@ -2520,7 +2554,7 @@ func (p *parser) parseBinaryLevel(matches func(token.Token) (string, bool), next
 			return nil, err
 		}
 		lhs = &ast.BinaryExpression{
-			Span: span(lhs.Pos(), rhs.End()),
+			Span: span(p.extStart(lhs), p.extEnd(rhs)),
 			Op:   op,
 			Left: lhs, Right: rhs,
 		}
@@ -2602,7 +2636,7 @@ func (p *parser) parseUnary() (ast.Node, error) {
 			return nil, err
 		}
 		return &ast.UnaryExpression{
-			Span:    span(tok.Pos, operand.End()),
+			Span:    span(tok.Pos, p.extEnd(operand)),
 			Op:      tok.Image,
 			Operand: operand,
 		}, nil
@@ -2779,9 +2813,11 @@ func (p *parser) parseParenthesizedExpression() (ast.Node, error) {
 	if p.peek().Kind != token.RPAREN {
 		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," but got %s`, describeToken(p.peek()))
 	}
-	p.advance()
+	rparen := p.advance()
 	// Parenthesized expressions keep the span of the inner expression in
-	// ZetaSQL's parse tree; the parentheses only affect grouping.
+	// ZetaSQL's parse tree; the parentheses only affect grouping, but
+	// enclosing productions span them (see parser.extents).
+	p.setExtent(expr, lparen.Pos, rparen.End)
 	return expr, nil
 }
 
@@ -2930,7 +2966,7 @@ func (p *parser) parsePartitionBy() (*ast.PartitionBy, error) {
 			return nil, err
 		}
 		partitionBy.Expressions = append(partitionBy.Expressions, expr)
-		partitionBy.Stop = expr.End()
+		partitionBy.Stop = p.extEnd(expr)
 		if p.peek().Kind != token.COMMA {
 			break
 		}
@@ -3087,7 +3123,7 @@ func (p *parser) parseFormatClause() (*ast.FormatClause, error) {
 	if err != nil {
 		return nil, err
 	}
-	fc := &ast.FormatClause{Span: span(formatTok.Pos, expr.End()), Format: expr}
+	fc := &ast.FormatClause{Span: span(formatTok.Pos, p.extEnd(expr)), Format: expr}
 	if isKeyword(p.peek(), "AT") {
 		p.advance() // AT
 		if _, err := p.expectKeyword("TIME"); err != nil {
