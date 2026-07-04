@@ -2165,6 +2165,59 @@ func (n *CreateTableStatement) Children() []Node {
 	return children(n.Name, n.Query)
 }
 
+// CreateViewStatement is a CREATE [MATERIALIZED|APPROX] VIEW statement; see
+// ASTCreateViewStatement, ASTCreateMaterializedViewStatement, and
+// ASTCreateApproxViewStatement in googlesql/parser/parse_tree.h. ViewKind is
+// "" for a plain view, "MATERIALIZED", or "APPROX". Scope is "", "TEMP",
+// "PUBLIC", or "PRIVATE". SqlSecurity is "", "INVOKER", or "DEFINER".
+type CreateViewStatement struct {
+	Span
+	ViewKind      string                 `json:"view_kind,omitempty"`
+	Scope         string                 `json:"scope,omitempty"`
+	IsOrReplace   bool                   `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool                   `json:"is_if_not_exists,omitempty"`
+	Recursive     bool                   `json:"recursive,omitempty"`
+	SqlSecurity   string                 `json:"sql_security,omitempty"`
+	Name          *PathExpression        `json:"name"`
+	Columns       *ColumnWithOptionsList `json:"columns,omitempty"`
+	Options       *OptionsList           `json:"options,omitempty"`
+	Query         *Query                 `json:"query,omitempty"`
+}
+
+func (n *CreateViewStatement) statementNode() {}
+func (n *CreateViewStatement) Children() []Node {
+	return children(n.Name, n.Columns, n.Options, n.Query)
+}
+
+// ColumnWithOptionsList is the parenthesized column name list (each with an
+// optional OPTIONS clause) in a CREATE VIEW statement; see
+// ASTColumnWithOptionsList in googlesql/parser/parse_tree.h.
+type ColumnWithOptionsList struct {
+	Span
+	Columns []*ColumnWithOptions `json:"columns"`
+}
+
+func (n *ColumnWithOptionsList) Children() []Node {
+	out := make([]Node, 0, len(n.Columns))
+	for _, c := range n.Columns {
+		out = append(out, c)
+	}
+	return out
+}
+
+// ColumnWithOptions is a single "identifier [OPTIONS(...)]" entry in a
+// ColumnWithOptionsList; see ASTColumnWithOptions in
+// googlesql/parser/parse_tree.h.
+type ColumnWithOptions struct {
+	Span
+	Name    *Identifier  `json:"name"`
+	Options *OptionsList `json:"options,omitempty"`
+}
+
+func (n *ColumnWithOptions) Children() []Node {
+	return children(n.Name, n.Options)
+}
+
 // CreateIndexStatement is a
 // "CREATE [OR REPLACE] [UNIQUE] [SEARCH|VECTOR] INDEX [IF NOT EXISTS] name
 // ON table [AS alias] [unnest_list] (index_items) [STORING (...)]

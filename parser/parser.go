@@ -1572,6 +1572,21 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		p.advance()
 		scope = "PRIVATE"
 	}
+	// CREATE [OR REPLACE] [MATERIALIZED|APPROX] [RECURSIVE] VIEW ...; see
+	// create_view_statement in googlesql.tm. MATERIALIZED and APPROX views do
+	// not accept a scope modifier, so a scope followed by one is reported as
+	// an unexpected keyword.
+	if isKeyword(p.peek(), "MATERIALIZED") || isKeyword(p.peek(), "APPROX") {
+		if scope != "" {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(p.peek().Image))
+		}
+		viewKind := strings.ToUpper(p.peek().Image)
+		p.advance()
+		return p.parseCreateViewStatement(createTok, "", isOrReplace, viewKind)
+	}
+	if isKeyword(p.peek(), "RECURSIVE") || isKeyword(p.peek(), "VIEW") {
+		return p.parseCreateViewStatement(createTok, scope, isOrReplace, "")
+	}
 	// CREATE [OR REPLACE] [scope] EXTERNAL TABLE FUNCTION is recognized only to
 	// diagnose it; see create_external_table_function_statement in
 	// googlesql.tm. The error points at the EXTERNAL keyword.
@@ -1635,6 +1650,117 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = p.prevEnd()
 	}
 	return stmt, nil
+}
+
+// parseCreateViewStatement parses the tail of "CREATE [OR REPLACE] [scope]
+// [MATERIALIZED|APPROX] [RECURSIVE] VIEW [IF NOT EXISTS] name
+// [(column_with_options_list)] [SQL SECURITY {INVOKER|DEFINER}] [OPTIONS(...)]
+// AS query"; see create_view_statement in googlesql.tm. viewKind is "",
+// "MATERIALIZED", or "APPROX". The RECURSIVE keyword and VIEW keyword are not
+// yet consumed.
+func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, isOrReplace bool, viewKind string) (ast.Statement, error) {
+	stmt := &ast.CreateViewStatement{Span: span(createTok.Pos, 0), ViewKind: viewKind, Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "RECURSIVE") {
+		p.advance()
+		stmt.Recursive = true
+	}
+	if _, err := p.expectKeyword("VIEW"); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	// column_with_options_list?
+	if p.peek().Kind == token.LPAREN {
+		cols, err := p.parseColumnWithOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Columns = cols
+		stmt.Stop = cols.End()
+	}
+	// sql_security?
+	if isKeyword(p.peek(), "SQL") {
+		p.advance() // SQL
+		if _, err := p.expectKeyword("SECURITY"); err != nil {
+			return nil, err
+		}
+		switch {
+		case isKeyword(p.peek(), "INVOKER"):
+			p.advance()
+			stmt.SqlSecurity = "INVOKER"
+		case isKeyword(p.peek(), "DEFINER"):
+			p.advance()
+			stmt.SqlSecurity = "DEFINER"
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword DEFINER or keyword INVOKER but got %s", describeToken(p.peek()))
+		}
+	}
+	// options?
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	if _, err := p.expectKeyword("AS"); err != nil {
+		return nil, err
+	}
+	query, err := p.parseQuery()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Query = query
+	stmt.Stop = p.prevEnd()
+	return stmt, nil
+}
+
+// parseColumnWithOptionsList parses "(" identifier [OPTIONS(...)] {","
+// identifier [OPTIONS(...)]} ")"; see column_with_options_list in
+// googlesql.tm. The next token is "(".
+func (p *parser) parseColumnWithOptionsList() (*ast.ColumnWithOptionsList, error) {
+	lparen := p.advance() // (
+	list := &ast.ColumnWithOptionsList{Span: span(lparen.Pos, 0)}
+	for {
+		tok := p.peek()
+		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+		}
+		nm := p.parseIdentifierToken(p.advance())
+		col := &ast.ColumnWithOptions{Span: span(nm.Pos(), nm.End()), Name: nm}
+		if isKeyword(p.peek(), "OPTIONS") {
+			p.advance() // OPTIONS
+			opts, err := p.parseOptionsList()
+			if err != nil {
+				return nil, err
+			}
+			col.Options = opts
+			col.Stop = opts.End()
+		}
+		list.Columns = append(list.Columns, col)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")" or ","`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
 }
 
 // parseCreateIndexStatement parses the tail of "CREATE [OR REPLACE] [UNIQUE]

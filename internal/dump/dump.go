@@ -629,6 +629,48 @@ func nodeString(n ast.Node) string {
 			return "CreateTableStatement"
 		}
 		return fmt.Sprintf("CreateTableStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateViewStatement:
+		// The modifier order matches ASTCreateViewStatementBase::CollectModifiers
+		// in parse_tree.cc: scope, is_or_replace, is_if_not_exists (from the
+		// base ASTCreateStatement), then SQL SECURITY, then recursive.
+		var name string
+		switch t.ViewKind {
+		case "MATERIALIZED":
+			name = "CreateMaterializedViewStatement"
+		case "APPROX":
+			name = "CreateApproxViewStatement"
+		default:
+			name = "CreateViewStatement"
+		}
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if t.SqlSecurity != "" {
+			mods = append(mods, "SQL SECURITY "+t.SqlSecurity)
+		}
+		if t.Recursive {
+			mods = append(mods, "recursive")
+		}
+		if len(mods) == 0 {
+			return name
+		}
+		return fmt.Sprintf("%s(%s)", name, strings.Join(mods, ", "))
+	case *ast.ColumnWithOptionsList:
+		return "ColumnWithOptionsList"
+	case *ast.ColumnWithOptions:
+		return "ColumnWithOptions"
 	case *ast.CreateIndexStatement:
 		// The debug detail lists UNIQUE, then SEARCH or VECTOR, comma-separated;
 		// see ASTCreateIndexStatement::SingleNodeDebugString in parse_tree.cc.
