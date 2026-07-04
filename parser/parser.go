@@ -260,6 +260,12 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 			return nil, err
 		}
 		return &ast.QueryStatement{Span: span(query.Pos(), query.End()), Query: query}, nil
+	case isKeyword(tok, "FROM"):
+		query, err := p.parseFromQuery()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.QueryStatement{Span: span(query.Pos(), query.End()), Query: query}, nil
 	case isKeyword(tok, "ALTER"):
 		return p.parseAlterStatement()
 	}
@@ -508,15 +514,79 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 		query.LockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
 		query.Stop = query.LockMode.End()
 	}
+	if err := p.parsePipeOperators(query); err != nil {
+		return nil, err
+	}
+	return query, nil
+}
+
+// parsePipeOperators parses any trailing "|> operator" sequence onto query.
+func (p *parser) parsePipeOperators(query *ast.Query) error {
 	for p.peek().Kind == token.PIPE_INPUT {
 		op, err := p.parsePipeOperator()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		query.PipeOperators = append(query.PipeOperators, op)
 		query.Stop = op.End()
 	}
+	return nil
+}
+
+// parseFromQuery parses a standalone FROM clause used as a query, optionally
+// followed by a lock mode clause and pipe operators; see the from_clause
+// alternative of query_without_pipe_operators in googlesql.tm. Clauses that
+// would be valid after a FROM clause in a normal query produce dedicated
+// errors suggesting pipe operators.
+func (p *parser) parseFromQuery() (*ast.Query, error) {
+	from, err := p.parseFromClause()
+	if err != nil {
+		return nil, err
+	}
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "WHERE"):
+		return nil, p.badKeywordAfterFromQuery(tok, "WHERE", "WHERE", false)
+	case isKeyword(tok, "SELECT"):
+		return nil, p.badKeywordAfterFromQuery(tok, "SELECT", "SELECT", false)
+	case isKeyword(tok, "GROUP"):
+		return nil, p.badKeywordAfterFromQuery(tok, "GROUP BY", "AGGREGATE", false)
+	case isKeyword(tok, "ORDER"):
+		return nil, p.badKeywordAfterFromQuery(tok, "ORDER BY", "ORDER BY", true)
+	case isKeyword(tok, "UNION"):
+		return nil, p.badKeywordAfterFromQuery(tok, "UNION", "UNION", true)
+	case isKeyword(tok, "INTERSECT"):
+		return nil, p.badKeywordAfterFromQuery(tok, "INTERSECT", "INTERSECT", true)
+	case isKeyword(tok, "LIMIT"):
+		return nil, p.badKeywordAfterFromQuery(tok, "LIMIT", "LIMIT", true)
+	// EXCEPT only lexes as a set operation keyword when followed by ALL or
+	// DISTINCT (KW_EXCEPT_IN_SET_OP in the reference lookahead transformer).
+	case isKeyword(tok, "EXCEPT") && (isKeyword(p.peekAt(1), "ALL") || isKeyword(p.peekAt(1), "DISTINCT")):
+		return nil, p.badKeywordAfterFromQuery(tok, "EXCEPT", "EXCEPT", true)
+	}
+	fromQuery := &ast.FromQuery{Span: span(from.Pos(), from.End()), From: from}
+	query := &ast.Query{Span: span(fromQuery.Pos(), fromQuery.End()), QueryExpr: fromQuery}
+	if isKeyword(p.peek(), "FOR") && isKeyword(p.peekAt(1), "UPDATE") {
+		forTok := p.advance()    // FOR
+		updateTok := p.advance() // UPDATE
+		query.LockMode = &ast.LockMode{Span: span(forTok.Pos, updateTok.End)}
+		query.Stop = query.LockMode.End()
+	}
+	if err := p.parsePipeOperators(query); err != nil {
+		return nil, err
+	}
 	return query, nil
+}
+
+// badKeywordAfterFromQuery builds the error for a clause keyword that is not
+// allowed after a FROM query; see bad_keyword_after_from_query and
+// bad_keyword_after_from_query_allows_parens in googlesql.tm.
+func (p *parser) badKeywordAfterFromQuery(tok token.Token, keyword, pipeOp string, allowsParens bool) error {
+	suffix := ""
+	if allowsParens {
+		suffix = " or parentheses around the FROM query"
+	}
+	return p.errorf(tok.Pos, "Syntax error: %s not supported after FROM query; Consider using pipe operator `|> %s`%s", keyword, pipeOp, suffix)
 }
 
 // parsePipeOperator parses one "|> <operator>" pipe operator.
@@ -544,6 +614,20 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		return node, nil
 	case isKeyword(tok, "SET"):
 		return p.parsePipeSet(pipeTok)
+	case isKeyword(tok, "LOG"):
+		logTok := p.advance()
+		node := &ast.PipeLog{Span: span(pipeTok.Pos, logTok.End)}
+		if p.peek().Kind == token.LPAREN {
+			sub, err := p.parseSubpipeline()
+			if err != nil {
+				return nil, err
+			}
+			node.Subpipeline = sub
+			node.Stop = sub.End()
+		}
+		return node, nil
+	case isKeyword(tok, "AGGREGATE"):
+		return p.parsePipeAggregate(pipeTok)
 	}
 	// The reference grammar's recovery point for an unrecognized pipe
 	// operator is the JOIN inside pipe_join.
@@ -587,6 +671,126 @@ func (p *parser) parsePipeSet(pipeTok token.Token) (ast.Node, error) {
 		}
 	}
 	return node, nil
+}
+
+// parseSubpipeline parses a parenthesized subpipeline "( |> op ... )" with
+// the opening parenthesis as the next token; see subpipeline_with_parens and
+// subpipeline_prefix_invalid in googlesql.tm.
+func (p *parser) parseSubpipeline() (*ast.Subpipeline, error) {
+	lparen := p.advance() // (
+	sub := &ast.Subpipeline{Span: span(lparen.Pos, 0)}
+	// Dedicated errors when the parenthesized text does not start with |>;
+	// see subpipeline_bad_prefix_subquery and
+	// subpipeline_bad_prefix_not_subquery in googlesql.tm.
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"):
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected subpipeline starting with |>, not a subquery")
+	case tok.Kind == token.LPAREN,
+		tok.Kind == token.QUOTED_IDENT,
+		tok.Kind == token.IDENT && !isReserved(tok),
+		isKeyword(tok, "WHERE"), isKeyword(tok, "LIMIT"), isKeyword(tok, "JOIN"),
+		isKeyword(tok, "ORDER"), isKeyword(tok, "GROUP"):
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected subpipeline starting with |>")
+	}
+	for p.peek().Kind == token.PIPE_INPUT {
+		op, err := p.parsePipeOperator()
+		if err != nil {
+			return nil, err
+		}
+		sub.PipeOperators = append(sub.PipeOperators, op)
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	sub.Stop = rparen.End
+	return sub, nil
+}
+
+// parsePipeAggregate parses "AGGREGATE [expression [AS alias], ...]
+// [GROUP BY ...]" after a |> token. The aggregate list and GROUP BY are
+// represented as a Select node; see pipe_aggregate in googlesql.tm.
+func (p *parser) parsePipeAggregate(pipeTok token.Token) (ast.Node, error) {
+	aggTok := p.advance() // AGGREGATE
+	sel := &ast.Select{Span: span(aggTok.Pos, aggTok.End)}
+	// An empty aggregate list is an empty SelectList located at the end of
+	// the AGGREGATE keyword.
+	list := &ast.SelectList{Span: span(aggTok.End, aggTok.End)}
+	if startsExpression(p.peek()) {
+		for {
+			col, err := p.parseSelectColumnExpr()
+			if err != nil {
+				return nil, err
+			}
+			if len(list.Columns) == 0 {
+				list.Start = col.Pos()
+			}
+			list.Columns = append(list.Columns, col)
+			list.Stop = col.End()
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			comma := p.advance()
+			if !startsExpression(p.peek()) {
+				// Trailing comma; it is included in the list's location.
+				list.Stop = comma.End
+				break
+			}
+		}
+	}
+	sel.SelectList = list
+	sel.Stop = list.End()
+	if isKeyword(p.peek(), "GROUP") {
+		groupBy, err := p.parseGroupBy()
+		if err != nil {
+			return nil, err
+		}
+		sel.GroupBy = groupBy
+		sel.Stop = groupBy.End()
+	}
+	return &ast.PipeAggregate{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
+}
+
+// parseSelectColumnExpr parses "expression [[AS] alias]" (a select list item
+// without the * forms); see select_column_expr in googlesql.tm.
+func (p *parser) parseSelectColumnExpr() (*ast.SelectColumn, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.checkAttachedAlias(); err != nil {
+		return nil, err
+	}
+	col := &ast.SelectColumn{Span: span(expr.Pos(), expr.End()), Expr: expr}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		col.Alias = alias
+		col.Stop = alias.End()
+	}
+	return col, nil
+}
+
+// startsExpression reports whether tok can begin an expression.
+func startsExpression(tok token.Token) bool {
+	switch tok.Kind {
+	case token.INT, token.FLOAT, token.STRING, token.BYTES,
+		token.LBRACKET, token.LPAREN, token.MINUS, token.PLUS, token.TILDE,
+		token.QUOTED_IDENT:
+		return true
+	case token.IDENT:
+		if !isReserved(tok) {
+			return true
+		}
+		switch strings.ToUpper(tok.Image) {
+		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE":
+			return true
+		}
+	}
+	return false
 }
 
 // parseWhereClause parses "WHERE expression"; the WHERE keyword is included

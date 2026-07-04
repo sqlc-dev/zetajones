@@ -164,6 +164,14 @@ func nodeString(n ast.Node) string {
 		return "BetweenExpression(BETWEEN)"
 	case *ast.StructConstructorWithParens:
 		return "StructConstructorWithParens"
+	case *ast.FromQuery:
+		return "FromQuery"
+	case *ast.Subpipeline:
+		return "Subpipeline"
+	case *ast.PipeLog:
+		return "PipeLog"
+	case *ast.PipeAggregate:
+		return "PipeAggregate"
 	case *ast.PipeWhere:
 		return "PipeWhere"
 	case *ast.PipeOrderBy:

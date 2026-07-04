@@ -496,6 +496,51 @@ func (n *StructConstructorWithParens) Children() []Node {
 	return children(n.FieldExpressions...)
 }
 
+// FromQuery is a standalone FROM clause used as a query, e.g. "FROM t";
+// see ASTFromQuery in googlesql/parser/parse_tree.h.
+type FromQuery struct {
+	Span
+	From *FromClause `json:"from"`
+}
+
+func (n *FromQuery) Children() []Node {
+	return children(n.From)
+}
+
+// Subpipeline is a parenthesized sequence of pipe operators, e.g.
+// "(|> WHERE x)"; see ASTSubpipeline in googlesql/parser/parse_tree.h. The
+// span includes the parentheses.
+type Subpipeline struct {
+	Span
+	PipeOperators []Node `json:"pipe_operators,omitempty"`
+}
+
+func (n *Subpipeline) Children() []Node {
+	return append([]Node(nil), n.PipeOperators...)
+}
+
+// PipeLog is a |> LOG pipe operator with an optional subpipeline.
+type PipeLog struct {
+	Span
+	Subpipeline *Subpipeline `json:"subpipeline,omitempty"`
+}
+
+func (n *PipeLog) Children() []Node {
+	return children(n.Subpipeline)
+}
+
+// PipeAggregate is a |> AGGREGATE pipe operator. The aggregate list and
+// optional GROUP BY are represented as an ASTSelect for resolver code
+// sharing in the reference implementation.
+type PipeAggregate struct {
+	Span
+	Select *Select `json:"select"`
+}
+
+func (n *PipeAggregate) Children() []Node {
+	return children(n.Select)
+}
+
 // PipeWhere is a |> WHERE pipe operator.
 type PipeWhere struct {
 	Span
