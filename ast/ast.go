@@ -221,6 +221,66 @@ func (n *UpdateSetValue) Children() []Node {
 	return children(n.Path, n.Value)
 }
 
+// MergeStatement is a MERGE statement; see ASTMergeStatement in
+// googlesql/parser/parse_tree.h.
+type MergeStatement struct {
+	Span
+	Target         *PathExpression      `json:"target"`
+	Alias          *Alias               `json:"alias,omitempty"`
+	Source         Node                 `json:"source"` // *TablePathExpression or *TableSubquery
+	MergeCondition Node                 `json:"merge_condition"`
+	WhenClauseList *MergeWhenClauseList `json:"when_clause_list"`
+}
+
+func (n *MergeStatement) statementNode() {}
+func (n *MergeStatement) Children() []Node {
+	return children(n.Target, n.Alias, n.Source, n.MergeCondition, n.WhenClauseList)
+}
+
+// MergeWhenClauseList is the list of WHEN clauses of a MERGE statement; see
+// ASTMergeWhenClauseList in googlesql/parser/parse_tree.h.
+type MergeWhenClauseList struct {
+	Span
+	Clauses []*MergeWhenClause `json:"clauses"`
+}
+
+func (n *MergeWhenClauseList) Children() []Node {
+	var out []Node
+	for _, c := range n.Clauses {
+		out = append(out, c)
+	}
+	return out
+}
+
+// MergeWhenClause is a single WHEN clause of a MERGE statement; see
+// ASTMergeWhenClause in googlesql/parser/parse_tree.h. MatchType is
+// "MATCHED", "NOT_MATCHED_BY_SOURCE", or "NOT_MATCHED_BY_TARGET".
+type MergeWhenClause struct {
+	Span
+	MatchType       string       `json:"match_type"`
+	SearchCondition Node         `json:"search_condition,omitempty"`
+	Action          *MergeAction `json:"action"`
+}
+
+func (n *MergeWhenClause) Children() []Node {
+	return children(n.SearchCondition, n.Action)
+}
+
+// MergeAction is the action of a MERGE WHEN clause; see ASTMergeAction in
+// googlesql/parser/parse_tree.h. ActionType is "INSERT", "UPDATE", or
+// "DELETE".
+type MergeAction struct {
+	Span
+	ActionType       string           `json:"action_type"`
+	InsertColumnList *ColumnList      `json:"insert_column_list,omitempty"`
+	InsertRow        *InsertValuesRow `json:"insert_row,omitempty"`
+	UpdateItemList   *UpdateItemList  `json:"update_item_list,omitempty"`
+}
+
+func (n *MergeAction) Children() []Node {
+	return children(n.InsertColumnList, n.InsertRow, n.UpdateItemList)
+}
+
 // AssertRowsModified is the ASSERT_ROWS_MODIFIED clause on a DML statement;
 // see ASTAssertRowsModified in googlesql/parser/parse_tree.h.
 type AssertRowsModified struct {

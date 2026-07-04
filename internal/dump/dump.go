@@ -78,6 +78,14 @@ func nodeString(n ast.Node) string {
 		return "UpdateItem"
 	case *ast.UpdateSetValue:
 		return "UpdateSetValue"
+	case *ast.MergeStatement:
+		return "MergeStatement"
+	case *ast.MergeWhenClauseList:
+		return "MergeWhenClauseList"
+	case *ast.MergeWhenClause:
+		return "MergeWhenClause(match_type=" + t.MatchType + ")"
+	case *ast.MergeAction:
+		return "MergeAction(" + t.ActionType + ")"
 	case *ast.AssertRowsModified:
 		return "AssertRowsModified"
 	case *ast.ReturningClause:

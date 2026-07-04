@@ -352,6 +352,11 @@ type parser struct {
 	// table item, where "." followed by "(" reports the dedicated generalized
 	// field access error; see table_path_expression_base in googlesql.tm.
 	inTablePath bool
+	// allowGeneralizedField is set while parsing the leading path of an
+	// expression, where "." followed by "(" is a generalized field access
+	// handled by the postfix layer rather than an error; see the "." "("
+	// path_expression ")" rule in googlesql.tm.
+	allowGeneralizedField bool
 	// quantifierQuestions records the byte positions of "?" tokens consumed
 	// as row pattern quantifiers (or reluctant markers) inside
 	// MATCH_RECOGNIZE patterns, so positional query parameter numbering
@@ -563,6 +568,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseDeleteStatement()
 	case isKeyword(tok, "INSERT"):
 		return p.parseInsertStatement()
+	case isKeyword(tok, "MERGE"):
+		return p.parseMergeStatement()
 	case isKeyword(tok, "UPDATE"):
 		return p.parseUpdateStatement()
 	}
@@ -1016,6 +1023,231 @@ func (p *parser) parseUpdateItem() (*ast.UpdateItem, error) {
 	}
 	setValue := &ast.UpdateSetValue{Span: span(path.Pos(), p.extEnd(value)), Path: path, Value: value}
 	return &ast.UpdateItem{Span: setValue.Span, SetValue: setValue}, nil
+}
+
+// parseMergeStatement parses a MERGE statement; see merge_statement in
+// googlesql.tm.
+func (p *parser) parseMergeStatement() (ast.Statement, error) {
+	mergeTok := p.advance() // MERGE
+	if isKeyword(p.peek(), "INTO") {
+		p.advance()
+	}
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.MergeStatement{Span: span(mergeTok.Pos, 0), Target: target}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Alias = alias
+	// After the target (and optional alias) the reference LALR parser is in a
+	// state where several tokens are valid, so a non-USING token yields a
+	// generic "Unexpected" error rather than "Expected keyword USING".
+	if !isKeyword(p.peek(), "USING") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	p.advance() // USING
+	source, err := p.parseMergeSource()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Source = source
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	cond, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.MergeCondition = cond
+	whenList, err := p.parseMergeWhenClauseList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.WhenClauseList = whenList
+	stmt.Stop = whenList.End()
+	return stmt, nil
+}
+
+// parseMergeSource parses the USING source of a MERGE statement: either a
+// table path expression or a parenthesized subquery; see merge_source in
+// googlesql.tm.
+func (p *parser) parseMergeSource() (ast.Node, error) {
+	if p.peek().Kind == token.LPAREN {
+		return p.parseTableSubquery()
+	}
+	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.TablePathExpression{Span: span(path.Pos(), path.End()), Path: path}, nil
+}
+
+// parseMergeWhenClauseList parses one or more WHEN clauses of a MERGE
+// statement; see merge_when_clause_list in googlesql.tm.
+func (p *parser) parseMergeWhenClauseList() (*ast.MergeWhenClauseList, error) {
+	first, err := p.parseMergeWhenClause()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.MergeWhenClauseList{Span: span(first.Pos(), first.End()), Clauses: []*ast.MergeWhenClause{first}}
+	for isKeyword(p.peek(), "WHEN") {
+		clause, err := p.parseMergeWhenClause()
+		if err != nil {
+			return nil, err
+		}
+		list.Clauses = append(list.Clauses, clause)
+		list.Stop = clause.End()
+	}
+	return list, nil
+}
+
+// parseMergeWhenClause parses a single WHEN clause of a MERGE statement; see
+// merge_when_clause in googlesql.tm.
+func (p *parser) parseMergeWhenClause() (*ast.MergeWhenClause, error) {
+	whenTok, err := p.expectKeyword("WHEN")
+	if err != nil {
+		return nil, err
+	}
+	clause := &ast.MergeWhenClause{Span: span(whenTok.Pos, 0)}
+	switch {
+	case isKeyword(p.peek(), "MATCHED"):
+		p.advance()
+		clause.MatchType = "MATCHED"
+	case isKeyword(p.peek(), "NOT"):
+		p.advance()
+		if _, err := p.expectKeyword("MATCHED"); err != nil {
+			return nil, err
+		}
+		clause.MatchType = "NOT_MATCHED_BY_TARGET"
+		if isKeyword(p.peek(), "BY") {
+			p.advance()
+			switch {
+			case isKeyword(p.peek(), "SOURCE"):
+				p.advance()
+				clause.MatchType = "NOT_MATCHED_BY_SOURCE"
+			case isKeyword(p.peek(), "TARGET"):
+				p.advance()
+				clause.MatchType = "NOT_MATCHED_BY_TARGET"
+			default:
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword SOURCE or keyword TARGET but got %s", describeToken(p.peek()))
+			}
+		}
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword MATCHED or keyword NOT but got %s", describeToken(p.peek()))
+	}
+	// Optional "AND <search condition>".
+	if isKeyword(p.peek(), "AND") {
+		p.advance()
+		cond, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		clause.SearchCondition = cond
+	}
+	if _, err := p.expectKeyword("THEN"); err != nil {
+		return nil, err
+	}
+	action, err := p.parseMergeAction()
+	if err != nil {
+		return nil, err
+	}
+	clause.Action = action
+	clause.Stop = action.End()
+	return clause, nil
+}
+
+// parseMergeAction parses the INSERT, UPDATE, or DELETE action of a MERGE WHEN
+// clause; see merge_action in googlesql.tm.
+func (p *parser) parseMergeAction() (*ast.MergeAction, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "INSERT"):
+		insertTok := p.advance()
+		action := &ast.MergeAction{Span: span(insertTok.Pos, insertTok.End), ActionType: "INSERT"}
+		if p.peek().Kind == token.LPAREN {
+			cols, err := p.parseInsertColumnList()
+			if err != nil {
+				return nil, err
+			}
+			action.InsertColumnList = cols
+			action.Stop = cols.End()
+		}
+		switch {
+		case isKeyword(p.peek(), "VALUES"):
+			p.advance()
+			row, err := p.parseMergeInsertValuesRow()
+			if err != nil {
+				return nil, err
+			}
+			action.InsertRow = row
+			action.Stop = row.End()
+		case isKeyword(p.peek(), "ROW"):
+			rowTok := p.advance()
+			action.InsertRow = &ast.InsertValuesRow{Span: span(rowTok.Pos, rowTok.End)}
+			action.Stop = rowTok.End
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword VALUES or keyword ROW but got %s", describeToken(p.peek()))
+		}
+		return action, nil
+	case isKeyword(tok, "UPDATE"):
+		updateTok := p.advance()
+		action := &ast.MergeAction{Span: span(updateTok.Pos, updateTok.End), ActionType: "UPDATE"}
+		if _, err := p.expectKeyword("SET"); err != nil {
+			return nil, err
+		}
+		items, err := p.parseUpdateItemList()
+		if err != nil {
+			return nil, err
+		}
+		action.UpdateItemList = items
+		action.Stop = items.End()
+		return action, nil
+	case isKeyword(tok, "DELETE"):
+		deleteTok := p.advance()
+		return &ast.MergeAction{Span: span(deleteTok.Pos, deleteTok.End), ActionType: "DELETE"}, nil
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+}
+
+// parseMergeInsertValuesRow parses a single "( expr, ... )" row following the
+// VALUES keyword in a MERGE INSERT action; see insert_values_row in
+// googlesql.tm.
+func (p *parser) parseMergeInsertValuesRow() (*ast.InsertValuesRow, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	row := &ast.InsertValuesRow{Span: span(lparen.Pos, 0)}
+	for {
+		var value ast.Node
+		if isKeyword(p.peek(), "DEFAULT") {
+			def := p.advance()
+			value = &ast.DefaultLiteral{Span: span(def.Pos, def.End)}
+		} else {
+			value, err = p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+		}
+		row.Values = append(row.Values, value)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	row.Stop = rparen.End
+	return row, nil
 }
 
 // parseGeneralizedPathExpression parses a path with optional "[expr]" array
@@ -3730,6 +3962,23 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 		switch p.peek().Kind {
 		case token.DOT:
 			next := p.peekAt(1)
+			if next.Kind == token.LPAREN {
+				// "expression . ( path )" generalized field access; see the
+				// expression_higher_prec_than_and "." "(" path_expression ")"
+				// rule in googlesql.tm.
+				p.advance() // .
+				p.advance() // (
+				inner, err := p.parsePathExpression()
+				if err != nil {
+					return nil, err
+				}
+				rparen, err := p.expect(token.RPAREN, `")"`)
+				if err != nil {
+					return nil, err
+				}
+				expr = &ast.DotGeneralizedField{Span: span(p.extStart(expr), rparen.End), Expr: expr, Path: inner}
+				continue
+			}
 			if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
 				if next.Kind == token.STAR && p.allowDotStar {
 					// Stop in front of a select column's ".*" and record
@@ -4371,7 +4620,10 @@ func (p *parser) parseArrayConstructor(start int) (ast.Node, error) {
 // parsePathOrCall parses a path expression, possibly followed by a function
 // call argument list.
 func (p *parser) parsePathOrCall() (ast.Node, error) {
+	prevAllow := p.allowGeneralizedField
+	p.allowGeneralizedField = true
 	path, err := p.parsePathExpression()
+	p.allowGeneralizedField = prevAllow
 	if err != nil {
 		return nil, err
 	}
@@ -4752,11 +5004,20 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 		if p.allowDotStar && p.peekAt(1).Kind == token.STAR {
 			return path, nil
 		}
+		if p.peekAt(1).Kind == token.LPAREN {
+			if p.inTablePath {
+				p.advance() // .
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
+			}
+			if p.allowGeneralizedField {
+				// Leave ".(" for the caller to parse as a generalized field
+				// access; see the "." "(" path_expression ")" rule in
+				// googlesql.tm.
+				return path, nil
+			}
+		}
 		p.advance()
 		tok := p.peek()
-		if p.inTablePath && tok.Kind == token.LPAREN {
-			return nil, p.errorf(tok.Pos, "Syntax error: Generalized field access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)")
-		}
 		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
