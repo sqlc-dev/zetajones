@@ -79,6 +79,82 @@ func (n *CallStatement) Children() []Node {
 	return out
 }
 
+// ExecuteImmediateStatement is "EXECUTE IMMEDIATE <expr> [INTO ...] [USING ...]";
+// see ASTExecuteImmediateStatement in googlesql/parser/parse_tree.h.
+type ExecuteImmediateStatement struct {
+	Span
+	Sql   Node                `json:"sql"`
+	Into  *ExecuteIntoClause  `json:"into,omitempty"`
+	Using *ExecuteUsingClause `json:"using,omitempty"`
+}
+
+func (n *ExecuteImmediateStatement) statementNode() {}
+func (n *ExecuteImmediateStatement) Children() []Node {
+	out := children(n.Sql)
+	if n.Into != nil {
+		out = append(out, n.Into)
+	}
+	if n.Using != nil {
+		out = append(out, n.Using)
+	}
+	return out
+}
+
+// ExecuteIntoClause is "INTO <identifier_list>"; see ASTExecuteIntoClause in
+// googlesql/parser/parse_tree.h.
+type ExecuteIntoClause struct {
+	Span
+	Identifiers *IdentifierList `json:"identifiers"`
+}
+
+func (n *ExecuteIntoClause) Children() []Node { return children(n.Identifiers) }
+
+// IdentifierList is a comma-separated list of identifiers; see
+// ASTIdentifierList in googlesql/parser/parse_tree.h.
+type IdentifierList struct {
+	Span
+	Identifiers []*Identifier `json:"identifiers"`
+}
+
+func (n *IdentifierList) Children() []Node {
+	out := make([]Node, 0, len(n.Identifiers))
+	for _, id := range n.Identifiers {
+		out = append(out, id)
+	}
+	return out
+}
+
+// ExecuteUsingClause is "USING <argument_list>"; see ASTExecuteUsingClause in
+// googlesql/parser/parse_tree.h.
+type ExecuteUsingClause struct {
+	Span
+	Arguments []*ExecuteUsingArgument `json:"arguments"`
+}
+
+func (n *ExecuteUsingClause) Children() []Node {
+	out := make([]Node, 0, len(n.Arguments))
+	for _, a := range n.Arguments {
+		out = append(out, a)
+	}
+	return out
+}
+
+// ExecuteUsingArgument is a single USING argument, optionally aliased with AS;
+// see ASTExecuteUsingArgument in googlesql/parser/parse_tree.h.
+type ExecuteUsingArgument struct {
+	Span
+	Expr  Node   `json:"expr"`
+	Alias *Alias `json:"alias,omitempty"`
+}
+
+func (n *ExecuteUsingArgument) Children() []Node {
+	out := children(n.Expr)
+	if n.Alias != nil {
+		out = append(out, n.Alias)
+	}
+	return out
+}
+
 // HintedStatement wraps a statement preceded by a "@{...}" hint; see
 // ASTHintedStatement in googlesql/parser/parse_tree.h.
 type HintedStatement struct {

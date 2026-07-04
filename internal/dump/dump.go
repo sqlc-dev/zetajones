@@ -390,6 +390,16 @@ func nodeString(n ast.Node) string {
 		return "DefaultLiteral"
 	case *ast.CallStatement:
 		return "CallStatement"
+	case *ast.ExecuteImmediateStatement:
+		return "ExecuteImmediateStatement"
+	case *ast.ExecuteIntoClause:
+		return "ExecuteIntoClause"
+	case *ast.IdentifierList:
+		return "IdentifierList"
+	case *ast.ExecuteUsingClause:
+		return "ExecuteUsingClause"
+	case *ast.ExecuteUsingArgument:
+		return "ExecuteUsingArgument"
 	case *ast.CaseValueExpression:
 		return "CaseValueExpression"
 	case *ast.CaseNoValueExpression:

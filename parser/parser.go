@@ -571,6 +571,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseCreateStatement()
 	case isKeyword(tok, "DELETE"):
 		return p.parseDeleteStatement()
+	case isKeyword(tok, "EXECUTE"):
+		return p.parseExecuteImmediateStatement()
 	case isKeyword(tok, "INSERT"):
 		return p.parseInsertStatement()
 	case isKeyword(tok, "MERGE"):
@@ -1351,6 +1353,123 @@ func (p *parser) parseCallStatement() (ast.Statement, error) {
 	}
 	stmt.Stop = p.advance().End // )
 	return stmt, nil
+}
+
+// parseExecuteImmediateStatement parses "EXECUTE IMMEDIATE <expression>
+// [INTO <identifier_list>] [USING <argument_list>]"; see execute_immediate in
+// googlesql.tm.
+func (p *parser) parseExecuteImmediateStatement() (ast.Statement, error) {
+	execTok := p.advance() // EXECUTE
+	if _, err := p.expectKeyword("IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	sql, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.ExecuteImmediateStatement{Span: span(execTok.Pos, p.extEnd(sql)), Sql: sql}
+	if isKeyword(p.peek(), "INTO") {
+		into, err := p.parseExecuteIntoClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Into = into
+		stmt.Stop = into.End()
+	}
+	if isKeyword(p.peek(), "USING") {
+		using, err := p.parseExecuteUsingClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Using = using
+		stmt.Stop = using.End()
+	}
+	return stmt, nil
+}
+
+// parseExecuteIntoClause parses "INTO <identifier_list>"; see
+// execute_into_clause in googlesql.tm.
+func (p *parser) parseExecuteIntoClause() (*ast.ExecuteIntoClause, error) {
+	intoTok := p.advance() // INTO
+	list, err := p.parseIdentifierList()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ExecuteIntoClause{Span: span(intoTok.Pos, list.End()), Identifiers: list}, nil
+}
+
+// parseIdentifierList parses a comma-separated list of identifiers; see
+// identifier_list in googlesql.tm.
+func (p *parser) parseIdentifierList() (*ast.IdentifierList, error) {
+	first, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.IdentifierList{Span: span(first.Pos(), first.End()), Identifiers: []*ast.Identifier{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		ident, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		list.Identifiers = append(list.Identifiers, ident)
+		list.Stop = ident.End()
+	}
+	return list, nil
+}
+
+// parseIdentifier parses a single (possibly quoted) identifier; see identifier
+// in googlesql.tm.
+func (p *parser) parseIdentifier() (*ast.Identifier, error) {
+	tok := p.peek()
+	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	return p.parseIdentifierToken(p.advance()), nil
+}
+
+// parseExecuteUsingClause parses "USING <argument_list>"; see
+// execute_using_clause in googlesql.tm.
+func (p *parser) parseExecuteUsingClause() (*ast.ExecuteUsingClause, error) {
+	usingTok := p.advance() // USING
+	clause := &ast.ExecuteUsingClause{Span: span(usingTok.Pos, usingTok.End)}
+	for {
+		arg, err := p.parseExecuteUsingArgument()
+		if err != nil {
+			return nil, err
+		}
+		clause.Arguments = append(clause.Arguments, arg)
+		clause.Stop = arg.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	// The clause location starts at the first argument, matching the
+	// execute_using_argument_list production (the "USING" keyword is not part
+	// of the ASTExecuteUsingClause node).
+	clause.Start = clause.Arguments[0].Pos()
+	return clause, nil
+}
+
+// parseExecuteUsingArgument parses "<expression> [AS <identifier>]"; see
+// execute_using_argument in googlesql.tm.
+func (p *parser) parseExecuteUsingArgument() (*ast.ExecuteUsingArgument, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	arg := &ast.ExecuteUsingArgument{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
+	if isKeyword(p.peek(), "AS") {
+		p.advance() // AS
+		ident, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		arg.Alias = &ast.Alias{Span: span(ident.Pos(), ident.End()), Identifier: ident}
+		arg.Stop = ident.End()
+	}
+	return arg, nil
 }
 
 // parseCreateStatement parses CREATE [OR REPLACE] [TEMP|TEMPORARY|PUBLIC|
