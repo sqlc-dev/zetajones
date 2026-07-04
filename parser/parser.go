@@ -5,6 +5,7 @@ package parser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -69,6 +70,10 @@ func Parse(ctx context.Context, r io.Reader) ([]ast.Statement, error) {
 func ParseStatement(sql string) (ast.Statement, error) {
 	toks, err := lexer.Lex(sql)
 	if err != nil {
+		var lerr *lexer.Error
+		if errors.As(err, &lerr) {
+			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
+		}
 		return nil, err
 	}
 	p := &parser{sql: sql, toks: toks}

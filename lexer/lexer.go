@@ -1,4 +1,7 @@
 // Package lexer converts GoogleSQL source text into a stream of tokens.
+//
+// Error messages are ported from github.com/google/googlesql
+// (googlesql/parser/googlesql.tm lexer rules). GoogleSQL is Apache 2.0.
 package lexer
 
 import (
@@ -7,6 +10,16 @@ import (
 
 	"github.com/sqlc-dev/zetajones/token"
 )
+
+// Error is a lexical error with a byte offset into the input. Message is a
+// full ZetaSQL-style message such as `Syntax error: Illegal input character
+// "\357"`.
+type Error struct {
+	Message string
+	Offset  int
+}
+
+func (e *Error) Error() string { return e.Message }
 
 // Lex scans the input SQL string and returns all tokens, ending with an EOF token.
 func Lex(sql string) ([]token.Token, error) {
@@ -30,7 +43,31 @@ type lexer struct {
 }
 
 func (l *lexer) errorf(pos int, format string, args ...any) error {
-	return fmt.Errorf("lex error at byte %d: %s", pos, fmt.Sprintf(format, args...))
+	return &Error{Message: fmt.Sprintf(format, args...), Offset: pos}
+}
+
+// cEscapeByte escapes a single byte the way absl::CEscape does: standard
+// C escapes for the common control characters, quote, and backslash, and
+// three-digit octal escapes for other non-printable bytes.
+func cEscapeByte(c byte) string {
+	switch c {
+	case '\n':
+		return `\n`
+	case '\r':
+		return `\r`
+	case '\t':
+		return `\t`
+	case '"':
+		return `\"`
+	case '\'':
+		return `\'`
+	case '\\':
+		return `\\`
+	}
+	if c < 0x20 || c > 0x7e {
+		return fmt.Sprintf(`\%03o`, c)
+	}
+	return string(c)
 }
 
 func (l *lexer) peekAt(off int) byte {
@@ -56,7 +93,7 @@ func (l *lexer) skipSpaceAndComments() error {
 		case c == '/' && l.peekAt(1) == '*':
 			end := strings.Index(l.sql[l.pos+2:], "*/")
 			if end < 0 {
-				return l.errorf(l.pos, "unterminated comment")
+				return l.errorf(l.pos, "Syntax error: Unclosed comment")
 			}
 			l.pos += 2 + end + 2
 		default:
@@ -167,7 +204,7 @@ func (l *lexer) next() (token.Token, error) {
 		l.pos++
 		return l.emit(kind, start), nil
 	}
-	return token.Token{}, l.errorf(start, "unexpected character %q", c)
+	return token.Token{}, l.errorf(start, `Syntax error: Illegal input character "%s"`, cEscapeByte(c))
 }
 
 func (l *lexer) emit(kind token.Kind, start int) token.Token {
@@ -240,11 +277,27 @@ func (l *lexer) str(start int, raw, bytes bool) (token.Token, error) {
 			return l.emitStr(start, bytes), nil
 		}
 		if c == '\n' && !triple {
-			return token.Token{}, l.errorf(start, "unterminated string literal")
+			return token.Token{}, l.unclosedError(start, raw, bytes, triple)
 		}
 		l.pos++
 	}
-	return token.Token{}, l.errorf(start, "unterminated string literal")
+	return token.Token{}, l.unclosedError(start, raw, bytes, triple)
+}
+
+// unclosedError builds a "Syntax error: Unclosed ..." message matching
+// SetUnclosedError/SetTripleUnclosedError in googlesql/parser/googlesql.tm.
+func (l *lexer) unclosedError(start int, raw, bytes, triple bool) error {
+	kind := "string literal"
+	if bytes {
+		kind = "bytes literal"
+	}
+	if raw {
+		kind = "raw " + kind
+	}
+	if triple {
+		kind = "triple-quoted " + kind
+	}
+	return l.errorf(start, "Syntax error: Unclosed %s", kind)
 }
 
 func (l *lexer) emitStr(start int, bytes bool) token.Token {
@@ -270,7 +323,7 @@ func (l *lexer) quotedIdent() (token.Token, error) {
 		}
 		l.pos++
 	}
-	return token.Token{}, l.errorf(start, "unterminated quoted identifier")
+	return token.Token{}, l.errorf(start, "Syntax error: Unclosed identifier literal")
 }
 
 // number scans an integer or floating point literal.

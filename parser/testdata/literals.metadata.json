@@ -1,8 +1,5 @@
 {
   "parse_todo": {
-    "case_100": true,
-    "case_101": true,
-    "case_102": true,
     "case_108": true,
     "case_109": true,
     "case_111": true,
@@ -48,9 +45,6 @@
     "case_40": true,
     "case_41": true,
     "case_42": true,
-    "case_43": true,
-    "case_44": true,
-    "case_45": true,
     "case_46": true,
     "case_47": true,
     "case_48": true,
@@ -78,14 +72,11 @@
     "case_77": true,
     "case_78": true,
     "case_79": true,
-    "case_8": true,
     "case_80": true,
     "case_81": true,
     "case_82": true,
     "case_83": true,
     "case_84": true,
-    "case_85": true,
-    "case_86": true,
     "case_90": true
   },
   "alternations": {
