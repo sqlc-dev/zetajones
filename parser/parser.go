@@ -4273,6 +4273,17 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			return p.parseStructConstructorWithKeyword()
 		case isKeyword(tok, "CASE"):
 			return p.parseCaseExpression()
+		case isTypedLiteralPrefix(tok.Image) && p.peekAt(1).Kind == token.STRING:
+			// A typed-literal keyword directly followed by a string literal
+			// (e.g. DATE '2021-01-01', JSON '{}', NUMERIC '1'); see
+			// date_or_time_literal / numeric_literal / json_literal in
+			// googlesql.tm. Otherwise the keyword is an ordinary identifier
+			// or function name and falls through below.
+			return p.parseTypedLiteral()
+		case isKeyword(tok, "RANGE") && p.peekAt(1).Kind == token.LT:
+			// "RANGE<type> '...'" is a range literal; see range_literal in
+			// googlesql.tm.
+			return p.parseRangeLiteral()
 		case isReserved(tok):
 			if err := p.exceptClashError(); err != nil {
 				return nil, err
@@ -5121,6 +5132,13 @@ func (p *parser) positionalParameterOrdinal() int {
 }
 
 func (p *parser) parseStringLiteral() (ast.Node, error) {
+	return p.parseStringLiteralValue()
+}
+
+// parseStringLiteralValue parses one or more adjacent string literals that
+// concatenate into a single StringLiteral with multiple components; see
+// string_literal in googlesql.tm.
+func (p *parser) parseStringLiteralValue() (*ast.StringLiteral, error) {
 	tok := p.advance()
 	component := &ast.StringLiteralComponent{Span: span(tok.Pos, tok.End), Image: tok.Image}
 	lit := &ast.StringLiteral{
@@ -5134,6 +5152,10 @@ func (p *parser) parseStringLiteral() (ast.Node, error) {
 		component := &ast.StringLiteralComponent{Span: span(tok.Pos, tok.End), Image: tok.Image}
 		lit.Components = append(lit.Components, component)
 		lit.Stop = tok.End
+	}
+	// String and bytes literals cannot be concatenated together.
+	if p.peek().Kind == token.BYTES {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: string and bytes literals cannot be concatenated.")
 	}
 	return lit, nil
 }
@@ -5151,7 +5173,62 @@ func (p *parser) parseBytesLiteral() (ast.Node, error) {
 		lit.Components = append(lit.Components, component)
 		lit.Stop = tok.End
 	}
+	// String and bytes literals cannot be concatenated together.
+	if p.peek().Kind == token.STRING {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: string and bytes literals cannot be concatenated.")
+	}
 	return lit, nil
+}
+
+// dateOrTimeLiteralKind maps a typed-literal keyword to its ZetaSQL type kind
+// name, or "" if the keyword does not introduce a date/time literal.
+func dateOrTimeLiteralKind(image string) string {
+	switch strings.ToUpper(image) {
+	case "DATE":
+		return "TYPE_DATE"
+	case "DATETIME":
+		return "TYPE_DATETIME"
+	case "TIME":
+		return "TYPE_TIME"
+	case "TIMESTAMP":
+		return "TYPE_TIMESTAMP"
+	}
+	return ""
+}
+
+// isTypedLiteralPrefix reports whether image is a keyword that introduces a
+// typed literal whose payload is a string literal (NUMERIC/DECIMAL,
+// BIGNUMERIC/BIGDECIMAL, JSON, DATE/DATETIME/TIME/TIMESTAMP).
+func isTypedLiteralPrefix(image string) bool {
+	switch strings.ToUpper(image) {
+	case "NUMERIC", "DECIMAL", "BIGNUMERIC", "BIGDECIMAL", "JSON",
+		"DATE", "DATETIME", "TIME", "TIMESTAMP":
+		return true
+	}
+	return false
+}
+
+// parseTypedLiteral parses a keyword-prefixed typed literal whose payload is a
+// string literal: NUMERIC/DECIMAL, BIGNUMERIC/BIGDECIMAL, JSON, and
+// DATE/DATETIME/TIME/TIMESTAMP. The caller has verified that the keyword is
+// immediately followed by a string literal. See numeric_literal,
+// bignumeric_literal, json_literal and date_or_time_literal in googlesql.tm.
+func (p *parser) parseTypedLiteral() (ast.Node, error) {
+	kw := p.advance()
+	value, err := p.parseStringLiteralValue()
+	if err != nil {
+		return nil, err
+	}
+	sp := span(kw.Pos, value.End())
+	switch strings.ToUpper(kw.Image) {
+	case "NUMERIC", "DECIMAL":
+		return &ast.NumericLiteral{Span: sp, Value: value}, nil
+	case "BIGNUMERIC", "BIGDECIMAL":
+		return &ast.BigNumericLiteral{Span: sp, Value: value}, nil
+	case "JSON":
+		return &ast.JSONLiteral{Span: sp, Value: value}, nil
+	}
+	return &ast.DateOrTimeLiteral{Span: sp, TypeKind: dateOrTimeLiteralKind(kw.Image), Value: value}, nil
 }
 
 // parseCastExpression parses "CAST(expr AS type [FORMAT ...])" or
@@ -5374,6 +5451,23 @@ func (p *parser) parseRangeType() (*ast.RangeType, error) {
 		return nil, err
 	}
 	return &ast.RangeType{Span: span(rangeTok.Pos, closeTok.End), ElementType: elem}, nil
+}
+
+// parseRangeLiteral parses "RANGE<type> '...'"; see range_literal in
+// googlesql.tm.
+func (p *parser) parseRangeLiteral() (ast.Node, error) {
+	typ, err := p.parseRangeType()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.STRING {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected string literal but got %s", describeToken(p.peek()))
+	}
+	value, err := p.parseStringLiteralValue()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RangeLiteral{Span: span(typ.Pos(), value.End()), Type: typ, Value: value}, nil
 }
 
 // parseStructType parses "STRUCT<field, ...>" (possibly empty); see

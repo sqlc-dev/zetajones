@@ -1076,6 +1076,49 @@ type BytesLiteralComponent struct {
 
 func (n *BytesLiteralComponent) Children() []Node { return nil }
 
+// NumericLiteral is a NUMERIC/DECIMAL typed literal: NUMERIC '123'.
+type NumericLiteral struct {
+	Span
+	Value *StringLiteral `json:"value"`
+}
+
+func (n *NumericLiteral) Children() []Node { return children(n.Value) }
+
+// BigNumericLiteral is a BIGNUMERIC/BIGDECIMAL typed literal.
+type BigNumericLiteral struct {
+	Span
+	Value *StringLiteral `json:"value"`
+}
+
+func (n *BigNumericLiteral) Children() []Node { return children(n.Value) }
+
+// JSONLiteral is a JSON typed literal: JSON '{"a": 1}'.
+type JSONLiteral struct {
+	Span
+	Value *StringLiteral `json:"value"`
+}
+
+func (n *JSONLiteral) Children() []Node { return children(n.Value) }
+
+// DateOrTimeLiteral is a DATE/DATETIME/TIME/TIMESTAMP typed literal. TypeKind
+// is one of the ZetaSQL type kind names, e.g. "TYPE_DATE".
+type DateOrTimeLiteral struct {
+	Span
+	TypeKind string         `json:"type_kind"`
+	Value    *StringLiteral `json:"value"`
+}
+
+func (n *DateOrTimeLiteral) Children() []Node { return children(n.Value) }
+
+// RangeLiteral is a RANGE<type> typed literal: RANGE<DATE> '[a, b)'.
+type RangeLiteral struct {
+	Span
+	Type  *RangeType     `json:"type"`
+	Value *StringLiteral `json:"value"`
+}
+
+func (n *RangeLiteral) Children() []Node { return children(n.Type, n.Value) }
+
 // UnaryExpression is a unary operator applied to an expression.
 type UnaryExpression struct {
 	Span

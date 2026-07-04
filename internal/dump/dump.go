@@ -270,6 +270,16 @@ func nodeString(n ast.Node) string {
 		return "BytesLiteral"
 	case *ast.BytesLiteralComponent:
 		return fmt.Sprintf("BytesLiteralComponent(%s)", t.Image)
+	case *ast.NumericLiteral:
+		return "NumericLiteral"
+	case *ast.BigNumericLiteral:
+		return "BigNumericLiteral"
+	case *ast.JSONLiteral:
+		return "JSONLiteral"
+	case *ast.DateOrTimeLiteral:
+		return fmt.Sprintf("DateOrTimeLiteral(%s)", t.TypeKind)
+	case *ast.RangeLiteral:
+		return "RangeLiteral"
 	case *ast.UnaryExpression:
 		return fmt.Sprintf("UnaryExpression(%s)", t.Op)
 	case *ast.BinaryExpression:
