@@ -155,12 +155,26 @@ func parseCase(lines []string, defaults *[]string) *Case {
 		return nil
 	}
 
+	// joinPart extracts the payload text of an output part. Following
+	// ParseNextTestCase in file_based_test_driver.cc, blank lines and "#"
+	// comment lines at the start or end of a part are comment blocks
+	// attached to the part rather than payload, while blank lines in the
+	// middle belong to the payload.
 	joinPart := func(part []string) string {
-		out := make([]string, len(part))
-		for i, line := range part {
-			out[i] = unescapeLine(line)
+		var out, pending []string
+		for _, line := range part {
+			if line == "" || strings.HasPrefix(line, "#") {
+				if len(out) == 0 {
+					continue // leading comment block
+				}
+				pending = append(pending, line)
+				continue
+			}
+			out = append(out, pending...)
+			pending = pending[:0]
+			out = append(out, unescapeLine(line))
 		}
-		return strings.TrimRight(strings.Join(out, "\n"), "\n")
+		return strings.Join(out, "\n")
 	}
 
 	if len(parts) > 1 {

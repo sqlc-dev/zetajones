@@ -7,6 +7,7 @@ package lexer
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sqlc-dev/zetajones/token"
 )
@@ -84,8 +85,14 @@ func (l *lexer) skipSpaceAndComments() error {
 	for l.pos < len(l.sql) {
 		c := l.sql[l.pos]
 		switch {
-		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f':
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f' || c == '\b':
 			l.pos++
+		case c >= 0x80:
+			r, size := utf8.DecodeRuneInString(l.sql[l.pos:])
+			if !isUnicodeSpace(r) {
+				return nil
+			}
+			l.pos += size
 		case c == '#':
 			l.skipToLineEnd()
 		case c == '-' && l.peekAt(1) == '-':
@@ -101,6 +108,24 @@ func (l *lexer) skipSpaceAndComments() error {
 		}
 	}
 	return nil
+}
+
+// isUnicodeSpace reports whether r is one of the Unicode space characters
+// treated as whitespace by the GoogleSQL lexer; see whitespace_character in
+// googlesql/parser/googlesql.tm. Zero-width spaces (U+200B, U+FEFF), the
+// Ogham space mark (U+1680) and the Mongolian vowel separator (U+180E) are
+// deliberately excluded, matching the reference implementation.
+func isUnicodeSpace(r rune) bool {
+	switch r {
+	case 0x00A0, // NO-BREAK SPACE
+		0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, // EN QUAD..SIX-PER-EM
+		0x2006, 0x2007, 0x2008, 0x2009, 0x200A, // ..HAIR SPACE
+		0x202F, // NARROW NO-BREAK SPACE
+		0x205F, // MEDIUM MATHEMATICAL SPACE
+		0x3000: // IDEOGRAPHIC SPACE
+		return true
+	}
+	return false
 }
 
 func (l *lexer) skipToLineEnd() {

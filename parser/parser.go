@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sqlc-dev/zetajones/ast"
 	"github.com/sqlc-dev/zetajones/lexer"
@@ -27,29 +28,87 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s [at %d:%d]", e.Message, line, col)
 }
 
-// LineCol returns the 1-based line and column of the error.
+// tabWidth is the tab stop width used for column numbers and caret rendering;
+// see kTabWidth in googlesql/public/parse_location.cc.
+const tabWidth = 8
+
+// LineCol returns the 1-based line and column of the error. Following
+// ParseLocationTranslator::GetLineAndColumnFromByteOffset in
+// googlesql/public/parse_location.cc, each UTF-8 character counts as one
+// column and a tab advances the column to one past the next multiple of
+// tabWidth.
 func (e *Error) LineCol() (line, col int) {
-	line, col = 1, 1
-	for i := 0; i < e.Offset && i < len(e.SQL); i++ {
-		if e.SQL[i] == '\n' {
-			line++
-			col = 1
-		} else {
-			col++
+	lineStart, lineText, line := lineAtOffset(e.SQL, e.Offset)
+	col = 1
+	for i := 0; i < e.Offset-lineStart && i < len(lineText); {
+		if lineText[i] == '\t' {
+			col = (col+tabWidth-1)/tabWidth*tabWidth + 1
+			i++
+			continue
 		}
+		_, size := utf8.DecodeRuneInString(lineText[i:])
+		i += size
+		col++
 	}
 	return line, col
 }
 
+// lineAtOffset returns the start offset, text (without line terminator) and
+// 1-based number of the line containing byte offset. Lines are terminated by
+// "\n", "\r" or "\r\n", matching
+// ParseLocationTranslator::CalculateLineOffsets.
+func lineAtOffset(sql string, offset int) (start int, text string, num int) {
+	start, num = 0, 1
+	i := 0
+	for i < len(sql) {
+		c := sql[i]
+		if c != '\n' && c != '\r' {
+			i++
+			continue
+		}
+		end := i
+		i++
+		if c == '\r' && i < len(sql) && sql[i] == '\n' {
+			i++
+		}
+		if offset < i {
+			return start, sql[start:end], num
+		}
+		start = i
+		num++
+	}
+	return start, sql[start:], num
+}
+
+// expandTabs replaces each tab with spaces up to the next multiple of
+// tabWidth bytes, matching ParseLocationTranslator::ExpandTabs.
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\t' {
+			out.WriteString(strings.Repeat(" ", tabWidth-out.Len()%tabWidth))
+		} else {
+			out.WriteByte(s[i])
+		}
+	}
+	return out.String()
+}
+
 // Caret renders the error in ZetaSQL's test format: the message with
-// location, the offending source line, and a caret marking the column.
+// location, the offending source line (tabs expanded), and a caret marking
+// the column.
 func (e *Error) Caret() string {
 	line, col := e.LineCol()
-	var srcLine string
-	if lines := strings.Split(e.SQL, "\n"); line-1 < len(lines) {
-		srcLine = lines[line-1]
+	_, srcLine, _ := lineAtOffset(e.SQL, e.Offset)
+	srcLine = expandTabs(srcLine)
+	caret := col
+	if caret > len(srcLine)+1 {
+		caret = len(srcLine) + 1
 	}
-	return fmt.Sprintf("%s [at %d:%d]\n%s\n%s^", e.Message, line, col, srcLine, strings.Repeat(" ", col-1))
+	return fmt.Sprintf("%s [at %d:%d]\n%s\n%s^", e.Message, line, col, srcLine, strings.Repeat(" ", caret-1))
 }
 
 // Parse reads SQL from r and parses it as a single statement.
@@ -607,6 +666,9 @@ func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {
 			return nil, err
 		}
 	}
+	if err := p.checkAttachedAlias(); err != nil {
+		return nil, err
+	}
 	col := &ast.SelectColumn{Span: span(expr.Pos(), expr.End()), Expr: expr}
 	alias, err := p.parseOptionalAlias()
 	if err != nil {
@@ -617,6 +679,29 @@ func (p *parser) parseSelectColumn() (*ast.SelectColumn, error) {
 		col.Stop = alias.End()
 	}
 	return col, nil
+}
+
+// checkAttachedAlias reports the reference implementation's ATTACHED_ALIAS
+// error: an integer or floating point literal immediately followed, with no
+// whitespace in between, by an unquoted identifier or keyword, as in
+// `SELECT 123abc`. See IsLiteralBeforeAdjacentUnquotedIdentifier in
+// googlesql/parser/lookahead_transformer.cc and the select_column_expr rule
+// in googlesql/parser/googlesql.tm.
+func (p *parser) checkAttachedAlias() error {
+	tok := p.peek()
+	if tok.Kind != token.IDENT || p.pos == 0 {
+		return nil
+	}
+	prev := p.toks[p.pos-1]
+	if (prev.Kind != token.INT && prev.Kind != token.FLOAT) || prev.End != tok.Pos {
+		return nil
+	}
+	// Inputs like "123.abc" tokenize as the float "123." followed by the
+	// identifier "abc" and remain valid, mirroring the reference lexer.
+	if strings.HasSuffix(prev.Image, ".") {
+		return nil
+	}
+	return p.errorf(tok.Pos, "Syntax error: Missing whitespace between literal and alias")
 }
 
 // parseOptionalAlias parses [AS] identifier if present.
