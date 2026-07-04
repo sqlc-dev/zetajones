@@ -3876,6 +3876,12 @@ func (p *parser) finishComparison(n ast.Node) (ast.Node, error) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Expression to the left of LIKE must be parenthesized")
 	case isKeyword(tok, "IN"), isKeyword(tok, "IS"), isKeyword(tok, "BETWEEN"):
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	case tok.Kind == token.EQ, tok.Kind == token.NEQ, tok.Kind == token.LT,
+		tok.Kind == token.GT, tok.Kind == token.LTE, tok.Kind == token.GTE:
+		// Comparison operators are non-associative (see the %nonassoc
+		// declaration in googlesql.tm); a second one is a syntax error at
+		// that operator rather than a swallowed trailing token.
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	return n, nil
 }
@@ -4050,15 +4056,28 @@ func (p *parser) parseBitwiseAnd() (ast.Node, error) {
 }
 
 func (p *parser) parseShift() (ast.Node, error) {
-	return p.parseBinaryLevel(func(tok token.Token) (string, bool) {
-		switch tok.Kind {
-		case token.LSHIFT:
-			return "<<", true
-		case token.RSHIFT:
-			return ">>", true
+	lhs, err := p.parseAdditive()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		tok := p.peek()
+		if tok.Kind != token.LSHIFT && tok.Kind != token.RSHIFT {
+			return lhs, nil
 		}
-		return "", false
-	}, p.parseAdditive)
+		p.advance()
+		rhs, err := p.parseAdditive()
+		if err != nil {
+			return nil, err
+		}
+		lhs = &ast.BitwiseShiftExpression{
+			Span:             span(p.extStart(lhs), p.extEnd(rhs)),
+			IsLeftShift:      tok.Kind == token.LSHIFT,
+			Lhs:              lhs,
+			OperatorLocation: &ast.Location{Span: span(tok.Pos, tok.End)},
+			Rhs:              rhs,
+		}
+	}
 }
 
 func (p *parser) parseAdditive() (ast.Node, error) {

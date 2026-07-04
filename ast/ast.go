@@ -1229,6 +1229,22 @@ func (n *BinaryExpression) Children() []Node {
 	return children(n.Left, n.Right)
 }
 
+// BitwiseShiftExpression is <lhs> (<< | >>) <rhs>. Unlike other binary
+// operators, ZetaSQL gives the shift operators a dedicated node with an
+// explicit Location child covering the operator token; see
+// ASTBitwiseShiftExpression in googlesql/parser/parse_tree.h.
+type BitwiseShiftExpression struct {
+	Span
+	IsLeftShift      bool      `json:"is_left_shift"`
+	Lhs              Node      `json:"lhs"`
+	OperatorLocation *Location `json:"operator_location"`
+	Rhs              Node      `json:"rhs"`
+}
+
+func (n *BitwiseShiftExpression) Children() []Node {
+	return children(n.Lhs, n.OperatorLocation, n.Rhs)
+}
+
 // AndExpr is an AND expression with two or more conjuncts, flattened.
 type AndExpr struct {
 	Span

@@ -299,6 +299,11 @@ func nodeString(n ast.Node) string {
 			}
 		}
 		return fmt.Sprintf("BinaryExpression(%s)", op)
+	case *ast.BitwiseShiftExpression:
+		if t.IsLeftShift {
+			return "BitwiseShiftExpression(<<)"
+		}
+		return "BitwiseShiftExpression(>>)"
 	case *ast.InExpression:
 		if t.IsNot {
 			return "InExpression(NOT IN)"
