@@ -313,6 +313,11 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 			// see MakeSyntaxError in parser_internal.cc.
 			return nil, p.errorf(p.peek().Pos, "Syntax error: OVER keyword must follow a function call")
 		}
+		if isKeyword(p.peek(), "OVER") {
+			// See the KW_OVER special case in
+			// googlesql/parser/parser_internal.cc.
+			return nil, p.errorf(p.peek().Pos, "Syntax error: OVER keyword must follow a function call")
+		}
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
 	}
 	return stmt, nil
@@ -445,19 +450,21 @@ func isKeyword(tok token.Token, kw string) bool {
 var reservedKeywords = map[string]bool{
 	"ALL": true, "AND": true, "ARRAY": true, "AS": true, "ASC": true,
 	"BETWEEN": true,
-	"BY":      true, "CASE": true, "CROSS": true, "DESC": true, "DISTINCT": true,
+	"BY":      true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
+	"DESC": true, "DISTINCT": true,
 	"ELSE": true, "END": true, "EXCEPT": true, "FALSE": true, "FOR": true,
 	"FROM": true,
-	"FULL": true, "GROUP": true, "HASH": true, "HAVING": true, "IN": true,
+	"FULL": true, "GROUP": true, "GROUPS": true, "HASH": true, "HAVING": true,
+	"IGNORE": true, "IN": true,
 	"INNER":     true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LATERAL": true, "LEFT": true,
 	"LIKE":  true,
 	"LIMIT": true, "LOOKUP": true, "NATURAL": true, "NOT": true, "NULL": true,
 	"NULLS": true, "ON": true,
 	"OR": true, "ORDER": true, "OUTER": true, "OVER": true, "PARTITION": true,
-	"RIGHT": true, "SELECT": true, "SET": true, "STRUCT": true,
+	"RESPECT": true, "RIGHT": true, "SELECT": true, "SET": true, "STRUCT": true,
 	"TRUE": true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
-	"WITH": true,
+	"WINDOW": true, "WITH": true,
 }
 
 func isReserved(tok token.Token) bool {
@@ -1441,6 +1448,14 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
+		if isKeyword(p.peek(), "WINDOW") {
+			window, err := p.parseWindowClause(true)
+			if err != nil {
+				return nil, err
+			}
+			sel.Window = window
+			sel.Stop = window.End()
+		}
 		return &ast.PipeSelect{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
 	case isKeyword(tok, "EXTEND"):
 		return p.parsePipeExtend(pipeTok)
@@ -1644,6 +1659,14 @@ func (p *parser) parsePipeExtend(pipeTok token.Token) (ast.Node, error) {
 		return nil, err
 	}
 	sel := &ast.Select{Span: span(extendTok.Pos, list.End()), SelectList: list}
+	if isKeyword(p.peek(), "WINDOW") {
+		window, err := p.parseWindowClause(true)
+		if err != nil {
+			return nil, err
+		}
+		sel.Window = window
+		sel.Stop = window.End()
+	}
 	return &ast.PipeExtend{Span: span(pipeTok.Pos, sel.End()), Select: sel}, nil
 }
 
@@ -1782,6 +1805,14 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		}
 		sel.Having = &ast.Having{Span: span(havingTok.Pos, p.extEnd(expr)), Expr: expr}
 		sel.Stop = p.extEnd(expr)
+	}
+	if isKeyword(p.peek(), "WINDOW") {
+		window, err := p.parseWindowClause(false)
+		if err != nil {
+			return nil, err
+		}
+		sel.Window = window
+		sel.Stop = window.End()
 	}
 	return sel, nil
 }
@@ -3111,8 +3142,16 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 			// handled elsewhere, and anything else is an error (see
 			// function_call_expression_base in googlesql.tm).
 			switch expr.(type) {
-			case *ast.PathExpression, *ast.DotIdentifier, *ast.FunctionCall:
+			case *ast.PathExpression, *ast.DotIdentifier:
 				return expr, nil
+			case *ast.FunctionCall:
+				// A parenthesized function call falls through to the
+				// "cannot be applied" error below; see the
+				// function_call_expression_with_args_prefix rule in
+				// googlesql.tm.
+				if _, parenthesized := p.extents[expr]; !parenthesized {
+					return nil, p.errorf(p.peek().Pos, "Syntax error: Double function call parentheses")
+				}
 			}
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Function call cannot be applied to this expression. Function calls require a path, e.g. a.b.c()")
 		case token.LBRACKET:
@@ -3310,6 +3349,12 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isReserved(tok):
 			if err := p.exceptClashError(); err != nil {
 				return nil, err
+			}
+			if isKeyword(tok, "OVER") {
+				// When the OVER keyword is used in the wrong place, we tell
+				// the user exactly where it can be used; see the KW_OVER
+				// special case in googlesql/parser/parser_internal.cc.
+				return nil, p.errorf(tok.Pos, "Syntax error: OVER keyword must follow a function call")
 			}
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
@@ -3870,12 +3915,24 @@ func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 		}
 		windowSpec.PartitionBy = partitionBy
 	}
+	if tok := p.peek(); tok.Kind != token.RPAREN && !isKeyword(tok, "ORDER") &&
+		!isKeyword(tok, "ROWS") && !isKeyword(tok, "RANGE") {
+		return nil, p.errorf(tok.Pos,
+			`Syntax error: Expected ")" or keyword ORDER or keyword RANGE or keyword ROWS but got %s`,
+			describeToken(tok))
+	}
 	if isKeyword(p.peek(), "ORDER") {
 		orderBy, err := p.parseOrderBy(false)
 		if err != nil {
 			return nil, err
 		}
 		windowSpec.OrderBy = orderBy
+	}
+	if tok := p.peek(); tok.Kind != token.RPAREN &&
+		!isKeyword(tok, "ROWS") && !isKeyword(tok, "RANGE") {
+		return nil, p.errorf(tok.Pos,
+			`Syntax error: Expected ")" or keyword RANGE or keyword ROWS but got %s`,
+			describeToken(tok))
 	}
 	if isKeyword(p.peek(), "ROWS") || isKeyword(p.peek(), "RANGE") {
 		frame, err := p.parseWindowFrame()
@@ -3890,6 +3947,59 @@ func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 	}
 	windowSpec.Stop = rparen.End
 	return windowSpec, nil
+}
+
+// parseWindowClause parses "WINDOW identifier AS window_specification
+// [, ...]"; see window_clause in googlesql.tm. If allowTrailingComma is
+// true (pipe SELECT/EXTEND), a trailing comma is permitted and extends the
+// clause's end location; see window_clause_with_trailing_comma.
+func (p *parser) parseWindowClause(allowTrailingComma bool) (*ast.WindowClause, error) {
+	windowTok := p.advance() // WINDOW
+	clause := &ast.WindowClause{Span: span(windowTok.Pos, 0)}
+	for {
+		def, err := p.parseWindowDefinition()
+		if err != nil {
+			return nil, err
+		}
+		clause.Windows = append(clause.Windows, def)
+		clause.Stop = def.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		next := p.peek()
+		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT || isReserved(next) {
+			// Trailing comma; it is included in the clause's location.
+			if !allowTrailingComma {
+				return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+			}
+			clause.Stop = comma.End
+			break
+		}
+	}
+	return clause, nil
+}
+
+// parseWindowDefinition parses "identifier AS window_specification"; see
+// window_definition in googlesql.tm.
+func (p *parser) parseWindowDefinition() (*ast.WindowDefinition, error) {
+	tok := p.peek()
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT || isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	name := p.parseIdentifierToken(p.advance())
+	if _, err := p.expectKeyword("AS"); err != nil {
+		return nil, err
+	}
+	spec, err := p.parseWindowSpecification()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.WindowDefinition{
+		Span:       span(name.Pos(), spec.End()),
+		Name:       name,
+		WindowSpec: spec,
+	}, nil
 }
 
 // parseWindowFrame parses "ROWS|RANGE window_frame_bound" or

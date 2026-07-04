@@ -165,16 +165,17 @@ func (n *LockMode) Children() []Node { return nil }
 // Select is a SELECT clause with its associated clauses.
 type Select struct {
 	Span
-	Distinct   bool         `json:"distinct,omitempty"`
-	SelectList *SelectList  `json:"select_list"`
-	From       *FromClause  `json:"from,omitempty"`
-	Where      *WhereClause `json:"where,omitempty"`
-	GroupBy    *GroupBy     `json:"group_by,omitempty"`
-	Having     *Having      `json:"having,omitempty"`
+	Distinct   bool          `json:"distinct,omitempty"`
+	SelectList *SelectList   `json:"select_list"`
+	From       *FromClause   `json:"from,omitempty"`
+	Where      *WhereClause  `json:"where,omitempty"`
+	GroupBy    *GroupBy      `json:"group_by,omitempty"`
+	Having     *Having       `json:"having,omitempty"`
+	Window     *WindowClause `json:"window,omitempty"`
 }
 
 func (n *Select) Children() []Node {
-	return children(n.SelectList, n.From, n.Where, n.GroupBy, n.Having)
+	return children(n.SelectList, n.From, n.Where, n.GroupBy, n.Having, n.Window)
 }
 
 // SelectList is the list of expressions being selected.
@@ -1448,6 +1449,33 @@ type WindowSpecification struct {
 
 func (n *WindowSpecification) Children() []Node {
 	return children(n.Name, n.PartitionBy, n.OrderBy, n.WindowFrame)
+}
+
+// WindowClause is a "WINDOW name AS (...), ..." named window clause on a
+// SELECT; see ASTWindowClause in googlesql/parser/parse_tree.h.
+type WindowClause struct {
+	Span
+	Windows []*WindowDefinition `json:"windows"`
+}
+
+func (n *WindowClause) Children() []Node {
+	var out []Node
+	for _, w := range n.Windows {
+		out = append(out, w)
+	}
+	return out
+}
+
+// WindowDefinition is a single "name AS window_specification" entry in a
+// WINDOW clause; see ASTWindowDefinition in googlesql/parser/parse_tree.h.
+type WindowDefinition struct {
+	Span
+	Name       *Identifier          `json:"name"`
+	WindowSpec *WindowSpecification `json:"window_spec"`
+}
+
+func (n *WindowDefinition) Children() []Node {
+	return children(n.Name, n.WindowSpec)
 }
 
 // WindowFrame is a "ROWS|RANGE ..." window frame clause; see ASTWindowFrame

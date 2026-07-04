@@ -176,6 +176,10 @@ func nodeString(n ast.Node) string {
 		return "AnalyticFunctionCall"
 	case *ast.WindowSpecification:
 		return "WindowSpecification"
+	case *ast.WindowClause:
+		return "WindowClause"
+	case *ast.WindowDefinition:
+		return "WindowDefinition"
 	case *ast.WindowFrame:
 		return "WindowFrame(" + t.Unit + ")"
 	case *ast.WindowFrameExpr:
