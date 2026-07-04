@@ -1553,6 +1553,13 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		p.advance()
 		isOrReplace = true
 	}
+	// CREATE [OR REPLACE] [UNIQUE] [SEARCH|VECTOR] INDEX ...; see
+	// create_index_statement in googlesql.tm. Index statements take no scope
+	// modifier, so they are recognized before scope parsing.
+	if isKeyword(p.peek(), "UNIQUE") || isKeyword(p.peek(), "SEARCH") ||
+		isKeyword(p.peek(), "VECTOR") || isKeyword(p.peek(), "INDEX") {
+		return p.parseCreateIndexStatement(createTok, isOrReplace)
+	}
 	var scope string
 	switch {
 	case isKeyword(p.peek(), "TEMP"), isKeyword(p.peek(), "TEMPORARY"):
@@ -1628,6 +1635,299 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = p.prevEnd()
 	}
 	return stmt, nil
+}
+
+// parseCreateIndexStatement parses the tail of "CREATE [OR REPLACE] [UNIQUE]
+// [SEARCH|VECTOR] INDEX [IF NOT EXISTS] name ON table [AS alias]
+// [unnest_list] (index_items) [STORING (...)] [PARTITION BY ...] [OPTIONS(...)]";
+// see create_index_statement in googlesql.tm. The next token is UNIQUE,
+// SEARCH, VECTOR, or INDEX.
+func (p *parser) parseCreateIndexStatement(createTok token.Token, isOrReplace bool) (ast.Statement, error) {
+	stmt := &ast.CreateIndexStatement{Span: span(createTok.Pos, 0), IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "UNIQUE") {
+		p.advance()
+		stmt.IsUnique = true
+	}
+	// opt_index_type: at most one of SEARCH or VECTOR; see index_type in
+	// googlesql.tm. After it, INDEX is required (so "SEARCH VECTOR" reports the
+	// INDEX-expected error at VECTOR).
+	if isKeyword(p.peek(), "SEARCH") {
+		p.advance()
+		stmt.IsSearch = true
+	} else if isKeyword(p.peek(), "VECTOR") {
+		p.advance()
+		stmt.IsVector = true
+	}
+	if _, err := p.expectKeyword("INDEX"); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	tableName, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.TableName = tableName
+	stmt.Stop = tableName.End()
+	// Optional table alias (as_alias: "AS"? identifier).
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		stmt.Alias = alias
+		stmt.Stop = alias.End()
+	}
+	// Optional list of UNNEST expressions.
+	if isKeyword(p.peek(), "UNNEST") {
+		list := &ast.IndexUnnestExpressionList{}
+		start := p.peek().Pos
+		for isKeyword(p.peek(), "UNNEST") {
+			uexpr, err := p.parseUnnestExpression()
+			if err != nil {
+				return nil, err
+			}
+			item := &ast.UnnestExpressionWithOptAliasAndOffset{Span: span(uexpr.Pos(), uexpr.End()), Expression: uexpr}
+			ualias, err := p.parseOptionalAlias()
+			if err != nil {
+				return nil, err
+			}
+			if ualias != nil {
+				item.Alias = ualias
+				item.Stop = ualias.End()
+			}
+			if isKeyword(p.peek(), "WITH") {
+				offset, err := p.parseWithOffsetClause()
+				if err != nil {
+					return nil, err
+				}
+				item.WithOffset = offset
+				item.Stop = offset.End()
+			}
+			list.UnnestExpressions = append(list.UnnestExpressions, item)
+			list.Stop = item.End()
+		}
+		list.Start = start
+		stmt.UnnestExpressionList = list
+		stmt.Stop = list.End()
+	}
+	// Required index item list (index_order_by_and_options).
+	itemList, err := p.parseIndexOrderByAndOptions()
+	if err != nil {
+		return nil, err
+	}
+	stmt.IndexItemList = itemList
+	stmt.Stop = itemList.End()
+	// Optional STORING clause.
+	if isKeyword(p.peek(), "STORING") {
+		storing, err := p.parseIndexStoringList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Storing = storing
+		stmt.Stop = storing.End()
+	}
+	// Optional suffix: PARTITION BY [OPTIONS] or OPTIONS.
+	if isKeyword(p.peek(), "PARTITION") {
+		pb, err := p.parseIndexPartitionBy()
+		if err != nil {
+			return nil, err
+		}
+		stmt.PartitionBy = pb
+		stmt.Stop = pb.End()
+		if isKeyword(p.peek(), "OPTIONS") {
+			p.advance()
+			opts, err := p.parseOptionsList()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Options = opts
+			stmt.Stop = opts.End()
+		}
+	} else if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseIndexOrderByAndOptions parses "( ALL COLUMNS [WITH COLUMN OPTIONS
+// (...)] )" or "( column_ordering_and_options_expr [, ...] )"; see
+// index_order_by_and_options and index_all_columns in googlesql.tm.
+func (p *parser) parseIndexOrderByAndOptions() (*ast.IndexItemList, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "ALL") {
+		p.advance() // ALL
+		if _, err := p.expectKeyword("COLUMNS"); err != nil {
+			return nil, err
+		}
+		var colOpts *ast.IndexItemList
+		withConsumed := false
+		if isKeyword(p.peek(), "WITH") {
+			p.advance() // WITH
+			if _, err := p.expectKeyword("COLUMN"); err != nil {
+				return nil, err
+			}
+			if _, err := p.expectKeyword("OPTIONS"); err != nil {
+				return nil, err
+			}
+			colOpts, err = p.parseIndexColumnList(false)
+			if err != nil {
+				return nil, err
+			}
+			withConsumed = true
+		}
+		if p.peek().Kind != token.RPAREN {
+			if withConsumed {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" but got %s`, describeToken(p.peek()))
+			}
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or keyword WITH but got %s`, describeToken(p.peek()))
+		}
+		rparen := p.advance()
+		allCols := &ast.IndexAllColumns{Span: span(lparen.Pos, rparen.End), Image: "ALL COLUMNS", ColumnOptions: colOpts}
+		oe := &ast.OrderingExpression{Span: span(lparen.Pos, rparen.End), Expr: allCols}
+		return &ast.IndexItemList{Span: span(lparen.Pos, rparen.End), OrderingExpressions: []*ast.OrderingExpression{oe}}, nil
+	}
+	return p.parseIndexColumnListBody(lparen, true)
+}
+
+// parseIndexColumnList parses "( column_ordering_and_options_expr [, ...] )".
+// If extendToClose is true the returned list's span includes the closing
+// parenthesis (index_order_by_and_options); otherwise it ends at the last
+// column (all_column_column_options, used by WITH COLUMN OPTIONS).
+func (p *parser) parseIndexColumnList(extendToClose bool) (*ast.IndexItemList, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	return p.parseIndexColumnListBody(lparen, extendToClose)
+}
+
+func (p *parser) parseIndexColumnListBody(lparen token.Token, extendToClose bool) (*ast.IndexItemList, error) {
+	if p.peek().Kind == token.RPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Unexpected ")"`)
+	}
+	list := &ast.IndexItemList{Span: span(lparen.Pos, 0)}
+	for {
+		oe, err := p.parseIndexOrderingExpression()
+		if err != nil {
+			return nil, err
+		}
+		list.OrderingExpressions = append(list.OrderingExpressions, oe)
+		list.Stop = oe.End()
+		if p.peek().Kind == token.COMMA {
+			p.advance()
+			continue
+		}
+		break
+	}
+	if p.peek().Kind != token.RPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or "," but got %s`, describeToken(p.peek()))
+	}
+	rparen := p.advance()
+	if extendToClose {
+		list.Stop = rparen.End
+	}
+	return list, nil
+}
+
+// parseIndexOrderingExpression parses "expression [COLLATE ...] [ASC|DESC]
+// [NULLS FIRST|LAST] [OPTIONS(...)]"; see column_ordering_and_options_expr in
+// googlesql.tm.
+func (p *parser) parseIndexOrderingExpression() (*ast.OrderingExpression, error) {
+	oe, err := p.parseOrderingExpression()
+	if err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		oe.Options = opts
+		oe.Stop = opts.End()
+	}
+	return oe, nil
+}
+
+// parseIndexStoringList parses "STORING ( expression [, ...] )"; see
+// index_storing_list in googlesql.tm. The STORING keyword is the next token.
+// The node span starts at the opening parenthesis.
+func (p *parser) parseIndexStoringList() (*ast.IndexStoringExpressionList, error) {
+	p.advance() // STORING
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == token.RPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Unexpected ")"`)
+	}
+	list := &ast.IndexStoringExpressionList{Span: span(lparen.Pos, 0)}
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		list.Expressions = append(list.Expressions, expr)
+		if p.peek().Kind == token.COMMA {
+			p.advance()
+			continue
+		}
+		break
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
+}
+
+// parseIndexPartitionBy parses "PARTITION BY expression [, ...]" with no hint;
+// see partition_by_clause_prefix_no_hint in googlesql.tm. The PARTITION keyword
+// is the next token.
+func (p *parser) parseIndexPartitionBy() (*ast.PartitionBy, error) {
+	partTok := p.advance() // PARTITION
+	if _, err := p.expectKeyword("BY"); err != nil {
+		return nil, err
+	}
+	pb := &ast.PartitionBy{Span: span(partTok.Pos, 0)}
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		pb.Expressions = append(pb.Expressions, expr)
+		pb.Stop = p.extEnd(expr)
+		if p.peek().Kind == token.COMMA {
+			p.advance()
+			continue
+		}
+		break
+	}
+	return pb, nil
 }
 
 // prevEnd returns the end offset of the most recently consumed token.
@@ -2703,6 +3003,12 @@ func (p *parser) parseOptionsList() (*ast.OptionsList, error) {
 	}
 	list := &ast.OptionsList{Span: span(lparen.Pos, 0)}
 	if p.peek().Kind != token.RPAREN {
+		// An options entry must begin with an identifier (the option name). If
+		// it cannot, the list can only be closed, so the reference reports the
+		// missing ")"; see options_list in googlesql.tm.
+		if k := p.peek().Kind; k != token.IDENT && k != token.QUOTED_IDENT {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" but got %s`, describeToken(p.peek()))
+		}
 		for {
 			entry, err := p.parseOptionsEntry()
 			if err != nil {

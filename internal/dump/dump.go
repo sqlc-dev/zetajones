@@ -207,6 +207,16 @@ func nodeString(n ast.Node) string {
 		return "OrderingExpression(ASC)"
 	case *ast.Collate:
 		return "Collate"
+	case *ast.IndexItemList:
+		return "IndexItemList"
+	case *ast.IndexAllColumns:
+		return "IndexAllColumns(" + t.Image + ")"
+	case *ast.IndexUnnestExpressionList:
+		return "IndexUnnestExpressionList"
+	case *ast.UnnestExpressionWithOptAliasAndOffset:
+		return "UnnestExpressionWithOptAliasAndOffset"
+	case *ast.IndexStoringExpressionList:
+		return "IndexStoringExpressionList"
 	case *ast.NullOrder:
 		if t.NullsFirst {
 			return "NullOrder(NULLS FIRST)"
@@ -619,6 +629,23 @@ func nodeString(n ast.Node) string {
 			return "CreateTableStatement"
 		}
 		return fmt.Sprintf("CreateTableStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateIndexStatement:
+		// The debug detail lists UNIQUE, then SEARCH or VECTOR, comma-separated;
+		// see ASTCreateIndexStatement::SingleNodeDebugString in parse_tree.cc.
+		if t.IsUnique || t.IsSearch || t.IsVector {
+			var parts []string
+			if t.IsUnique {
+				parts = append(parts, "UNIQUE")
+			}
+			if t.IsSearch {
+				parts = append(parts, "SEARCH")
+			}
+			if t.IsVector {
+				parts = append(parts, "VECTOR")
+			}
+			return "CreateIndexStatement(" + strings.Join(parts, ",") + ")"
+		}
+		return "CreateIndexStatement"
 	case *ast.CreateRowAccessPolicyStatement:
 		var mods []string
 		if t.IsOrReplace {

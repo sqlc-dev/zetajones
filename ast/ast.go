@@ -1180,15 +1180,16 @@ func (n *OrderBy) Children() []Node {
 // OrderingExpression is a single ORDER BY item.
 type OrderingExpression struct {
 	Span
-	Expr       Node       `json:"expr"`
-	Collate    *Collate   `json:"collate,omitempty"`
-	NullOrder  *NullOrder `json:"null_order,omitempty"`
-	Descending bool       `json:"descending,omitempty"`
-	HasAsc     bool       `json:"has_asc,omitempty"` // explicit ASC keyword present
+	Expr       Node         `json:"expr"`
+	Collate    *Collate     `json:"collate,omitempty"`
+	NullOrder  *NullOrder   `json:"null_order,omitempty"`
+	Options    *OptionsList `json:"options,omitempty"` // per-column OPTIONS in CREATE INDEX
+	Descending bool         `json:"descending,omitempty"`
+	HasAsc     bool         `json:"has_asc,omitempty"` // explicit ASC keyword present
 }
 
 func (n *OrderingExpression) Children() []Node {
-	return children(n.Expr, n.Collate, n.NullOrder)
+	return children(n.Expr, n.Collate, n.NullOrder, n.Options)
 }
 
 // Collate is a "COLLATE <string literal or parameter>" clause; see ASTCollate
@@ -2162,6 +2163,107 @@ type CreateTableStatement struct {
 func (n *CreateTableStatement) statementNode() {}
 func (n *CreateTableStatement) Children() []Node {
 	return children(n.Name, n.Query)
+}
+
+// CreateIndexStatement is a
+// "CREATE [OR REPLACE] [UNIQUE] [SEARCH|VECTOR] INDEX [IF NOT EXISTS] name
+// ON table [AS alias] [unnest_list] (index_items) [STORING (...)]
+// [PARTITION BY ...] [OPTIONS(...)]" statement; see ASTCreateIndexStatement in
+// googlesql/parser/parse_tree.h. Children appear in the fixed grammar order.
+type CreateIndexStatement struct {
+	Span
+	IsOrReplace          bool                        `json:"is_or_replace,omitempty"`
+	IsUnique             bool                        `json:"is_unique,omitempty"`
+	IsSearch             bool                        `json:"is_search,omitempty"`
+	IsVector             bool                        `json:"is_vector,omitempty"`
+	IsIfNotExists        bool                        `json:"is_if_not_exists,omitempty"`
+	Name                 *PathExpression             `json:"name"`
+	TableName            *PathExpression             `json:"table_name"`
+	Alias                *Alias                      `json:"alias,omitempty"`
+	UnnestExpressionList *IndexUnnestExpressionList  `json:"unnest_expression_list,omitempty"`
+	IndexItemList        *IndexItemList              `json:"index_item_list"`
+	Storing              *IndexStoringExpressionList `json:"storing,omitempty"`
+	PartitionBy          *PartitionBy                `json:"partition_by,omitempty"`
+	Options              *OptionsList                `json:"options,omitempty"`
+}
+
+func (n *CreateIndexStatement) statementNode() {}
+func (n *CreateIndexStatement) Children() []Node {
+	return children(n.Name, n.TableName, n.Alias, n.UnnestExpressionList, n.IndexItemList, n.Storing, n.PartitionBy, n.Options)
+}
+
+// IndexItemList is the parenthesized list of ordering expressions in a
+// CREATE INDEX statement; see ASTIndexItemList in
+// googlesql/parser/parse_tree.h.
+type IndexItemList struct {
+	Span
+	OrderingExpressions []*OrderingExpression `json:"ordering_expressions"`
+}
+
+func (n *IndexItemList) Children() []Node {
+	out := make([]Node, 0, len(n.OrderingExpressions))
+	for _, e := range n.OrderingExpressions {
+		out = append(out, e)
+	}
+	return out
+}
+
+// IndexAllColumns is the "ALL COLUMNS [WITH COLUMN OPTIONS (...)]" form of the
+// index item list; see ASTIndexAllColumns in
+// googlesql/parser/parse_tree.h. The optional child is the per-column options
+// list (an IndexItemList).
+type IndexAllColumns struct {
+	Span
+	Image         string         `json:"image"`
+	ColumnOptions *IndexItemList `json:"column_options,omitempty"`
+}
+
+func (n *IndexAllColumns) Children() []Node {
+	return children(n.ColumnOptions)
+}
+
+// IndexUnnestExpressionList is the list of UNNEST expressions preceding the
+// index items in a CREATE INDEX statement; see
+// ASTIndexUnnestExpressionList in googlesql/parser/parse_tree.h.
+type IndexUnnestExpressionList struct {
+	Span
+	UnnestExpressions []*UnnestExpressionWithOptAliasAndOffset `json:"unnest_expressions"`
+}
+
+func (n *IndexUnnestExpressionList) Children() []Node {
+	out := make([]Node, 0, len(n.UnnestExpressions))
+	for _, e := range n.UnnestExpressions {
+		out = append(out, e)
+	}
+	return out
+}
+
+// UnnestExpressionWithOptAliasAndOffset is an UNNEST expression with an
+// optional alias and optional WITH OFFSET clause; see
+// ASTUnnestExpressionWithOptAliasAndOffset in
+// googlesql/parser/parse_tree.h.
+type UnnestExpressionWithOptAliasAndOffset struct {
+	Span
+	Expression *UnnestExpression `json:"expression"`
+	Alias      *Alias            `json:"alias,omitempty"`
+	WithOffset *WithOffset       `json:"with_offset,omitempty"`
+}
+
+func (n *UnnestExpressionWithOptAliasAndOffset) Children() []Node {
+	return children(n.Expression, n.Alias, n.WithOffset)
+}
+
+// IndexStoringExpressionList is the "STORING (expr, ...)" clause of a
+// CREATE INDEX statement; see ASTIndexStoringExpressionList in
+// googlesql/parser/parse_tree.h. The span starts at the opening parenthesis
+// after the STORING keyword.
+type IndexStoringExpressionList struct {
+	Span
+	Expressions []Node `json:"expressions"`
+}
+
+func (n *IndexStoringExpressionList) Children() []Node {
+	return append([]Node(nil), n.Expressions...)
 }
 
 // CreateRowAccessPolicyStatement is a
