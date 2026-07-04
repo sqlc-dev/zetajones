@@ -2417,7 +2417,7 @@ func (p *parser) parsePipeAggregate(pipeTok token.Token) (ast.Node, error) {
 	sel.SelectList = list
 	sel.Stop = list.End()
 	if isKeyword(p.peek(), "GROUP") {
-		groupBy, err := p.parseGroupBy()
+		groupBy, err := p.parseGroupBy(false)
 		if err != nil {
 			return nil, err
 		}
@@ -2568,7 +2568,7 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		sel.Stop = where.End()
 	}
 	if isKeyword(p.peek(), "GROUP") {
-		groupBy, err := p.parseGroupBy()
+		groupBy, err := p.parseGroupBy(true)
 		if err != nil {
 			return nil, err
 		}
@@ -3173,15 +3173,25 @@ func (p *parser) parseExpressionWithOptAlias() (*ast.ExpressionWithOptAlias, err
 	return node, nil
 }
 
-func (p *parser) parseGroupBy() (*ast.GroupBy, error) {
+func (p *parser) parseGroupBy(allowAll bool) (*ast.GroupBy, error) {
 	groupTok, err := p.expectKeyword("GROUP")
+	if err != nil {
+		return nil, err
+	}
+	hint, err := p.parseOptionalHint()
 	if err != nil {
 		return nil, err
 	}
 	if _, err := p.expectKeyword("BY"); err != nil {
 		return nil, err
 	}
-	groupBy := &ast.GroupBy{Span: span(groupTok.Pos, groupTok.End)}
+	groupBy := &ast.GroupBy{Span: span(groupTok.Pos, groupTok.End), Hint: hint}
+	if allowAll && isKeyword(p.peek(), "ALL") {
+		allTok := p.advance()
+		groupBy.All = &ast.GroupByAll{Span: span(allTok.Pos, allTok.End)}
+		groupBy.Stop = allTok.End
+		return groupBy, nil
+	}
 	for {
 		expr, err := p.parseExpression()
 		if err != nil {

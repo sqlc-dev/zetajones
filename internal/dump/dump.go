@@ -184,6 +184,8 @@ func nodeString(n ast.Node) string {
 		return "WhereClause"
 	case *ast.GroupBy:
 		return "GroupBy"
+	case *ast.GroupByAll:
+		return "GroupByAll"
 	case *ast.GroupingItem:
 		return "GroupingItem"
 	case *ast.Having:

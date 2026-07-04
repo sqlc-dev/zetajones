@@ -813,16 +813,28 @@ func (n *WhereClause) Children() []Node {
 // GroupBy is a GROUP BY clause.
 type GroupBy struct {
 	Span
+	Hint  *Hint           `json:"hint,omitempty"`
+	All   *GroupByAll     `json:"all,omitempty"`
 	Items []*GroupingItem `json:"items"`
 }
 
 func (n *GroupBy) Children() []Node {
-	var out []Node
+	out := children(n.Hint)
+	if n.All != nil {
+		out = append(out, n.All)
+	}
 	for _, item := range n.Items {
 		out = append(out, item)
 	}
 	return out
 }
+
+// GroupByAll is the ALL keyword in "GROUP BY ALL".
+type GroupByAll struct {
+	Span
+}
+
+func (n *GroupByAll) Children() []Node { return nil }
 
 // GroupingItem is a single GROUP BY item.
 type GroupingItem struct {
