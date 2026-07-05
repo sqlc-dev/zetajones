@@ -5524,14 +5524,16 @@ func (n *GqlQuery) Children() []Node { return children(n.Query) }
 // list when present.
 type GraphTableQuery struct {
 	Span
-	Graph *PathExpression `json:"graph"`
-	Op    Node            `json:"op"`
-	Shape *SelectList     `json:"shape,omitempty"`
-	Alias *Alias          `json:"alias,omitempty"`
+	Graph            *PathExpression `json:"graph"`
+	Op               Node            `json:"op"`
+	Shape            *SelectList     `json:"shape,omitempty"`
+	Alias            *Alias          `json:"alias,omitempty"`
+	PostfixOperators []Node          `json:"postfix_operators,omitempty"`
 }
 
 func (n *GraphTableQuery) Children() []Node {
-	return children(n.Graph, n.Op, n.Shape, n.Alias)
+	out := children(n.Graph, n.Op, n.Shape, n.Alias)
+	return append(out, n.PostfixOperators...)
 }
 
 // GqlOperatorList is a list of GQL linear operators; see ASTGqlOperatorList in
@@ -5549,10 +5551,11 @@ func (n *GqlOperatorList) Children() []Node { return append([]Node(nil), n.Opera
 type GqlMatch struct {
 	Span
 	Pattern  *GraphPattern `json:"pattern"`
+	Hint     *Hint         `json:"hint,omitempty"`
 	Optional bool          `json:"optional,omitempty"`
 }
 
-func (n *GqlMatch) Children() []Node { return children(n.Pattern) }
+func (n *GqlMatch) Children() []Node { return children(n.Pattern, n.Hint) }
 
 // GqlLet is a "LET <definitions>" operator; see ASTGqlLet in
 // googlesql/parser/parse_tree.h.
@@ -5665,14 +5668,52 @@ func (n *GraphEdgePattern) Children() []Node { return children(n.Filler) }
 // ASTGraphElementPatternFiller in googlesql/parser/parse_tree.h.
 type GraphElementPatternFiller struct {
 	Span
-	Name  *Identifier       `json:"name,omitempty"`
-	Label *GraphLabelFilter `json:"label,omitempty"`
-	Where *WhereClause      `json:"where,omitempty"`
+	Name     *Identifier                 `json:"name,omitempty"`
+	Label    *GraphLabelFilter           `json:"label,omitempty"`
+	PropSpec *GraphPropertySpecification `json:"prop_spec,omitempty"`
+	Where    *WhereClause                `json:"where,omitempty"`
+	Hint     *Hint                       `json:"hint,omitempty"`
 }
 
 func (n *GraphElementPatternFiller) Children() []Node {
-	return children(n.Name, n.Label, n.Where)
+	return children(n.Name, n.Label, n.PropSpec, n.Where, n.Hint)
 }
+
+// GraphPropertySpecification is the "{ name: value, ... }" property list in a
+// node or edge pattern filler; see ASTGraphPropertySpecification in
+// googlesql/parser/parse_tree.h.
+type GraphPropertySpecification struct {
+	Span
+	Properties []*GraphPropertyNameAndValue `json:"properties"`
+}
+
+func (n *GraphPropertySpecification) Children() []Node {
+	out := make([]Node, 0, len(n.Properties))
+	for _, prop := range n.Properties {
+		out = append(out, prop)
+	}
+	return out
+}
+
+// GraphPropertyNameAndValue is a single "name: value" property; see
+// ASTGraphPropertyNameAndValue in googlesql/parser/parse_tree.h.
+type GraphPropertyNameAndValue struct {
+	Span
+	Name  *Identifier `json:"name"`
+	Value Node        `json:"value"`
+}
+
+func (n *GraphPropertyNameAndValue) Children() []Node { return children(n.Name, n.Value) }
+
+// GraphPathMode is a "WALK"/"TRAIL"/"SIMPLE"/"ACYCLIC" path mode keyword; see
+// ASTGraphPathMode in googlesql/parser/parse_tree.h. The mode keyword is not
+// shown in the debug string.
+type GraphPathMode struct {
+	Span
+	Mode string `json:"mode,omitempty"`
+}
+
+func (n *GraphPathMode) Children() []Node { return nil }
 
 // GraphLabelFilter is an "IS <label_expr>" or ":<label_expr>" clause; see
 // ASTGraphLabelFilter in googlesql/parser/parse_tree.h.

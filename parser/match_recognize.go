@@ -99,6 +99,9 @@ func attachPostfixOperator(node ast.Node, clause ast.Node) ast.Node {
 	case *ast.ParenthesizedJoin:
 		t.PostfixOperators = append(t.PostfixOperators, clause)
 		t.Stop = clause.End()
+	case *ast.GraphTableQuery:
+		t.PostfixOperators = append(t.PostfixOperators, clause)
+		t.Stop = clause.End()
 	default:
 		return nil
 	}

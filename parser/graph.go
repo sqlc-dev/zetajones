@@ -17,6 +17,8 @@ package parser
 // subqueries) are intentionally left for later work.
 
 import (
+	"strings"
+
 	"github.com/sqlc-dev/zetajones/ast"
 	"github.com/sqlc-dev/zetajones/token"
 )
@@ -220,11 +222,15 @@ func (p *parser) parseGraphLinearOp() (ast.Node, error) {
 // googlesql.tm.
 func (p *parser) parseGqlMatch() (*ast.GqlMatch, error) {
 	matchTok := p.advance() // MATCH
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
 	pattern, err := p.parseGraphPattern()
 	if err != nil {
 		return nil, err
 	}
-	return &ast.GqlMatch{Span: span(matchTok.Pos, pattern.End()), Pattern: pattern}, nil
+	return &ast.GqlMatch{Span: span(matchTok.Pos, pattern.End()), Pattern: pattern, Hint: hint}, nil
 }
 
 // parseGqlOptionalMatch parses "OPTIONAL MATCH <graph_pattern>"; see
@@ -232,11 +238,15 @@ func (p *parser) parseGqlMatch() (*ast.GqlMatch, error) {
 func (p *parser) parseGqlOptionalMatch() (*ast.GqlMatch, error) {
 	optTok := p.advance() // OPTIONAL
 	p.advance()           // MATCH
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
 	pattern, err := p.parseGraphPattern()
 	if err != nil {
 		return nil, err
 	}
-	return &ast.GqlMatch{Span: span(optTok.Pos, pattern.End()), Pattern: pattern, Optional: true}, nil
+	return &ast.GqlMatch{Span: span(optTok.Pos, pattern.End()), Pattern: pattern, Hint: hint, Optional: true}, nil
 }
 
 // parseGqlLet parses "LET <definition_list>"; see graph_let_operator in
@@ -360,9 +370,22 @@ func (p *parser) parseGraphPattern() (*ast.GraphPattern, error) {
 	paths := []*ast.GraphPathPattern{first}
 	for p.peek().Kind == token.COMMA {
 		p.advance() // ,
+		// A path in the list (after the comma) may be prefixed with a hint,
+		// which is attached to the front of the path pattern.
+		var hint *ast.Hint
+		if p.peek().Kind == token.ATSIGN {
+			hint, err = p.parseOptionalHint()
+			if err != nil {
+				return nil, err
+			}
+		}
 		next, err := p.parseGraphPathPattern()
 		if err != nil {
 			return nil, err
+		}
+		if hint != nil {
+			next.Factors = append([]ast.Node{hint}, next.Factors...)
+			next.Start = hint.Pos()
 		}
 		paths = append(paths, next)
 	}
@@ -380,38 +403,80 @@ func (p *parser) parseGraphPattern() (*ast.GraphPattern, error) {
 	return gp, nil
 }
 
-// parseGraphPathPattern parses a sequence of node/edge path factors; see
-// graph_path_pattern / graph_path_pattern_expr in googlesql.tm. A leading
-// "identifier =" path-variable assignment prefix is recognized only to
-// reproduce the reference's error behavior; the assignment itself is not yet
-// modeled.
+// parseGraphPathPattern parses an optional path-variable assignment and path
+// mode followed by a path pattern expression; see graph_path_pattern in
+// googlesql.tm. (Path search prefixes are handled by a separate feature.)
 func (p *parser) parseGraphPathPattern() (*ast.GraphPathPattern, error) {
-	// A path pattern may begin with a "graph_identifier =" path variable
-	// assignment. Any leading bare identifier here must be such a prefix,
-	// since a path factor always starts with "(", "-", "<", or "->".
-	if t := p.peek(); (t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT {
-		p.advance() // path variable name
+	startPos := p.peek().Pos
+	var pathVar *ast.Identifier
+	// (graph_identifier "=")? — any bare identifier at the start of a path
+	// pattern is a path-variable assignment (a path factor never starts with an
+	// identifier). Path mode keywords bind as a mode instead.
+	if t := p.peek(); ((t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT) && !isGraphPathModeKeyword(t) {
+		pathVar = p.parseIdentifierToken(p.advance())
 		if p.peek().Kind != token.EQ {
 			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "=" but got %s`, describeToken(p.peek()))
 		}
 		p.advance() // =
 	}
+	// graph_path_mode?
+	var mode *ast.GraphPathMode
+	if isGraphPathModeKeyword(p.peek()) {
+		mode = p.parseGraphPathMode()
+	}
+	pattern, err := p.parseGraphPathPatternExpr()
+	if err != nil {
+		return nil, err
+	}
+	if pathVar == nil && mode == nil {
+		return pattern, nil
+	}
+	// A parenthesized pattern is normally returned unwrapped; wrap it again so
+	// the prefix (assignment / mode) has a dedicated ASTGraphPathPattern.
+	if pattern.Parenthesized {
+		pattern = &ast.GraphPathPattern{Span: pattern.Span, Factors: []ast.Node{pattern}}
+	}
+	prefix := make([]ast.Node, 0, 2)
+	if pathVar != nil {
+		prefix = append(prefix, pathVar)
+	}
+	if mode != nil {
+		prefix = append(prefix, mode)
+	}
+	pattern.Factors = append(prefix, pattern.Factors...)
+	pattern.Start = startPos
+	return pattern, nil
+}
 
-	var factors []ast.Node
+// parseGraphPathPatternExpr parses a concatenation of graph path factors,
+// returning an ASTGraphPathPattern; see graph_path_pattern_expr in
+// googlesql.tm. A single parenthesized subpath is returned unwrapped.
+func (p *parser) parseGraphPathPatternExpr() (*ast.GraphPathPattern, error) {
+	first, err := p.parseGraphPathFactor()
+	if err != nil {
+		return nil, err
+	}
+	var path *ast.GraphPathPattern
+	if pp, ok := first.(*ast.GraphPathPattern); ok {
+		path = pp
+	} else {
+		path = &ast.GraphPathPattern{Span: span(first.Pos(), first.End()), Factors: []ast.Node{first}}
+	}
 	for p.startsGraphPathFactor() {
-		f, err := p.parseGraphPathFactor()
+		// When concatenating onto a parenthesized subpath, wrap it so the
+		// wrapper (not the parenthesized node) grows to hold the new factor.
+		if path.Parenthesized {
+			path = &ast.GraphPathPattern{Span: path.Span, Factors: []ast.Node{path}}
+		}
+		next, err := p.parseGraphPathFactor()
 		if err != nil {
 			return nil, err
 		}
-		factors = append(factors, f)
+		path.Factors = append(path.Factors, next)
+		path.Start = path.Factors[0].Pos()
+		path.Stop = next.End()
 	}
-	if len(factors) == 0 {
-		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
-	}
-	return &ast.GraphPathPattern{
-		Span:    span(factors[0].Pos(), factors[len(factors)-1].End()),
-		Factors: factors,
-	}, nil
+	return path, nil
 }
 
 // startsGraphPathFactor reports whether the next token begins a graph path
@@ -424,11 +489,77 @@ func (p *parser) startsGraphPathFactor() bool {
 	return false
 }
 
+// parseGraphPathFactor parses a graph path primary optionally followed by a
+// quantifier; see graph_path_factor / graph_quantified_path_primary in
+// googlesql.tm.
 func (p *parser) parseGraphPathFactor() (ast.Node, error) {
-	if p.peek().Kind == token.LPAREN {
+	primary, err := p.parseGraphPathPrimary()
+	if err != nil {
+		return nil, err
+	}
+	if !p.startsGraphQuantifier() {
+		return primary, nil
+	}
+	if _, ok := primary.(*ast.GraphNodePattern); ok {
+		return nil, p.errorf(primary.Pos(), "Quantifier cannot be used on a node pattern")
+	}
+	quant, err := p.parseGraphQuantifier()
+	if err != nil {
+		return nil, err
+	}
+	// @$ of graph_quantified_path_primary spans every consumed token, including
+	// a trailing "}" that is not part of the FixedQuantifier node's location.
+	quantEnd := p.prevEnd()
+	var container *ast.GraphPathPattern
+	if edge, ok := primary.(*ast.GraphEdgePattern); ok {
+		container = &ast.GraphPathPattern{Factors: []ast.Node{edge}, Parenthesized: true}
+	} else {
+		container = primary.(*ast.GraphPathPattern)
+	}
+	container.Factors = append([]ast.Node{quant}, container.Factors...)
+	container.Span = span(primary.Pos(), quantEnd)
+	return container, nil
+}
+
+// startsGraphQuantifier reports whether the next token begins a graph
+// quantifier ("{", "+", or "*").
+func (p *parser) startsGraphQuantifier() bool {
+	switch p.peek().Kind {
+	case token.LBRACE, token.PLUS, token.STAR:
+		return true
+	}
+	return false
+}
+
+// parseGraphPathPrimary parses a node pattern, an edge pattern, or a
+// parenthesized subpath; see graph_path_primary in googlesql.tm.
+func (p *parser) parseGraphPathPrimary() (ast.Node, error) {
+	if p.peek().Kind != token.LPAREN {
+		return p.parseGraphEdgePattern()
+	}
+	if p.parenStartsNodePattern() {
 		return p.parseGraphNodePattern()
 	}
-	return p.parseGraphEdgePattern()
+	return p.parseGraphParenthesizedPathPattern()
+}
+
+// parenStartsNodePattern reports whether a "(" begins a node pattern (as
+// opposed to a parenthesized subpath). The interior of a node pattern is an
+// element filler, which never begins with a path factor, a path mode keyword,
+// or a "identifier =" path-variable assignment.
+func (p *parser) parenStartsNodePattern() bool {
+	t1 := p.peekAt(1)
+	switch t1.Kind {
+	case token.LPAREN, token.MINUS, token.LT, token.ARROW:
+		return false
+	}
+	if isGraphPathModeKeyword(t1) {
+		return false
+	}
+	if ((t1.Kind == token.IDENT && !isReserved(t1)) || t1.Kind == token.QUOTED_IDENT) && p.peekAt(2).Kind == token.EQ {
+		return false
+	}
+	return true
 }
 
 // parseGraphNodePattern parses "( <filler> )"; see graph_node_pattern in
@@ -446,6 +577,111 @@ func (p *parser) parseGraphNodePattern() (*ast.GraphNodePattern, error) {
 	return &ast.GraphNodePattern{Span: span(lparen.Pos, rparen.End), Filler: filler}, nil
 }
 
+// parseGraphParenthesizedPathPattern parses "( hint? path_pattern where? )";
+// see graph_parenthesized_path_pattern in googlesql.tm.
+func (p *parser) parseGraphParenthesizedPathPattern() (*ast.GraphPathPattern, error) {
+	lparen := p.advance() // (
+	if p.peek().Kind == token.ATSIGN {
+		return nil, p.errorf(p.peek().Pos, "Hint cannot be used at beginning of path pattern")
+	}
+	inner, err := p.parseGraphPathPattern()
+	if err != nil {
+		return nil, err
+	}
+	var where *ast.WhereClause
+	if isKeyword(p.peek(), "WHERE") {
+		where, err = p.parseWhereClause()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if p.peek().Kind != token.RPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" but got %s`, describeToken(p.peek()))
+	}
+	rparen := p.advance() // )
+	if where != nil {
+		ret := inner
+		if inner.Parenthesized {
+			ret = &ast.GraphPathPattern{Factors: []ast.Node{inner}}
+		}
+		ret.Parenthesized = true
+		ret.Factors = append([]ast.Node{where}, ret.Factors...)
+		ret.Span = span(lparen.Pos, rparen.End)
+		return ret, nil
+	}
+	inner.Parenthesized = true
+	inner.Span = span(lparen.Pos, rparen.End)
+	return inner, nil
+}
+
+// parseGraphPathMode parses a "WALK"/"TRAIL"/"SIMPLE"/"ACYCLIC" path mode
+// keyword; see graph_path_mode in googlesql.tm.
+func (p *parser) parseGraphPathMode() *ast.GraphPathMode {
+	tok := p.advance()
+	return &ast.GraphPathMode{Span: span(tok.Pos, tok.End), Mode: strings.ToUpper(tok.Image)}
+}
+
+// isGraphPathModeKeyword reports whether tok is a graph path mode keyword.
+func isGraphPathModeKeyword(tok token.Token) bool {
+	return isKeyword(tok, "WALK") || isKeyword(tok, "TRAIL") ||
+		isKeyword(tok, "SIMPLE") || isKeyword(tok, "ACYCLIC")
+}
+
+// parseGraphQuantifier parses "{lo,hi}", "{n}", "+", or "*"; see
+// graph_quantifier in googlesql.tm. Unlike the row-pattern quantifier, each
+// bound node's location covers only the bound itself.
+func (p *parser) parseGraphQuantifier() (ast.Node, error) {
+	tok := p.peek()
+	switch tok.Kind {
+	case token.PLUS, token.STAR:
+		p.advance()
+		symbol := "PLUS"
+		if tok.Kind == token.STAR {
+			symbol = "STAR"
+		}
+		return &ast.SymbolQuantifier{Span: span(tok.Pos, tok.End), Symbol: symbol}, nil
+	}
+	lbrace := p.advance() // {
+	afterBrace := p.prevEnd()
+	lower, err := p.parseOptionalQuantifierBound()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		afterComma := p.prevEnd()
+		upper, err := p.parseOptionalQuantifierBound()
+		if err != nil {
+			return nil, err
+		}
+		if p.peek().Kind != token.RBRACE {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "}" but got %s`, describeToken(p.peek()))
+		}
+		rbrace := p.advance() // }
+		return &ast.BoundedQuantifier{
+			Span:       span(lbrace.Pos, rbrace.End),
+			LowerBound: graphQuantifierBound(lower, afterBrace),
+			UpperBound: graphQuantifierBound(upper, afterComma),
+		}, nil
+	}
+	// Not a comma: must be the fixed "{ n }" form.
+	if lower != nil && p.peek().Kind == token.RBRACE {
+		p.advance() // }
+		return &ast.FixedQuantifier{Span: span(lower.Pos(), lower.End()), Bound: lower}, nil
+	}
+	return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," but got %s`, describeToken(p.peek()))
+}
+
+// graphQuantifierBound builds an ASTQuantifierBound whose location covers only
+// the bound expression, or is an empty point at emptyPos when the bound is
+// omitted.
+func graphQuantifierBound(bound ast.Node, emptyPos int) *ast.QuantifierBound {
+	if bound == nil {
+		return &ast.QuantifierBound{Span: span(emptyPos, emptyPos)}
+	}
+	return &ast.QuantifierBound{Span: span(bound.Pos(), bound.End()), Bound: bound}
+}
+
 // parseGraphEdgePattern parses an edge pattern in any of its full or
 // abbreviated forms; see graph_edge_pattern in googlesql.tm.
 func (p *parser) parseGraphEdgePattern() (*ast.GraphEdgePattern, error) {
@@ -455,13 +691,21 @@ func (p *parser) parseGraphEdgePattern() (*ast.GraphEdgePattern, error) {
 		p.advance()
 		return &ast.GraphEdgePattern{Span: span(start.Pos, start.End), Orientation: "RIGHT"}, nil
 	case token.LT: // <- or <-[...]-
-		p.advance() // <
+		lt := p.advance() // <
 		if p.peek().Kind != token.MINUS {
 			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "-" but got %s`, describeToken(p.peek()))
 		}
 		minus := p.advance() // -
+		// Edge pattern delimiters are multi-tokens: no whitespace allowed.
+		if err := p.validateNoWhitespace(lt, "<", minus, "-"); err != nil {
+			return nil, err
+		}
 		if p.peek().Kind == token.LBRACKET {
-			filler, endTok, err := p.parseGraphBracketedFiller(token.MINUS)
+			lbracket := p.peek()
+			if err := p.validateNoWhitespace(minus, "-", lbracket, "["); err != nil {
+				return nil, err
+			}
+			filler, endTok, err := p.parseGraphBracketedFiller(true, token.MINUS)
 			if err != nil {
 				return nil, err
 			}
@@ -469,9 +713,13 @@ func (p *parser) parseGraphEdgePattern() (*ast.GraphEdgePattern, error) {
 		}
 		return &ast.GraphEdgePattern{Span: span(start.Pos, minus.End), Orientation: "LEFT"}, nil
 	case token.MINUS: // - or -[...]- or -[...]->
-		p.advance() // -
+		minus := p.advance() // -
 		if p.peek().Kind == token.LBRACKET {
-			filler, endTok, err := p.parseGraphBracketedFiller(token.MINUS, token.ARROW)
+			lbracket := p.peek()
+			if err := p.validateNoWhitespace(minus, "-", lbracket, "["); err != nil {
+				return nil, err
+			}
+			filler, endTok, err := p.parseGraphBracketedFiller(false, token.MINUS, token.ARROW)
 			if err != nil {
 				return nil, err
 			}
@@ -486,9 +734,22 @@ func (p *parser) parseGraphEdgePattern() (*ast.GraphEdgePattern, error) {
 	return nil, p.errorf(start.Pos, "Syntax error: Unexpected %s", describeToken(start))
 }
 
+// validateNoWhitespace reports a "Unexpected whitespace between ..." error at
+// the left token's position when the two tokens are not directly adjacent; see
+// ValidateNoWhitespace in googlesql/parser/parser_internal.cc.
+func (p *parser) validateNoWhitespace(left token.Token, leftImage string, right token.Token, rightImage string) error {
+	if left.End != right.Pos {
+		return p.errorf(left.Pos, `Syntax error: Unexpected whitespace between "%s" and "%s"`, leftImage, rightImage)
+	}
+	return nil
+}
+
 // parseGraphBracketedFiller parses "[ <filler> ]" followed by one of the given
-// closing token kinds, returning the filler and the closing token.
-func (p *parser) parseGraphBracketedFiller(closers ...token.Kind) (*ast.GraphElementPatternFiller, token.Token, error) {
+// closing token kinds, returning the filler and the closing token. The closing
+// bracket must be directly adjacent to the closing token (no whitespace). When
+// leftOnly is set (the "<-[...]-" form), a non-"-" closer yields the reference
+// "Expected \"-\"" error.
+func (p *parser) parseGraphBracketedFiller(leftOnly bool, closers ...token.Kind) (*ast.GraphElementPatternFiller, token.Token, error) {
 	p.advance() // [
 	filler, err := p.parseGraphElementPatternFiller()
 	if err != nil {
@@ -497,11 +758,22 @@ func (p *parser) parseGraphBracketedFiller(closers ...token.Kind) (*ast.GraphEle
 	if p.peek().Kind != token.RBRACKET {
 		return nil, token.Token{}, p.errorf(p.peek().Pos, `Syntax error: Expected "]" but got %s`, describeToken(p.peek()))
 	}
-	p.advance() // ]
+	rbracket := p.advance() // ]
 	for _, k := range closers {
 		if p.peek().Kind == k {
+			closer := p.peek()
+			img := "-"
+			if k == token.ARROW {
+				img = "->"
+			}
+			if err := p.validateNoWhitespace(rbracket, "]", closer, img); err != nil {
+				return nil, token.Token{}, err
+			}
 			return filler, p.advance(), nil
 		}
+	}
+	if leftOnly {
+		return nil, token.Token{}, p.errorf(p.peek().Pos, `Syntax error: Expected "-" but got %s`, describeToken(p.peek()))
 	}
 	return nil, token.Token{}, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 }
@@ -512,11 +784,21 @@ func (p *parser) parseGraphBracketedFiller(closers ...token.Kind) (*ast.GraphEle
 // and hints are not yet supported.
 func (p *parser) parseGraphElementPatternFiller() (*ast.GraphElementPatternFiller, error) {
 	startPos := p.peek().Pos
+	var hint *ast.Hint
 	var name *ast.Identifier
 	var label *ast.GraphLabelFilter
+	var propSpec *ast.GraphPropertySpecification
 	var where *ast.WhereClause
 	end := startPos
 
+	if p.peek().Kind == token.ATSIGN {
+		h, err := p.parseOptionalHint()
+		if err != nil {
+			return nil, err
+		}
+		hint = h
+		end = hint.End()
+	}
 	if t := p.peek(); (t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT {
 		name = p.parseIdentifierToken(p.advance())
 		end = name.End()
@@ -529,15 +811,66 @@ func (p *parser) parseGraphElementPatternFiller() (*ast.GraphElementPatternFille
 		label = lf
 		end = lf.End()
 	}
+	if p.peek().Kind == token.LBRACE {
+		ps, err := p.parseGraphPropertySpecification()
+		if err != nil {
+			return nil, err
+		}
+		propSpec = ps
+		end = ps.End()
+	}
 	if isKeyword(p.peek(), "WHERE") {
 		w, err := p.parseWhereClause()
 		if err != nil {
 			return nil, err
 		}
+		if propSpec != nil {
+			return nil, p.errorf(w.Pos(), "WHERE clause cannot be used together with property specification")
+		}
 		where = w
 		end = w.End()
 	}
-	return &ast.GraphElementPatternFiller{Span: span(startPos, end), Name: name, Label: label, Where: where}, nil
+	return &ast.GraphElementPatternFiller{Span: span(startPos, end), Name: name, Label: label, PropSpec: propSpec, Where: where, Hint: hint}, nil
+}
+
+// parseGraphPropertySpecification parses "{ name: value, ... }"; see
+// graph_property_specification in googlesql.tm.
+func (p *parser) parseGraphPropertySpecification() (*ast.GraphPropertySpecification, error) {
+	lbrace := p.advance() // {
+	first, err := p.parseGraphPropertyNameAndValue()
+	if err != nil {
+		return nil, err
+	}
+	props := []*ast.GraphPropertyNameAndValue{first}
+	for p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		prop, err := p.parseGraphPropertyNameAndValue()
+		if err != nil {
+			return nil, err
+		}
+		props = append(props, prop)
+	}
+	if p.peek().Kind != token.RBRACE {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "}" but got %s`, describeToken(p.peek()))
+	}
+	rbrace := p.advance() // }
+	return &ast.GraphPropertySpecification{Span: span(lbrace.Pos, rbrace.End), Properties: props}, nil
+}
+
+func (p *parser) parseGraphPropertyNameAndValue() (*ast.GraphPropertyNameAndValue, error) {
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.COLON {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ":" but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // :
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GraphPropertyNameAndValue{Span: span(name.Pos(), p.extEnd(value)), Name: name, Value: value}, nil
 }
 
 // parseGraphLabelFilter parses "( IS | : ) <label_expression>"; see
@@ -548,7 +881,10 @@ func (p *parser) parseGraphLabelFilter() (*ast.GraphLabelFilter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.GraphLabelFilter{Span: span(tok.Pos, expr.End()), Expr: expr}, nil
+	// The is_label_expression location (@$) spans every consumed token,
+	// including a trailing ")" of a parenthesized label expression, even though
+	// the label expression node's own location excludes the parentheses.
+	return &ast.GraphLabelFilter{Span: span(tok.Pos, p.prevEnd()), Expr: expr}, nil
 }
 
 // Label expressions are parsed with precedence "|" < "&" < "!"/primary; see
@@ -567,7 +903,7 @@ func (p *parser) parseGraphLabelOr() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = combineGraphLabelOperation("OR", left, right)
+		left = combineGraphLabelOperation("OR", left, right, p.prevEnd())
 	}
 	return left, nil
 }
@@ -583,7 +919,7 @@ func (p *parser) parseGraphLabelAnd() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = combineGraphLabelOperation("AND", left, right)
+		left = combineGraphLabelOperation("AND", left, right, p.prevEnd())
 	}
 	return left, nil
 }
@@ -595,8 +931,9 @@ func (p *parser) parseGraphLabelNot() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
+		// @$ spans the operand's tokens including a trailing ")".
 		return &ast.GraphLabelOperation{
-			Span:     span(notTok.Pos, operand.End()),
+			Span:     span(notTok.Pos, p.prevEnd()),
 			Op:       "NOT",
 			Operands: []ast.Node{operand},
 		}, nil
@@ -635,14 +972,16 @@ func (p *parser) parseGraphLabelPrimary() (ast.Node, error) {
 // combineGraphLabelOperation combines left and right under op, flattening into
 // left when it is an unparenthesized operation of the same op; see
 // MakeOrCombineGraphLabelOperation in parser_internal.h.
-func combineGraphLabelOperation(op string, left, right ast.Node) ast.Node {
+func combineGraphLabelOperation(op string, left, right ast.Node, end int) ast.Node {
+	// end is @$.end(), the end of the last consumed token, which includes a
+	// trailing ")" when the right operand is parenthesized.
 	if lo, ok := left.(*ast.GraphLabelOperation); ok && lo.Op == op && !lo.Parenthesized {
 		lo.Operands = append(lo.Operands, right)
-		lo.Stop = right.End()
+		lo.Stop = end
 		return lo
 	}
 	return &ast.GraphLabelOperation{
-		Span:     span(left.Pos(), right.End()),
+		Span:     span(left.Pos(), end),
 		Op:       op,
 		Operands: []ast.Node{left, right},
 	}

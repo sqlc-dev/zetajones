@@ -1398,6 +1398,12 @@ func nodeString(n ast.Node) string {
 		return "GraphWildcardLabel"
 	case *ast.GraphLabelOperation:
 		return "GraphLabelOperation(" + t.Op + ")"
+	case *ast.GraphPropertySpecification:
+		return "GraphPropertySpecification"
+	case *ast.GraphPropertyNameAndValue:
+		return "GraphPropertyNameAndValue"
+	case *ast.GraphPathMode:
+		return "GraphPathMode"
 	default:
 		return fmt.Sprintf("UNKNOWN_NODE(%T)", n)
 	}
