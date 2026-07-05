@@ -1103,10 +1103,13 @@ type SelectColumn struct {
 	Span
 	Expr  Node   `json:"expr"`
 	Alias *Alias `json:"alias,omitempty"`
+	// Order is the ASC/DESC[/NULLS] suffix on a pipe AGGREGATE selection
+	// item; see pipe_selection_item_with_order in googlesql.tm.
+	Order *GroupingItemOrder `json:"order,omitempty"`
 }
 
 func (n *SelectColumn) Children() []Node {
-	return children(n.Expr, n.Alias)
+	return children(n.Expr, n.Alias, n.Order)
 }
 
 // Alias is an [AS] name alias.
@@ -2232,6 +2235,29 @@ type ClampedBetweenModifier struct {
 
 func (n *ClampedBetweenModifier) Children() []Node {
 	return children(n.Low, n.High)
+}
+
+// WithReportModifier is the "WITH REPORT [options_list]" modifier on an
+// aggregate function call; see ASTWithReportModifier in
+// googlesql/parser/parse_tree.h and with_report_modifier in googlesql.tm.
+type WithReportModifier struct {
+	Span
+	Options *OptionsList `json:"options,omitempty"`
+}
+
+func (n *WithReportModifier) Children() []Node {
+	return children(n.Options)
+}
+
+// SequenceArg is a "SEQUENCE path" function-call argument; see ASTSequenceArg
+// in googlesql/parser/parse_tree.h and sequence_arg in googlesql.tm.
+type SequenceArg struct {
+	Span
+	Sequence *PathExpression `json:"sequence"`
+}
+
+func (n *SequenceArg) Children() []Node {
+	return children(n.Sequence)
 }
 
 // InList is the parenthesized value list of an IN or LIKE ANY/SOME/ALL
@@ -4440,6 +4466,7 @@ type FunctionCall struct {
 	GroupBy        *GroupBy                `json:"group_by,omitempty"`
 	HavingClause   *Having                 `json:"having,omitempty"`
 	ClampedBetween *ClampedBetweenModifier `json:"clamped_between_modifier,omitempty"`
+	WithReport     *WithReportModifier     `json:"with_report_modifier,omitempty"`
 	OrderBy        *OrderBy                `json:"order_by,omitempty"`
 	LimitOffset    *LimitOffset            `json:"limit_offset,omitempty"`
 }
@@ -4461,6 +4488,9 @@ func (n *FunctionCall) Children() []Node {
 	}
 	if n.ClampedBetween != nil {
 		out = append(out, n.ClampedBetween)
+	}
+	if n.WithReport != nil {
+		out = append(out, n.WithReport)
 	}
 	if n.OrderBy != nil {
 		out = append(out, n.OrderBy)

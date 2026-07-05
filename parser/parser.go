@@ -7437,6 +7437,15 @@ func (p *parser) parseOptionsEntry() (*ast.OptionsEntry, error) {
 		}
 		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "=" but got %s`, describeToken(p.peek()))
 	}
+	// expression_or_proto in googlesql.tm: the value may be the bare reserved
+	// keyword PROTO, which is turned into a path expression naming "PROTO"
+	// (reserved keywords are otherwise not valid expressions).
+	if isKeyword(p.peek(), "PROTO") {
+		protoTok := p.advance()
+		ident := &ast.Identifier{Span: span(protoTok.Pos, protoTok.End), Name: "PROTO"}
+		path := &ast.PathExpression{Span: span(protoTok.Pos, protoTok.End), Names: []*ast.Identifier{ident}}
+		return &ast.OptionsEntry{Span: span(name.Pos(), path.End()), Name: name, Op: op, Value: path}, nil
+	}
 	value, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -9098,7 +9107,7 @@ func (p *parser) parsePipeAggregate(pipeTok token.Token) (ast.Node, error) {
 	list := &ast.SelectList{Span: span(aggTok.End, aggTok.End)}
 	if startsExpression(p.peek()) {
 		for {
-			col, err := p.parseSelectColumnOrDotStar()
+			col, err := p.parsePipeAggregateSelectColumn()
 			if err != nil {
 				return nil, err
 			}
@@ -9525,6 +9534,31 @@ func (p *parser) parseSelectColumnOrDotStar() (*ast.SelectColumn, error) {
 	if alias != nil {
 		col.Alias = alias
 		col.Stop = alias.End()
+	}
+	return col, nil
+}
+
+// parsePipeAggregateSelectColumn parses one pipe AGGREGATE selection item:
+// "select_column_expr opt_selection_item_order" or "select_column_dot_star"
+// (which has no order suffix); see pipe_selection_item_with_order in
+// googlesql.tm.
+func (p *parser) parsePipeAggregateSelectColumn() (*ast.SelectColumn, error) {
+	col, err := p.parseSelectColumnOrDotStar()
+	if err != nil {
+		return nil, err
+	}
+	switch col.Expr.(type) {
+	case *ast.DotStar, *ast.DotStarWithModifiers:
+		// select_column_dot_star does not take an ordering suffix.
+		return col, nil
+	}
+	order, err := p.parseSelectionItemOrder()
+	if err != nil {
+		return nil, err
+	}
+	if order != nil {
+		col.Order = order
+		col.Stop = order.End()
 	}
 	return col, nil
 }
@@ -10303,9 +10337,21 @@ func (p *parser) parseGroupBy(mode groupByMode) (*ast.GroupBy, error) {
 		}
 		andOrderBy = true
 	}
-	if _, err := p.expectKeyword("BY"); err != nil {
-		return nil, err
+	if !isKeyword(p.peek(), "BY") {
+		if cerr := p.exceptClashError(); cerr != nil {
+			return nil, cerr
+		}
+		// Right after "GROUP" the preamble is "hint? BY" (plus "(AND ORDER)?"
+		// in pipe AGGREGATE). When no hint and no "AND ORDER" have been
+		// consumed, "@" (for a hint) is still a valid continuation alongside
+		// "BY", so the reference lists both; see group_by_preamble in
+		// googlesql.tm.
+		if mode != groupByPipe && hint == nil {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected @ for hint or keyword BY but got %s", describeToken(p.peek()))
+		}
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword BY but got %s", describeToken(p.peek()))
 	}
+	p.advance() // BY
 	groupBy := &ast.GroupBy{Span: span(groupTok.Pos, groupTok.End), Hint: hint, AndOrderBy: andOrderBy}
 	if mode == groupByRegular && isKeyword(p.peek(), "ALL") {
 		allTok := p.advance()
@@ -10513,22 +10559,55 @@ func (p *parser) parseGroupingItemOrder() (*ast.GroupingItemOrder, error) {
 	default:
 		return nil, nil
 	}
-	if isKeyword(p.peek(), "NULLS") {
-		nullsTok := p.advance()
-		var nullsFirst bool
-		switch {
-		case isKeyword(p.peek(), "FIRST"):
-			nullsFirst = true
-		case isKeyword(p.peek(), "LAST"):
-			nullsFirst = false
-		default:
-			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword FIRST or keyword LAST but got %s", describeToken(p.peek()))
-		}
-		endTok := p.advance()
-		order.NullOrder = &ast.NullOrder{Span: span(nullsTok.Pos, endTok.End), NullsFirst: nullsFirst}
-		order.Stop = endTok.End
+	if err := p.parseNullOrderSuffix(order); err != nil {
+		return nil, err
 	}
 	return order, nil
+}
+
+// parseSelectionItemOrder parses the optional ASC/DESC ordering suffix (with an
+// optional NULLS FIRST/LAST) on a pipe AGGREGATE selection item; see
+// selection_item_order / opt_selection_item_order in googlesql.tm. Unlike
+// opt_grouping_item_order it does not accept NULLS FIRST/LAST without a
+// preceding ASC/DESC. It returns nil when no ordering suffix is present.
+func (p *parser) parseSelectionItemOrder() (*ast.GroupingItemOrder, error) {
+	var order *ast.GroupingItemOrder
+	switch {
+	case isKeyword(p.peek(), "ASC"):
+		tok := p.advance()
+		order = &ast.GroupingItemOrder{Span: span(tok.Pos, tok.End), Spec: "ASC"}
+	case isKeyword(p.peek(), "DESC"):
+		tok := p.advance()
+		order = &ast.GroupingItemOrder{Span: span(tok.Pos, tok.End), Spec: "DESC"}
+	default:
+		return nil, nil
+	}
+	if err := p.parseNullOrderSuffix(order); err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+// parseNullOrderSuffix parses an optional "NULLS FIRST" / "NULLS LAST" suffix
+// and attaches it to order; see opt_null_order in googlesql.tm.
+func (p *parser) parseNullOrderSuffix(order *ast.GroupingItemOrder) error {
+	if !isKeyword(p.peek(), "NULLS") {
+		return nil
+	}
+	nullsTok := p.advance()
+	var nullsFirst bool
+	switch {
+	case isKeyword(p.peek(), "FIRST"):
+		nullsFirst = true
+	case isKeyword(p.peek(), "LAST"):
+		nullsFirst = false
+	default:
+		return p.errorf(p.peek().Pos, "Syntax error: Expected keyword FIRST or keyword LAST but got %s", describeToken(p.peek()))
+	}
+	endTok := p.advance()
+	order.NullOrder = &ast.NullOrder{Span: span(nullsTok.Pos, endTok.End), NullsFirst: nullsFirst}
+	order.Stop = endTok.End
+	return nil
 }
 
 // parseOrderBy parses "ORDER [hint] BY ordering_expression, ...". When
@@ -11899,12 +11978,27 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// "INTERVAL <expr> <datepart> [TO <datepart>]"; see
 			// interval_expression in googlesql.tm.
 			return p.parseIntervalExpr()
+		case isKeyword(tok, "GROUPING") || isKeyword(tok, "IF"):
+			// GROUPING and IF are non-reserved keywords, but in expression
+			// position they can only name a function call requiring "(":
+			// they are not listed in keyword_as_identifier, so a bare
+			// GROUPING/IF is not a valid path expression. See
+			// function_name_from_keyword and function_call_expression_base in
+			// googlesql.tm. (RANGE is also in that grammar rule but has its own
+			// range-literal handling above and otherwise parses as a path.)
+			kw := p.advance()
+			ident := &ast.Identifier{Span: span(kw.Pos, kw.End), Name: kw.Image}
+			path := &ast.PathExpression{Span: span(kw.Pos, kw.End), Names: []*ast.Identifier{ident}}
+			if p.peek().Kind != token.LPAREN {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+			}
+			return p.finishFunctionCall(path)
 		case isReservedFunctionNameKeyword(tok):
 			// COLLATE, LEFT, and RIGHT are reserved keywords, but in expression
 			// position they can name a function call: "COLLATE(...)". They must
 			// be followed by "(". See function_name_from_keyword in
-			// googlesql.tm. (IF, GROUPING, and RANGE are non-reserved and
-			// already reach parsePathOrCall below.)
+			// googlesql.tm. (RANGE is non-reserved and reaches parsePathOrCall
+			// below; GROUPING and IF are handled just above.)
 			kw := p.advance()
 			ident := &ast.Identifier{Span: span(kw.Pos, kw.End), Name: kw.Image}
 			path := &ast.PathExpression{Span: span(kw.Pos, kw.End), Names: []*ast.Identifier{ident}}
@@ -12391,13 +12485,28 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 	if p.peek().Kind != token.RPAREN && !nullHandlingAhead() &&
 		!isKeyword(p.peek(), "WHERE") && !isKeyword(p.peek(), "GROUP") &&
 		!isKeyword(p.peek(), "HAVING") && !isKeyword(p.peek(), "ORDER") &&
-		!isKeyword(p.peek(), "LIMIT") {
+		!isKeyword(p.peek(), "LIMIT") && !isKeyword(p.peek(), "WITH") {
+		firstArg := true
 		for {
 			var arg ast.Node
 			switch {
 			case p.peek().Kind == token.STAR:
 				star := p.advance()
 				arg = &ast.Star{Span: span(star.Pos, star.End), Image: star.Image}
+			case isKeyword(p.peek(), "SEQUENCE") && !isKeyword(p.peekAt(1), "CLAMPED"):
+				// sequence_arg: "SEQUENCE" path_expression; see
+				// function_call_argument in googlesql.tm. When SEQUENCE is
+				// directly followed by CLAMPED the reference lexer treats
+				// SEQUENCE as an ordinary identifier so that "CLAMPED BETWEEN"
+				// can be a modifier (see the KW_SEQUENCE case in
+				// lookahead_transformer.cc); such a SEQUENCE falls through to
+				// the default expression case below.
+				seqTok := p.advance() // SEQUENCE
+				seqPath, perr := p.parsePathExpression()
+				if perr != nil {
+					return nil, perr
+				}
+				arg = &ast.SequenceArg{Span: span(seqTok.Pos, seqPath.End()), Sequence: seqPath}
 			case p.peekAt(1).Kind == token.LAMBDA &&
 				(p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
 				!isReserved(p.peek()):
@@ -12450,8 +12559,21 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 					// prefix.
 					return nil, p.errorf(p.peek().Pos, "Each function argument is an expression, not a query; to use a query as an expression, the query must be wrapped with additional parentheses to make it a scalar subquery expression")
 				}
+				startTok := p.peek()
 				arg, err = p.parseExpression()
 				if err != nil {
+					// In the empty-argument-list state (nothing parsed yet),
+					// the reference LALR parser can reduce to a zero-argument
+					// call, so an unparseable first token is reported as a
+					// missing ")" rather than "Unexpected ...". See the empty
+					// argument list alternative of function_call_expression in
+					// googlesql.tm.
+					if firstArg {
+						var e *Error
+						if errors.As(err, &e) && e.Offset == startTok.Pos {
+							return nil, p.errorf(startTok.Pos, `Syntax error: Expected ")" but got %s`, describeToken(startTok))
+						}
+					}
 					return nil, err
 				}
 				if p.peek().Kind == token.ARROW {
@@ -12477,6 +12599,7 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 				}
 			}
 			call.Args = append(call.Args, arg)
+			firstArg = false
 			if p.peek().Kind != token.COMMA {
 				break
 			}
@@ -12549,10 +12672,14 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 	}
 	// clamped_between_modifier in googlesql.tm. It requires at least one
 	// argument; with no arguments, CLAMPED parses as an identifier inside
-	// the first argument expression.
-	if len(call.Args) > 0 && isKeyword(p.peek(), "CLAMPED") && isKeyword(p.peekAt(1), "BETWEEN") {
+	// the first argument expression. Once CLAMPED appears directly after an
+	// argument (not after a comma) it can only be this modifier, so "BETWEEN"
+	// is then required.
+	if len(call.Args) > 0 && isKeyword(p.peek(), "CLAMPED") {
 		clampedTok := p.advance()
-		p.advance() // consume BETWEEN
+		if _, err := p.expectKeyword("BETWEEN"); err != nil {
+			return nil, err
+		}
 		low, err := p.parseBitwiseOr()
 		if err != nil {
 			return nil, err
@@ -12569,6 +12696,21 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 			Low:  low,
 			High: high,
 		}
+	}
+	// with_report_modifier in googlesql.tm: "WITH" "REPORT" options_list?.
+	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "REPORT") {
+		withTok := p.advance()   // WITH
+		reportTok := p.advance() // REPORT
+		wr := &ast.WithReportModifier{Span: span(withTok.Pos, reportTok.End)}
+		if p.peek().Kind == token.LPAREN {
+			opts, err := p.parseOptionsList()
+			if err != nil {
+				return nil, err
+			}
+			wr.Options = opts
+			wr.Stop = opts.End()
+		}
+		call.WithReport = wr
 	}
 	// order_by_clause? opt_limit_offset_clause in function_call_expression.
 	if isKeyword(p.peek(), "ORDER") {

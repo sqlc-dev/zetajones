@@ -570,6 +570,10 @@ func nodeString(n ast.Node) string {
 		return "BetweenExpression(BETWEEN)"
 	case *ast.ClampedBetweenModifier:
 		return "ClampedBetweenModifier"
+	case *ast.WithReportModifier:
+		return "WithReportModifier"
+	case *ast.SequenceArg:
+		return "SequenceArg"
 	case *ast.HavingModifier:
 		return "HavingModifier"
 	case *ast.NamedArgument:
