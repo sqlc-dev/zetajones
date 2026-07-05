@@ -243,6 +243,15 @@ func parseCase(lines []string, defaults *[]string) *Case {
 		return c
 	}
 
+	// file_based_test_driver appends a trailing newline to each test case's
+	// input by default; run_parser_test.cc strips it only when the case has the
+	// [strip_trailing_newline] option. Byte offsets in the expected output (and
+	// the end-of-input error position) index into this newline-terminated
+	// input, so reproduce it here.
+	if !c.HasOption("strip_trailing_newline") {
+		c.SQL += "\n"
+	}
+
 	// Under parse_multiple the driver parses each ";"-separated statement and
 	// emits one output per statement, all "--"-separated with no unparse output
 	// (see TestMulti in run_parser_test.cc). Every output part is therefore an

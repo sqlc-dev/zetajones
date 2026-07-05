@@ -31,13 +31,6 @@ func Lex(sql string) ([]token.Token, error) {
 		if err != nil {
 			return nil, err
 		}
-		if tok.Kind == token.EOF && len(toks) > 0 && tok.Pos > l.prev.End {
-			// ZetaSQL reports end-of-input at the end of the last real token,
-			// not past trailing whitespace/comments, so "Unexpected end of
-			// statement" points just after the final token.
-			tok.Pos = l.prev.End
-			tok.End = l.prev.End
-		}
 		toks = append(toks, tok)
 		l.updateLookback(tok)
 		if tok.Kind == token.EOF {
@@ -57,6 +50,14 @@ type lexer struct {
 	// path expression; digits after such a dot lex as identifiers ("t.1",
 	// "t.1b") rather than as numbers.
 	afterPathDot bool
+	// lastCommentEnd is the end offset of the last comment consumed by the
+	// current skipSpaceAndComments pass, or -1 if none. Dash/pound (line)
+	// comments include their terminating line break, so their end lands on the
+	// next line; block comments end at "*/". This is used to place the
+	// end-of-input position after a trailing comment (see next), matching the
+	// EOI rule in googlesql/parser/googlesql.tm: whitespace before EOI is
+	// skipped but trailing comments are not.
+	lastCommentEnd int
 }
 
 // updateLookback records tok as the lookback token and tracks whether the
@@ -122,8 +123,12 @@ func (l *lexer) peekAt(off int) byte {
 
 func (l *lexer) peek() byte { return l.peekAt(0) }
 
-// skipSpaceAndComments advances past whitespace and comments.
+// skipSpaceAndComments advances past whitespace and comments. It records the
+// end offset of the last comment consumed in l.lastCommentEnd (or -1 if the
+// pass consumes no comment) so that next can place the end-of-input position
+// after a trailing comment rather than past trailing whitespace.
 func (l *lexer) skipSpaceAndComments() error {
+	l.lastCommentEnd = -1
 	for l.pos < len(l.sql) {
 		c := l.sql[l.pos]
 		switch {
@@ -136,15 +141,16 @@ func (l *lexer) skipSpaceAndComments() error {
 			}
 			l.pos += size
 		case c == '#':
-			l.skipToLineEnd()
+			l.skipLineComment()
 		case c == '-' && l.peekAt(1) == '-':
-			l.skipToLineEnd()
+			l.skipLineComment()
 		case c == '/' && l.peekAt(1) == '*':
 			end := strings.Index(l.sql[l.pos+2:], "*/")
 			if end < 0 {
 				return l.errorf(l.pos, "Syntax error: Unclosed comment")
 			}
 			l.pos += 2 + end + 2
+			l.lastCommentEnd = l.pos
 		default:
 			return nil
 		}
@@ -170,10 +176,28 @@ func isUnicodeSpace(r rune) bool {
 	return false
 }
 
-func (l *lexer) skipToLineEnd() {
-	for l.pos < len(l.sql) && l.sql[l.pos] != '\n' {
+// skipLineComment consumes a dash ("--") or pound ("#") comment, including its
+// terminating line break, matching dash_comment/pound_comment in
+// googlesql/parser/googlesql.tm (/...[^\r\n]*(\r|\n|\r\n)?/). Because the line
+// break is part of the comment, l.lastCommentEnd (set here) lands at the start
+// of the next line, which is where ZetaSQL reports end-of-input after a
+// trailing line comment.
+func (l *lexer) skipLineComment() {
+	for l.pos < len(l.sql) && l.sql[l.pos] != '\n' && l.sql[l.pos] != '\r' {
 		l.pos++
 	}
+	// Consume one optional line terminator: "\r\n", "\r", or "\n".
+	if l.pos < len(l.sql) {
+		if l.sql[l.pos] == '\r' {
+			l.pos++
+			if l.pos < len(l.sql) && l.sql[l.pos] == '\n' {
+				l.pos++
+			}
+		} else if l.sql[l.pos] == '\n' {
+			l.pos++
+		}
+	}
+	l.lastCommentEnd = l.pos
 }
 
 func isIdentStart(c byte) bool {
@@ -217,7 +241,15 @@ func (l *lexer) next() (token.Token, error) {
 	}
 	start := l.pos
 	if l.pos >= len(l.sql) {
-		return token.Token{Kind: token.EOF, Pos: start, End: start}, nil
+		// End of input. ZetaSQL reports the end-of-input position after the last
+		// real token or trailing comment, but not past trailing whitespace (see
+		// the EOI rule in googlesql/parser/googlesql.tm). A trailing line comment
+		// includes its terminating line break, so its end is on the next line.
+		pos := l.prev.End
+		if l.lastCommentEnd > pos {
+			pos = l.lastCommentEnd
+		}
+		return token.Token{Kind: token.EOF, Pos: pos, End: pos}, nil
 	}
 	c := l.sql[l.pos]
 

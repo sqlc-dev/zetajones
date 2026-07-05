@@ -514,10 +514,12 @@ func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
 	// in googlesql/parser/lookahead_transformer.cc.
 	markScriptLabels(toks)
 	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
-	// An empty script resolves to a Script wrapping an empty statement list.
+	// An empty script resolves to a Script wrapping an empty statement list,
+	// located at the end-of-input position (which follows any trailing comment).
 	if p.peek().Kind == token.EOF {
-		empty := &ast.StatementList{Span: span(0, 0)}
-		return &ast.Script{Span: span(0, 0), Statements: empty}, nil
+		pos := p.peek().Pos
+		empty := &ast.StatementList{Span: span(pos, pos)}
+		return &ast.Script{Span: span(pos, pos), Statements: empty}, nil
 	}
 	list := &ast.StatementList{Span: span(p.peek().Pos, 0)}
 	for {
