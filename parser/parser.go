@@ -7310,6 +7310,14 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		if !p.isAllowedInComparison(low) {
 			return nil, p.errorf(p.extStart(low), "Syntax error: Expression in BETWEEN must be parenthesized")
 		}
+		// OR has lower precedence than AND and is factored out of
+		// expression_higher_prec_than_and, so it is not caught by the
+		// middle-operand check above. A dedicated grammar rule reports the
+		// same parenthesization error, pointing at the middle operand; see
+		// the "OR" alternative of the between rule in googlesql.tm.
+		if isKeyword(p.peek(), "OR") {
+			return nil, p.errorf(p.extStart(low), "Syntax error: Expression in BETWEEN must be parenthesized")
+		}
 		if p.peek().Kind == token.EOF {
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected end of statement")
 		}
@@ -7665,7 +7673,9 @@ func (p *parser) isAllowedInComparison(n ast.Node) bool {
 		return true
 	}
 	switch e := n.(type) {
-	case *ast.AndExpr, *ast.OrExpr, *ast.BetweenExpression:
+	case *ast.AndExpr, *ast.OrExpr, *ast.BetweenExpression,
+		*ast.InExpression, *ast.LikeExpression,
+		*ast.QuantifiedComparisonExpression:
 		return false
 	case *ast.UnaryExpression:
 		return e.Op != "NOT"
