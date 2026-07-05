@@ -732,6 +732,7 @@ var reservedKeywords = map[string]bool{
 	"RESPECT": true, "RIGHT": true, "ROWS": true, "SELECT": true, "SET": true, "STRUCT": true,
 	"TABLESAMPLE": true,
 	"THEN":        true,
+	"TO":          true,
 	"TRUE":        true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
 	"WINDOW": true, "WITH": true,
 }
@@ -864,6 +865,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseImportStatement()
 	case isKeyword(tok, "MODULE"):
 		return p.parseModuleStatement()
+	case isKeyword(tok, "RENAME"):
+		return p.parseRenameStatement()
 	case isKeyword(tok, "INSERT"):
 		return p.parseInsertStatement()
 	case isKeyword(tok, "MERGE"):
@@ -1072,6 +1075,36 @@ func (p *parser) parseImportStatement() (ast.Statement, error) {
 		stmt.Stop = opts.End()
 	}
 	return stmt, nil
+}
+
+// parseRenameStatement parses "RENAME identifier path_expression TO
+// path_expression"; see rename_statement in googlesql.tm.
+func (p *parser) parseRenameStatement() (ast.Statement, error) {
+	renameTok := p.advance() // RENAME
+	ident, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	oldName, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	// After the source path the LALR parser expects either "." (to extend the
+	// path, already consumed by parsePathExpression) or the "TO" keyword.
+	if !isKeyword(p.peek(), "TO") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected \".\" or keyword TO but got %s", describeToken(p.peek()))
+	}
+	p.advance() // TO
+	newName, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RenameStatement{
+		Span:       span(renameTok.Pos, p.prevEnd()),
+		Identifier: ident,
+		OldName:    oldName,
+		NewName:    newName,
+	}, nil
 }
 
 // parseModuleStatement parses "MODULE path_expression [OPTIONS(...)]"; see
@@ -1322,8 +1355,10 @@ func (p *parser) parseDeleteStatement() (ast.Statement, error) {
 func (p *parser) parseInsertStatement() (ast.Statement, error) {
 	insertTok := p.advance() // INSERT
 	stmt := &ast.InsertStatement{Span: span(insertTok.Pos, 0)}
-	// INSERT [OR] {IGNORE|REPLACE|UPDATE]
-	if isKeyword(p.peek(), "OR") {
+	// INSERT [OR] {IGNORE|REPLACE|UPDATE]. Per insert_mode in googlesql.tm the
+	// "OR" prefix requires one of the three mode keywords to follow.
+	sawOr := isKeyword(p.peek(), "OR")
+	if sawOr {
 		p.advance()
 	}
 	switch {
@@ -1336,18 +1371,24 @@ func (p *parser) parseInsertStatement() (ast.Statement, error) {
 	case isKeyword(p.peek(), "UPDATE"):
 		p.advance()
 		stmt.InsertMode = "UPDATE"
+	default:
+		if sawOr {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword IGNORE or keyword REPLACE or keyword UPDATE but got %s", describeToken(p.peek()))
+		}
 	}
 	if isKeyword(p.peek(), "INTO") {
 		p.advance()
 	}
-	target, err := p.parseMaybeDashedPathExpression()
+	target, err := p.parseMaybeDashedGeneralizedPathExpression()
 	if err != nil {
 		return nil, err
 	}
 	stmt.Target = target
 	stmt.Stop = p.extEnd(target)
-	// Optional column list "( ident, ... )".
-	if p.peek().Kind == token.LPAREN {
+	// Optional column list "( ident, ... )". A "(" that opens a query instead
+	// (e.g. "insert into T (select 5)") is left for the source parser; see
+	// identifierPreceedsParenthsizedQuery in googlesql.tm.
+	if p.peek().Kind == token.LPAREN && !p.parenOpensInsertQuery() {
 		cols, err := p.parseInsertColumnList()
 		if err != nil {
 			return nil, err
@@ -1355,7 +1396,10 @@ func (p *parser) parseInsertStatement() (ast.Statement, error) {
 		stmt.Columns = cols
 		stmt.Stop = cols.End()
 	}
-	// The rows source: VALUES ... or a query.
+	// The rows source: VALUES ... or a query. Per insert_source_and_opt_on_conflict
+	// in googlesql.tm, an ON CONFLICT clause is only allowed after VALUES or a
+	// parenthesized query, never after a bare query.
+	var allowOnConflict bool
 	switch {
 	case isKeyword(p.peek(), "VALUES"):
 		rows, err := p.parseInsertValuesRowList()
@@ -1364,13 +1408,26 @@ func (p *parser) parseInsertStatement() (ast.Statement, error) {
 		}
 		stmt.Rows = rows
 		stmt.Stop = rows.End()
+		allowOnConflict = true
 	default:
+		allowOnConflict = p.peek().Kind == token.LPAREN
 		query, err := p.parseQuery()
 		if err != nil {
 			return nil, err
 		}
 		stmt.Query = query
-		stmt.Stop = query.End()
+		// The statement covers all consumed tokens; for a parenthesized query
+		// source this includes the wrapping parens, which the reused inner
+		// Query node's own location excludes.
+		stmt.Stop = p.prevEnd()
+	}
+	if allowOnConflict && isKeyword(p.peek(), "ON") && isKeyword(p.peekAt(1), "CONFLICT") {
+		oc, err := p.parseOnConflictClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.OnConflict = oc
+		stmt.Stop = oc.End()
 	}
 	if isKeyword(p.peek(), "ASSERT_ROWS_MODIFIED") {
 		arm, err := p.parseAssertRowsModified()
@@ -1391,6 +1448,82 @@ func (p *parser) parseInsertStatement() (ast.Statement, error) {
 	return stmt, nil
 }
 
+// parseOnConflictClause parses "ON CONFLICT [conflict_target] DO
+// (NOTHING | UPDATE SET update_item, ... [WHERE expr])"; see on_conflict_clause
+// in googlesql.tm. The next tokens are "ON" "CONFLICT".
+func (p *parser) parseOnConflictClause() (*ast.OnConflictClause, error) {
+	onTok := p.advance() // ON
+	p.advance()          // CONFLICT
+	clause := &ast.OnConflictClause{Span: span(onTok.Pos, 0)}
+	// Optional conflict_target: a column_list "(...)" or "ON UNIQUE CONSTRAINT
+	// identifier".
+	switch {
+	case p.peek().Kind == token.LPAREN:
+		cols, err := p.parseInsertColumnList()
+		if err != nil {
+			return nil, err
+		}
+		clause.ConflictTarget = cols
+	case isKeyword(p.peek(), "ON"):
+		p.advance() // ON
+		if _, err := p.expectKeyword("UNIQUE"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("CONSTRAINT"); err != nil {
+			return nil, err
+		}
+		ident, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		clause.ConflictTarget = ident
+	}
+	if _, err := p.expectKeyword("DO"); err != nil {
+		return nil, err
+	}
+	switch {
+	case isKeyword(p.peek(), "NOTHING"):
+		nothingTok := p.advance()
+		clause.ConflictAction = "NOTHING"
+		clause.Stop = nothingTok.End
+	case isKeyword(p.peek(), "UPDATE"):
+		p.advance() // UPDATE
+		clause.ConflictAction = "UPDATE"
+		if _, err := p.expectKeyword("SET"); err != nil {
+			return nil, err
+		}
+		items, err := p.parseUpdateItemList()
+		if err != nil {
+			return nil, err
+		}
+		clause.UpdateItemList = items
+		clause.Stop = items.End()
+		if isKeyword(p.peek(), "WHERE") {
+			p.advance()
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			clause.UpdateWhere = expr
+			clause.Stop = p.extEnd(expr)
+		}
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword NOTHING or keyword UPDATE but got %s", describeToken(p.peek()))
+	}
+	return clause, nil
+}
+
+// parenOpensInsertQuery reports whether a "(" following the INSERT target
+// begins a parenthesized query (its source) rather than a column list. A
+// column list starts with an identifier; a query primary starts with SELECT,
+// WITH, FROM, TABLE, or another "(".
+func (p *parser) parenOpensInsertQuery() bool {
+	next := p.peekAt(1)
+	return next.Kind == token.LPAREN ||
+		isKeyword(next, "SELECT") || isKeyword(next, "WITH") ||
+		isKeyword(next, "FROM") || isKeyword(next, "TABLE")
+}
+
 // parseInsertColumnList parses "( ident, ... )" with the opening parenthesis
 // as the next token; see column_list in googlesql.tm.
 func (p *parser) parseInsertColumnList() (*ast.ColumnList, error) {
@@ -1398,7 +1531,7 @@ func (p *parser) parseInsertColumnList() (*ast.ColumnList, error) {
 	list := &ast.ColumnList{Span: span(lparen.Pos, 0)}
 	for {
 		tok := p.peek()
-		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
 		list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
@@ -1462,11 +1595,21 @@ func (p *parser) parseInsertValuesRowList() (*ast.InsertValuesRowList, error) {
 // googlesql.tm.
 func (p *parser) parseUpdateStatement() (ast.Statement, error) {
 	updateTok := p.advance() // UPDATE
-	target, err := p.parseMaybeDashedPathExpression()
+	target, err := p.parseMaybeDashedGeneralizedPathExpression()
 	if err != nil {
 		return nil, err
 	}
 	stmt := &ast.UpdateStatement{Span: span(updateTok.Pos, p.extEnd(target)), Target: target}
+	// Optional table alias, before the WITH OFFSET / SET clauses; see as_alias
+	// in update_statement in googlesql.tm.
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		stmt.Alias = alias
+		stmt.Stop = alias.End()
+	}
 	if isKeyword(p.peek(), "WITH") {
 		offset, err := p.parseWithOffsetClause()
 		if err != nil {
@@ -1475,9 +1618,13 @@ func (p *parser) parseUpdateStatement() (ast.Statement, error) {
 		stmt.Offset = offset
 		stmt.Stop = offset.End()
 	}
-	if _, err := p.expectKeyword("SET"); err != nil {
-		return nil, err
+	// After the target and optional alias/offset the LALR parser can still shift
+	// an alias identifier or WITH, so a non-SET token here is reported
+	// generically as unexpected rather than "Expected keyword SET".
+	if !isKeyword(p.peek(), "SET") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 	}
+	p.advance() // SET
 	items, err := p.parseUpdateItemList()
 	if err != nil {
 		return nil, err
@@ -1544,9 +1691,14 @@ func (p *parser) parseUpdateItemList() (*ast.UpdateItemList, error) {
 // "( INSERT|UPDATE|DELETE ... )" statement or a "path = value" assignment; see
 // update_item in googlesql.tm.
 func (p *parser) parseUpdateItem() (*ast.UpdateItem, error) {
-	if p.peek().Kind == token.LPAREN &&
-		(isKeyword(p.peekAt(1), "INSERT") || isKeyword(p.peekAt(1), "UPDATE") || isKeyword(p.peekAt(1), "DELETE")) {
+	// A "(" always begins a nested DML statement (INSERT/UPDATE/DELETE); a
+	// generalized path may not begin with a parenthesized component. See
+	// nested_dml_statement and the comment on update_item in googlesql.tm.
+	if p.peek().Kind == token.LPAREN {
 		lparen := p.advance() // (
+		if !isKeyword(p.peek(), "INSERT") && !isKeyword(p.peek(), "UPDATE") && !isKeyword(p.peek(), "DELETE") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword DELETE or keyword INSERT or keyword UPDATE but got %s", describeToken(p.peek()))
+		}
 		inner, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -1556,6 +1708,12 @@ func (p *parser) parseUpdateItem() (*ast.UpdateItem, error) {
 			return nil, err
 		}
 		return &ast.UpdateItem{Span: span(lparen.Pos, rparen.End), Statement: inner}, nil
+	}
+	// The set-value target is a generalized path expression. When it cannot
+	// begin one, the LALR parser is still expecting the "(" of a nested DML, so
+	// the error names "(" rather than "identifier".
+	if tok := p.peek(); tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+		return nil, p.errorf(tok.Pos, `Syntax error: Expected "(" but got %s`, describeToken(tok))
 	}
 	path, err := p.parseGeneralizedPathExpression()
 	if err != nil {
@@ -1911,7 +2069,7 @@ func (p *parser) parseCloneDataSource() (*ast.CloneDataSource, error) {
 func (p *parser) parseGeneralizedPathExpression() (ast.Node, error) {
 	tok := p.peek()
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
-		return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	if isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))

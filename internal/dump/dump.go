@@ -66,6 +66,8 @@ func nodeString(n ast.Node) string {
 			return "InsertStatement(insert_mode=" + t.InsertMode + ")"
 		}
 		return "InsertStatement"
+	case *ast.OnConflictClause:
+		return "OnConflictClause(conflict_action=" + t.ConflictAction + ")"
 	case *ast.InsertValuesRowList:
 		return "InsertValuesRowList"
 	case *ast.InsertValuesRow:
@@ -135,6 +137,8 @@ func nodeString(n ast.Node) string {
 		return "IntoAlias"
 	case *ast.ImportStatement:
 		return "ImportStatement"
+	case *ast.RenameStatement:
+		return "RenameStatement"
 	case *ast.ModuleStatement:
 		return "ModuleStatement"
 	case *ast.SingleAssignment:

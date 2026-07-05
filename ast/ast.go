@@ -105,6 +105,21 @@ func (n *ImportStatement) Children() []Node {
 	return out
 }
 
+// RenameStatement is "RENAME <identifier> <old_path> TO <new_path>"; see
+// ASTRenameStatement in googlesql/parser/parse_tree.h.
+type RenameStatement struct {
+	Span
+	// Identifier names the object type being renamed (e.g. table).
+	Identifier *Identifier     `json:"identifier"`
+	OldName    *PathExpression `json:"old_name"`
+	NewName    *PathExpression `json:"new_name"`
+}
+
+func (n *RenameStatement) statementNode() {}
+func (n *RenameStatement) Children() []Node {
+	return children(n.Identifier, n.OldName, n.NewName)
+}
+
 // SingleAssignment is "SET identifier = expression"; see ASTSingleAssignment
 // in googlesql/parser/parse_tree.h.
 type SingleAssignment struct {
@@ -588,10 +603,11 @@ func (n *DeleteStatement) Children() []Node {
 type InsertStatement struct {
 	Span
 	InsertMode         string               `json:"insert_mode,omitempty"`
-	Target             *PathExpression      `json:"target"`
+	Target             Node                 `json:"target"`
 	Columns            *ColumnList          `json:"columns,omitempty"`
 	Rows               *InsertValuesRowList `json:"rows,omitempty"`
 	Query              *Query               `json:"query,omitempty"`
+	OnConflict         *OnConflictClause    `json:"on_conflict,omitempty"`
 	AssertRowsModified *AssertRowsModified  `json:"assert_rows_modified,omitempty"`
 	Returning          *ReturningClause     `json:"returning,omitempty"`
 }
@@ -605,7 +621,34 @@ func (n *InsertStatement) Children() []Node {
 	if n.Query != nil {
 		out = append(out, n.Query)
 	}
+	if n.OnConflict != nil {
+		out = append(out, n.OnConflict)
+	}
 	return append(out, children(n.AssertRowsModified, n.Returning)...)
+}
+
+// OnConflictClause is the "ON CONFLICT ... DO ..." clause of an INSERT; see
+// ASTOnConflictClause in googlesql/parser/parse_tree.h.
+type OnConflictClause struct {
+	Span
+	// ConflictAction is "NOTHING" or "UPDATE".
+	ConflictAction string `json:"conflict_action"`
+	// ConflictTarget is an optional conflict target: either a *ColumnList (a
+	// column list) or an *Identifier (a unique constraint name).
+	ConflictTarget Node            `json:"conflict_target,omitempty"`
+	UpdateItemList *UpdateItemList `json:"update_item_list,omitempty"`
+	UpdateWhere    Node            `json:"update_where,omitempty"`
+}
+
+func (n *OnConflictClause) Children() []Node {
+	out := children(n.ConflictTarget)
+	if n.UpdateItemList != nil {
+		out = append(out, n.UpdateItemList)
+	}
+	if n.UpdateWhere != nil {
+		out = append(out, n.UpdateWhere)
+	}
+	return out
 }
 
 // InsertValuesRowList is the VALUES list of an INSERT statement; see
@@ -638,7 +681,8 @@ func (n *InsertValuesRow) Children() []Node {
 // googlesql/parser/parse_tree.h.
 type UpdateStatement struct {
 	Span
-	Target             *PathExpression     `json:"target"`
+	Target             Node                `json:"target"`
+	Alias              *Alias              `json:"alias,omitempty"`
 	Offset             *WithOffset         `json:"offset,omitempty"`
 	UpdateItemList     *UpdateItemList     `json:"update_item_list"`
 	From               *FromClause         `json:"from,omitempty"`
@@ -649,7 +693,7 @@ type UpdateStatement struct {
 
 func (n *UpdateStatement) statementNode() {}
 func (n *UpdateStatement) Children() []Node {
-	return children(n.Target, n.Offset, n.UpdateItemList, n.From, n.Where, n.AssertRowsModified, n.Returning)
+	return children(n.Target, n.Alias, n.Offset, n.UpdateItemList, n.From, n.Where, n.AssertRowsModified, n.Returning)
 }
 
 // UpdateItemList is the SET item list of an UPDATE statement; see
