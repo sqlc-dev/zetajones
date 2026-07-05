@@ -3466,6 +3466,14 @@ func (p *parser) parseWithConnectionClause() (*ast.WithConnectionClause, error) 
 func (p *parser) parseSqlFunctionBodyOrString() (ast.Node, error) {
 	if p.peek().Kind == token.LPAREN {
 		lparen := p.advance() // (
+		// The grammar's sql_function_body rule special-cases "(" "SELECT" to
+		// reject a bare query body (which would otherwise parse as a scalar
+		// subquery expression), directing the user to wrap it in an extra pair
+		// of parentheses. The message deliberately omits the "Syntax error:"
+		// prefix, matching MakeSyntaxError in googlesql.tm.
+		if isKeyword(p.peek(), "SELECT") {
+			return nil, p.errorf(p.peek().Pos, "The body of each CREATE FUNCTION statement is an expression, not a query; to use a query as an expression, the query must be wrapped with additional parentheses to make it a scalar subquery expression")
+		}
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
@@ -3549,7 +3557,11 @@ func (p *parser) beginsParameterType(tok token.Token) bool {
 // [NOT AGGREGATE]"; see function_parameter in googlesql.tm.
 func (p *parser) parseFunctionParameter() (*ast.FunctionParameter, error) {
 	var name *ast.Identifier
-	if (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && p.beginsParameterType(p.peekAt(1)) {
+	// A parameter name must be an identifier (grammar: identifier? type...),
+	// so a reserved keyword such as ANY cannot be a name: "ANY TYPE" with no
+	// name parses as a templated_parameter_type rather than name ANY + type
+	// TYPE. Uses the full reserved-keyword set (keywords.cc).
+	if (p.peek().Kind == token.QUOTED_IDENT || (p.peek().Kind == token.IDENT && !token.IsReservedKeyword(p.peek().Image))) && p.beginsParameterType(p.peekAt(1)) {
 		name = p.parseIdentifierToken(p.advance())
 	}
 	typ, err := p.parseFunctionParameterType()
@@ -3618,6 +3630,14 @@ func (p *parser) parseTemplatedParameterType() (*ast.TemplatedParameterType, err
 		kind = "ARRAY"
 	case isKeyword(kindTok, "TABLE"):
 		kind = "TABLE"
+	case kindTok.Kind == token.QUOTED_IDENT || (kindTok.Kind == token.IDENT && !token.IsReservedKeyword(kindTok.Image)):
+		// Grammar: templated_parameter_kind's identifier branch accepts only
+		// TABLE/TYPE; any other (non-reserved) identifier (INTEGER, FLOAT, ...)
+		// matches the branch but is rejected with this specific message. A
+		// reserved keyword (AS) or non-identifier (")") never reaches the
+		// branch and falls through to the generic error below. See
+		// templated_parameter_kind in googlesql.tm.
+		return nil, p.errorf(kindTok.Pos, "Syntax error: unexpected ANY template type")
 	default:
 		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
 	}
@@ -4714,10 +4734,13 @@ func (p *parser) parseCreateRowAccessPolicyStatement(createTok token.Token, isOr
 		stmt.IsIfNotExists = true
 	}
 	// Optional policy name: a single (non-reserved) identifier wrapped in a
-	// PathExpression node. A reserved keyword such as ON is not an identifier,
-	// so the common no-name form falls through to the ON expectation below.
+	// PathExpression node. A reserved keyword such as ON or TO is not an
+	// identifier, so the common no-name form falls through to the ON
+	// expectation below. Uses the full reserved-keyword set (keywords.cc)
+	// rather than the parser's expression-boundary subset so that reserved
+	// words like TO are not mistaken for a policy name.
 	var name *ast.PathExpression
-	if tok := p.peek(); tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+	if tok := p.peek(); tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !token.IsReservedKeyword(tok.Image)) {
 		ident := p.parseIdentifierToken(p.advance())
 		name = &ast.PathExpression{Span: span(ident.Pos(), ident.End()), Names: []*ast.Identifier{ident}}
 	}
@@ -4731,6 +4754,7 @@ func (p *parser) parseCreateRowAccessPolicyStatement(createTok token.Token, isOr
 	stmt.TargetPath = target
 	// Optional create_row_access_policy_grant_to_clause: either
 	// "GRANT TO (grantee_list)" or the bare "TO grantee_list".
+	grantConsumed := false
 	switch {
 	case isKeyword(p.peek(), "GRANT"):
 		gt, err := p.parseGrantToClause()
@@ -4738,6 +4762,7 @@ func (p *parser) parseCreateRowAccessPolicyStatement(createTok token.Token, isOr
 			return nil, err
 		}
 		stmt.GrantTo = gt
+		grantConsumed = true
 	case isKeyword(p.peek(), "TO"):
 		toTok := p.advance() // TO
 		grantees, err := p.parseGranteeList()
@@ -4745,11 +4770,18 @@ func (p *parser) parseCreateRowAccessPolicyStatement(createTok token.Token, isOr
 			return nil, err
 		}
 		stmt.GrantTo = &ast.GrantToClause{Span: span(toTok.Pos, grantees.End()), Grantees: grantees}
+		grantConsumed = true
 	}
-	// filter_using_clause is mandatory but is introduced by either the optional
-	// FILTER keyword or USING; any other token here is simply unexpected (the
-	// reference has several valid continuations, so it does not name one).
+	// filter_using_clause is mandatory and is introduced by either the optional
+	// FILTER keyword or USING. When a grant_to clause was just consumed the only
+	// valid continuation is FILTER or USING, so the reference (bison) lists them:
+	// "Expected keyword FILTER or keyword USING but got X". Directly after the
+	// target path the expected set is large (path continuation, GRANT, TO,
+	// FILTER, USING), so bison drops the list and reports "Unexpected X".
 	if !isKeyword(p.peek(), "FILTER") && !isKeyword(p.peek(), "USING") {
+		if grantConsumed {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword FILTER or keyword USING but got %s", describeToken(p.peek()))
+		}
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 	}
 	fu, err := p.parseFilterUsingClause()
