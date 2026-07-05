@@ -674,6 +674,20 @@ func nodeString(n ast.Node) string {
 		return "PipeSet"
 	case *ast.PipeSetItem:
 		return "PipeSetItem"
+	case *ast.PipeAs:
+		return "PipeAs"
+	case *ast.PipeRename:
+		return "PipeRename"
+	case *ast.PipeRenameItem:
+		return "PipeRenameItem"
+	case *ast.PipeDrop:
+		return "PipeDrop"
+	case *ast.PipeAssert:
+		return "PipeAssert"
+	case *ast.PipeDescribe:
+		return "PipeDescribe"
+	case *ast.PipeStaticDescribe:
+		return "PipeStaticDescribe"
 	case *ast.FunctionCall:
 		if t.Distinct {
 			return "FunctionCall(distinct=true)"

@@ -5587,6 +5587,12 @@ func (p *parser) parseWithClause() (*ast.WithClause, error) {
 		}
 	}
 	if p.peek().Kind == token.PIPE_INPUT {
+		if !p.features.Enabled(FeaturePipes) {
+			// With pipes disabled, the reference lookahead transformer does
+			// not fuse "|" ">" into a "|>" token, so the query is followed by
+			// a stray bitwise-or operator; report it as an unexpected "|".
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected |")
+		}
 		// See the with_clause "|>" alternative of
 		// query_without_pipe_operators in googlesql.tm.
 		return nil, p.errorf(p.peek().Pos, "Syntax error: A pipe operator cannot follow the WITH clause before the main query; The main query usually starts with SELECT or FROM here")
@@ -6041,6 +6047,10 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		return node, nil
 	case isKeyword(tok, "AGGREGATE"):
 		return p.parsePipeAggregate(pipeTok)
+	case isKeyword(tok, "GROUP"):
+		// A pipe GROUP BY is an error; GROUP BY belongs to a pipe AGGREGATE
+		// operator. See pipe_group_by in googlesql.tm.
+		return nil, p.errorf(tok.Pos, "Syntax error: GROUP BY should be part of a pipe AGGREGATE operator, without a leading pipe symbol")
 	case isKeyword(tok, "SELECT"):
 		sel, err := p.parseSelectClause()
 		if err != nil {
@@ -6068,6 +6078,20 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 	case isKeyword(tok, "DISTINCT"):
 		distinctTok := p.advance()
 		return &ast.PipeDistinct{Span: span(pipeTok.Pos, distinctTok.End)}, nil
+	case isKeyword(tok, "AS"):
+		return p.parsePipeAs(pipeTok)
+	case isKeyword(tok, "RENAME"):
+		return p.parsePipeRename(pipeTok)
+	case isKeyword(tok, "DROP"):
+		return p.parsePipeDrop(pipeTok)
+	case isKeyword(tok, "ASSERT"):
+		return p.parsePipeAssert(pipeTok)
+	case isKeyword(tok, "DESCRIBE"):
+		descTok := p.advance()
+		return &ast.PipeDescribe{Span: span(pipeTok.Pos, descTok.End)}, nil
+	case isKeyword(tok, "STATIC_DESCRIBE"):
+		descTok := p.advance()
+		return &ast.PipeStaticDescribe{Span: span(pipeTok.Pos, descTok.End)}, nil
 	case isKeyword(tok, "MATCH_RECOGNIZE"):
 		clause, err := p.parseMatchRecognizeClause()
 		if err != nil {
@@ -6172,6 +6196,126 @@ func (p *parser) parsePipeSet(pipeTok token.Token) (ast.Node, error) {
 		comma := p.advance()
 		next := p.peek()
 		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			// Trailing comma; it is included in the operator's location.
+			node.Stop = comma.End
+			break
+		}
+	}
+	return node, nil
+}
+
+// parsePipeAs parses "AS identifier" after a |> token; see pipe_as in
+// googlesql.tm. The alias location covers just the identifier.
+func (p *parser) parsePipeAs(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // AS
+	ident, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	alias := &ast.Alias{Span: span(ident.Pos(), ident.End()), Identifier: ident}
+	return &ast.PipeAs{Span: span(pipeTok.Pos, alias.End()), Alias: alias}, nil
+}
+
+// parsePipeRename parses "RENAME rename_item [, ...][,]" after a |> token,
+// where each item is "old_name [AS] new_name"; see pipe_rename in googlesql.tm.
+// A trailing comma is not included in the operator's location.
+func (p *parser) parsePipeRename(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // RENAME
+	node := &ast.PipeRename{Span: span(pipeTok.Pos, 0)}
+	for {
+		item, err := p.parsePipeRenameItem()
+		if err != nil {
+			return nil, err
+		}
+		node.Items = append(node.Items, item)
+		node.Stop = item.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+		next := p.peek()
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			// Trailing comma; it is not included in the operator's location.
+			break
+		}
+	}
+	return node, nil
+}
+
+// parsePipeRenameItem parses one "old_name [AS] new_name" pair; see
+// pipe_rename_item in googlesql.tm.
+func (p *parser) parsePipeRenameItem() (*ast.PipeRenameItem, error) {
+	oldName, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == token.DOT {
+		return nil, p.errorf(oldName.Pos(), "Syntax error: Pipe RENAME can only rename columns by name alone; Renaming columns under table aliases or fields under paths is not supported")
+	}
+	if isKeyword(p.peek(), "AS") {
+		p.advance() // AS
+	}
+	newName, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.PipeRenameItem{Span: span(oldName.Pos(), newName.End()), OldName: oldName, NewName: newName}, nil
+}
+
+// parsePipeDrop parses "DROP identifier [, ...][,]" after a |> token; see
+// pipe_drop in googlesql.tm. A trailing comma is included in the operator's
+// location but not in the IdentifierList child.
+func (p *parser) parsePipeDrop(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // DROP
+	list := &ast.IdentifierList{Span: span(0, 0)}
+	node := &ast.PipeDrop{Span: span(pipeTok.Pos, 0), ColumnList: list}
+	for {
+		ident, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		if p.peek().Kind == token.DOT {
+			return nil, p.errorf(ident.Pos(), "Syntax error: Pipe DROP can only drop columns by name alone; Dropping columns under table aliases or fields under paths is not supported")
+		}
+		if len(list.Identifiers) == 0 {
+			list.Start = ident.Pos()
+		}
+		list.Identifiers = append(list.Identifiers, ident)
+		list.Stop = ident.End()
+		node.Stop = ident.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		next := p.peek()
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			// Trailing comma; included in the operator's location only.
+			node.Stop = comma.End
+			break
+		}
+	}
+	return node, nil
+}
+
+// parsePipeAssert parses "ASSERT expression [, expression ...][,]" after a |>
+// token; see pipe_assert in googlesql.tm. The first expression is the asserted
+// condition and the rest are message expressions. A trailing comma is included
+// in the operator's location.
+func (p *parser) parsePipeAssert(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // ASSERT
+	node := &ast.PipeAssert{Span: span(pipeTok.Pos, 0)}
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		node.Exprs = append(node.Exprs, expr)
+		node.Stop = p.extEnd(expr)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		if !startsExpression(p.peek()) {
 			// Trailing comma; it is included in the operator's location.
 			node.Stop = comma.End
 			break

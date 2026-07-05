@@ -2272,6 +2272,83 @@ func (n *PipeSetItem) Children() []Node {
 	return children(n.Column, n.Expr)
 }
 
+// PipeAs is a |> AS pipe operator; see ASTPipeAs in
+// googlesql/parser/parse_tree.h.
+type PipeAs struct {
+	Span
+	Alias *Alias `json:"alias"`
+}
+
+func (n *PipeAs) Children() []Node {
+	return children(n.Alias)
+}
+
+// PipeRename is a |> RENAME pipe operator; see ASTPipeRename in
+// googlesql/parser/parse_tree.h.
+type PipeRename struct {
+	Span
+	Items []*PipeRenameItem `json:"items"`
+}
+
+func (n *PipeRename) Children() []Node {
+	out := make([]Node, 0, len(n.Items))
+	for _, it := range n.Items {
+		out = append(out, it)
+	}
+	return out
+}
+
+// PipeRenameItem is a single "old_name [AS] new_name" pair in a pipe RENAME
+// operator; see ASTPipeRenameItem in googlesql/parser/parse_tree.h.
+type PipeRenameItem struct {
+	Span
+	OldName *Identifier `json:"old_name"`
+	NewName *Identifier `json:"new_name"`
+}
+
+func (n *PipeRenameItem) Children() []Node {
+	return children(n.OldName, n.NewName)
+}
+
+// PipeDrop is a |> DROP pipe operator; see ASTPipeDrop in
+// googlesql/parser/parse_tree.h.
+type PipeDrop struct {
+	Span
+	ColumnList *IdentifierList `json:"column_list"`
+}
+
+func (n *PipeDrop) Children() []Node {
+	return children(n.ColumnList)
+}
+
+// PipeAssert is a |> ASSERT pipe operator; the first expression is the
+// asserted condition and the rest are message expressions. See ASTPipeAssert
+// in googlesql/parser/parse_tree.h.
+type PipeAssert struct {
+	Span
+	Exprs []Node `json:"exprs"`
+}
+
+func (n *PipeAssert) Children() []Node {
+	return append([]Node(nil), n.Exprs...)
+}
+
+// PipeDescribe is a |> DESCRIBE pipe operator; see ASTPipeDescribe in
+// googlesql/parser/parse_tree.h.
+type PipeDescribe struct {
+	Span
+}
+
+func (n *PipeDescribe) Children() []Node { return nil }
+
+// PipeStaticDescribe is a |> STATIC_DESCRIBE pipe operator; see
+// ASTPipeStaticDescribe in googlesql/parser/parse_tree.h.
+type PipeStaticDescribe struct {
+	Span
+}
+
+func (n *PipeStaticDescribe) Children() []Node { return nil }
+
 // AlterStatement is an ALTER <object kind> statement. NodeName holds the
 // per-object-kind parse tree node name (e.g. "AlterTableStatement",
 // "AlterViewStatement"), matching the distinct ASTAlter*Statement node

@@ -195,8 +195,13 @@ func (p *parser) parseOptionalSampleSuffix() (*ast.SampleSuffix, error) {
 			return nil, err
 		}
 		weight := &ast.WithWeight{Span: span(withTok.Pos, p.prevEnd())}
-		// Optional [AS] alias identifier.
-		if isKeyword(p.peek(), "AS") || p.peek().Kind == token.IDENT && !isReserved(p.peek()) || p.peek().Kind == token.QUOTED_IDENT {
+		// Optional [AS] alias identifier. "REPEATABLE(" starts the repeatable
+		// clause rather than an alias; the reference grammar resolves the
+		// shift/reduce conflict in favor of repeatable_clause when the "("
+		// lookahead is present (see the note on opt_sample_clause_suffix in
+		// googlesql.tm). A bare REPEATABLE not followed by "(" is an alias.
+		startsRepeatable := isKeyword(p.peek(), "REPEATABLE") && p.peekAt(1).Kind == token.LPAREN
+		if isKeyword(p.peek(), "AS") || (!startsRepeatable && p.peek().Kind == token.IDENT && !isReserved(p.peek())) || p.peek().Kind == token.QUOTED_IDENT {
 			alias, err := p.parseOptionalAlias()
 			if err != nil {
 				return nil, err
@@ -214,6 +219,11 @@ func (p *parser) parseOptionalSampleSuffix() (*ast.SampleSuffix, error) {
 			}
 			suffix.Repeatable = repeatable
 			suffix.Stop = repeatable.End()
+			// The WithWeight node's location spans the whole
+			// "WITH WEIGHT [alias] [REPEATABLE(...)]" production; its @$
+			// includes the trailing repeatable clause. See
+			// opt_sample_clause_suffix in googlesql.tm.
+			weight.Stop = repeatable.End()
 		}
 		return suffix, nil
 	}
