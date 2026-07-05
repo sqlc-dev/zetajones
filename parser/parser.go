@@ -9226,12 +9226,19 @@ func (p *parser) parseStringLiteralValue() (*ast.StringLiteral, error) {
 		Components: []*ast.StringLiteralComponent{component},
 	}
 	// Adjacent string literals concatenate into one literal with multiple
-	// components.
+	// components, but must be separated by whitespace or comments; see
+	// string_literal in googlesql.tm.
+	prevEnd := tok.End
 	for p.peek().Kind == token.STRING {
+		next := p.peek()
+		if next.Pos == prevEnd {
+			return nil, p.errorf(next.Pos, "Syntax error: concatenated string literals must be separated by whitespace or comments")
+		}
 		tok := p.advance()
 		component := &ast.StringLiteralComponent{Span: span(tok.Pos, tok.End), Image: tok.Image}
 		lit.Components = append(lit.Components, component)
 		lit.Stop = tok.End
+		prevEnd = tok.End
 	}
 	// String and bytes literals cannot be concatenated together.
 	if p.peek().Kind == token.BYTES {
@@ -9247,11 +9254,17 @@ func (p *parser) parseBytesLiteral() (ast.Node, error) {
 		Span:       span(tok.Pos, tok.End),
 		Components: []*ast.BytesLiteralComponent{component},
 	}
+	prevEnd := tok.End
 	for p.peek().Kind == token.BYTES {
+		next := p.peek()
+		if next.Pos == prevEnd {
+			return nil, p.errorf(next.Pos, "Syntax error: concatenated bytes literals must be separated by whitespace or comments")
+		}
 		tok := p.advance()
 		component := &ast.BytesLiteralComponent{Span: span(tok.Pos, tok.End), Image: tok.Image}
 		lit.Components = append(lit.Components, component)
 		lit.Stop = tok.End
+		prevEnd = tok.End
 	}
 	// String and bytes literals cannot be concatenated together.
 	if p.peek().Kind == token.STRING {

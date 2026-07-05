@@ -618,8 +618,10 @@ func (l *lexer) quotedIdent() (token.Token, error) {
 // number scans an integer or floating point literal.
 func (l *lexer) number() (token.Token, error) {
 	start := l.pos
-	// Hex integer.
-	if l.peek() == '0' && (l.peekAt(1) == 'x' || l.peekAt(1) == 'X') {
+	// Hex integer. Requires at least one hex digit; "0x" with no digit lexes as
+	// the decimal integer "0" followed by the identifier "x" (which the parser
+	// then reports as a missing-whitespace-before-alias error).
+	if l.peek() == '0' && (l.peekAt(1) == 'x' || l.peekAt(1) == 'X') && isHexDigit(l.peekAt(2)) {
 		l.pos += 2
 		for l.pos < len(l.sql) && isHexDigit(l.sql[l.pos]) {
 			l.pos++
