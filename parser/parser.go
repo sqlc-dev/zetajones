@@ -8586,11 +8586,50 @@ func (p *parser) parseSelectClause() (*ast.Select, error) {
 	}
 	sel := &ast.Select{Span: span(selectTok.Pos, selectTok.End)}
 
+	// Optional hint immediately after SELECT; see "SELECT" hint? in
+	// select_clause in googlesql.tm. (This is distinct from a hint preceding
+	// the whole statement, which produces an ASTHintedStatement.)
+	if p.peek().Kind == token.ATSIGN {
+		hint, err := p.parseOptionalHint()
+		if err != nil {
+			return nil, err
+		}
+		sel.Hint = hint
+		sel.Stop = hint.End()
+	}
+
+	// Optional WITH modifier (anonymization / differential privacy).
+	if isKeyword(p.peek(), "WITH") {
+		wm, err := p.parseWithModifier()
+		if err != nil {
+			return nil, err
+		}
+		sel.WithModifier = wm
+		sel.Stop = wm.End()
+	}
+
 	if isKeyword(p.peek(), "DISTINCT") {
 		p.advance()
 		sel.Distinct = true
 	} else if isKeyword(p.peek(), "ALL") {
 		p.advance()
+	}
+
+	// Optional AS STRUCT / AS VALUE / AS <type_name> clause; see
+	// opt_select_as_clause in googlesql.tm.
+	if isKeyword(p.peek(), "AS") {
+		sa, err := p.parseSelectAs()
+		if err != nil {
+			return nil, err
+		}
+		sel.SelectAs = sa
+		sel.Stop = sa.End()
+	}
+
+	// An empty select list followed by FROM has a dedicated error; see the
+	// second production of select_clause in googlesql.tm.
+	if isKeyword(p.peek(), "FROM") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: SELECT list must not be empty")
 	}
 
 	list, err := p.parseSelectList()
@@ -8600,6 +8639,52 @@ func (p *parser) parseSelectClause() (*ast.Select, error) {
 	sel.SelectList = list
 	sel.Stop = list.End()
 	return sel, nil
+}
+
+// parseWithModifier parses "WITH <identifier> [OPTIONS(...)]" after SELECT; see
+// opt_with_modifier in googlesql.tm. OPTIONS is only consumed as the modifier's
+// options list when it immediately follows the identifier and is directly
+// followed by "(", matching the KW_OPTIONS_IN_WITH_OPTIONS lookahead
+// disambiguation in lookahead_transformer.cc. Otherwise OPTIONS is left for the
+// select list (as a path expression or function call).
+func (p *parser) parseWithModifier() (*ast.WithModifier, error) {
+	withTok := p.advance() // WITH
+	id, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	wm := &ast.WithModifier{Span: span(withTok.Pos, id.End()), Identifier: id}
+	if isKeyword(p.peek(), "OPTIONS") && p.peekAt(1).Kind == token.LPAREN {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		wm.Options = opts
+		wm.Stop = opts.End()
+	}
+	return wm, nil
+}
+
+// parseSelectAs parses "AS STRUCT", "AS VALUE", or "AS <path_expression>"; see
+// opt_select_as_clause in googlesql.tm. An unquoted single-identifier VALUE is
+// treated as the VALUE mode rather than a type name.
+func (p *parser) parseSelectAs() (*ast.SelectAs, error) {
+	asTok := p.advance() // AS
+	if isKeyword(p.peek(), "STRUCT") {
+		structTok := p.advance()
+		return &ast.SelectAs{Span: span(asTok.Pos, structTok.End), AsMode: "STRUCT"}, nil
+	}
+	tok := p.peek()
+	if tok.Kind == token.IDENT && strings.EqualFold(tok.Image, "VALUE") && p.peekAt(1).Kind != token.DOT {
+		valTok := p.advance()
+		return &ast.SelectAs{Span: span(asTok.Pos, valTok.End), AsMode: "VALUE"}, nil
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.SelectAs{Span: span(asTok.Pos, path.End()), TypeName: path}, nil
 }
 
 func (p *parser) parseSelect() (*ast.Select, error) {

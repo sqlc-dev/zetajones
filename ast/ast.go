@@ -1044,19 +1044,45 @@ func (n *LockMode) Children() []Node { return nil }
 // Select is a SELECT clause with its associated clauses.
 type Select struct {
 	Span
-	Distinct   bool          `json:"distinct,omitempty"`
-	SelectList *SelectList   `json:"select_list"`
-	From       *FromClause   `json:"from,omitempty"`
-	Where      *WhereClause  `json:"where,omitempty"`
-	GroupBy    *GroupBy      `json:"group_by,omitempty"`
-	Having     *Having       `json:"having,omitempty"`
-	Qualify    *Qualify      `json:"qualify,omitempty"`
-	Window     *WindowClause `json:"window,omitempty"`
+	Hint         *Hint         `json:"hint,omitempty"`
+	WithModifier *WithModifier `json:"with_modifier,omitempty"`
+	Distinct     bool          `json:"distinct,omitempty"`
+	SelectAs     *SelectAs     `json:"select_as,omitempty"`
+	SelectList   *SelectList   `json:"select_list"`
+	From         *FromClause   `json:"from,omitempty"`
+	Where        *WhereClause  `json:"where,omitempty"`
+	GroupBy      *GroupBy      `json:"group_by,omitempty"`
+	Having       *Having       `json:"having,omitempty"`
+	Qualify      *Qualify      `json:"qualify,omitempty"`
+	Window       *WindowClause `json:"window,omitempty"`
 }
 
 func (n *Select) Children() []Node {
-	return children(n.SelectList, n.From, n.Where, n.GroupBy, n.Having, n.Qualify, n.Window)
+	return children(n.Hint, n.WithModifier, n.SelectAs, n.SelectList, n.From, n.Where, n.GroupBy, n.Having, n.Qualify, n.Window)
 }
+
+// SelectAs is the "AS STRUCT", "AS VALUE", or "AS <type_name>" clause that may
+// follow SELECT (and ALL/DISTINCT). AsMode is "STRUCT" or "VALUE"; for a type
+// name it is empty and TypeName holds the path expression. See ASTSelectAs in
+// googlesql/parser/parse_tree.h.
+type SelectAs struct {
+	Span
+	AsMode   string          `json:"as_mode,omitempty"`
+	TypeName *PathExpression `json:"type_name,omitempty"`
+}
+
+func (n *SelectAs) Children() []Node { return children(n.TypeName) }
+
+// WithModifier is the "WITH <identifier> [OPTIONS(...)]" modifier after SELECT,
+// used for anonymization and differential privacy. See ASTWithModifier in
+// googlesql/parser/parse_tree.h.
+type WithModifier struct {
+	Span
+	Identifier *Identifier  `json:"identifier"`
+	Options    *OptionsList `json:"options,omitempty"`
+}
+
+func (n *WithModifier) Children() []Node { return children(n.Identifier, n.Options) }
 
 // SelectList is the list of expressions being selected.
 type SelectList struct {

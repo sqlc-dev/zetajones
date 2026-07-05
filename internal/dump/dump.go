@@ -135,6 +135,13 @@ func nodeString(n ast.Node) string {
 			return "Select(distinct=true)"
 		}
 		return "Select"
+	case *ast.SelectAs:
+		if t.AsMode == "" {
+			return "SelectAs"
+		}
+		return "SelectAs(as_mode=" + t.AsMode + ")"
+	case *ast.WithModifier:
+		return "WithModifier"
 	case *ast.SelectList:
 		return "SelectList"
 	case *ast.SelectColumn:
