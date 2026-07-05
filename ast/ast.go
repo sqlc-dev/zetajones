@@ -3106,13 +3106,105 @@ type CreateViewStatement struct {
 	SqlSecurity   string                 `json:"sql_security,omitempty"`
 	Name          *PathExpression        `json:"name"`
 	Columns       *ColumnWithOptionsList `json:"columns,omitempty"`
-	Options       *OptionsList           `json:"options,omitempty"`
-	Query         *Query                 `json:"query,omitempty"`
+	// PartitionBy, ClusterBy, and ReplicaSource apply only to
+	// CREATE MATERIALIZED VIEW; see ASTCreateMaterializedViewStatement in
+	// googlesql/parser/parse_tree.h. They are nil for plain and APPROX views.
+	PartitionBy   *PartitionBy    `json:"partition_by,omitempty"`
+	ClusterBy     *ClusterBy      `json:"cluster_by,omitempty"`
+	Options       *OptionsList    `json:"options,omitempty"`
+	Query         *Query          `json:"query,omitempty"`
+	ReplicaSource *PathExpression `json:"replica_source,omitempty"`
 }
 
 func (n *CreateViewStatement) statementNode() {}
 func (n *CreateViewStatement) Children() []Node {
-	return children(n.Name, n.Columns, n.Options, n.Query)
+	// The child order follows ASTCreateMaterializedViewStatement's
+	// init_fields_order: name, columns, partition_by, cluster_by, options,
+	// query, replica_source. For plain and APPROX views the materialized-only
+	// fields are nil, reducing to name, columns, options, query.
+	return children(n.Name, n.Columns, n.PartitionBy, n.ClusterBy, n.Options, n.Query, n.ReplicaSource)
+}
+
+// CreateSequenceStatement is a CREATE [OR REPLACE] SEQUENCE [IF NOT EXISTS]
+// <name> [OPTIONS(...)] statement; see ASTCreateSequenceStatement in
+// googlesql/parser/parse_tree.h.
+type CreateSequenceStatement struct {
+	Span
+	IsOrReplace   bool            `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool            `json:"is_if_not_exists,omitempty"`
+	Name          *PathExpression `json:"name"`
+	Options       *OptionsList    `json:"options,omitempty"`
+}
+
+func (n *CreateSequenceStatement) statementNode() {}
+func (n *CreateSequenceStatement) Children() []Node {
+	return children(n.Name, n.Options)
+}
+
+// CreateDatabaseStatement is a CREATE DATABASE <name> [OPTIONS(...)]
+// statement; see ASTCreateDatabaseStatement in
+// googlesql/parser/parse_tree.h. It takes no scope, OR REPLACE, or IF NOT
+// EXISTS modifiers.
+type CreateDatabaseStatement struct {
+	Span
+	Name    *PathExpression `json:"name"`
+	Options *OptionsList    `json:"options,omitempty"`
+}
+
+func (n *CreateDatabaseStatement) statementNode() {}
+func (n *CreateDatabaseStatement) Children() []Node {
+	return children(n.Name, n.Options)
+}
+
+// CreateSchemaStatement is a CREATE [OR REPLACE] SCHEMA [IF NOT EXISTS]
+// <name> [DEFAULT COLLATE ...] [OPTIONS(...)] statement; see
+// ASTCreateSchemaStatement in googlesql/parser/parse_tree.h. It takes no scope
+// modifier.
+type CreateSchemaStatement struct {
+	Span
+	IsOrReplace   bool            `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool            `json:"is_if_not_exists,omitempty"`
+	Name          *PathExpression `json:"name"`
+	Collate       *Collate        `json:"collate,omitempty"`
+	Options       *OptionsList    `json:"options,omitempty"`
+}
+
+func (n *CreateSchemaStatement) statementNode() {}
+func (n *CreateSchemaStatement) Children() []Node {
+	return children(n.Name, n.Collate, n.Options)
+}
+
+// CreateExternalSchemaStatement is a CREATE [OR REPLACE] [scope] EXTERNAL
+// SCHEMA [IF NOT EXISTS] <name> [WITH CONNECTION <connection>] OPTIONS(...)
+// statement; see ASTCreateExternalSchemaStatement in
+// googlesql/parser/parse_tree.h.
+type CreateExternalSchemaStatement struct {
+	Span
+	Scope          string                `json:"scope,omitempty"`
+	IsOrReplace    bool                  `json:"is_or_replace,omitempty"`
+	IsIfNotExists  bool                  `json:"is_if_not_exists,omitempty"`
+	Name           *PathExpression       `json:"name"`
+	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
+	Options        *OptionsList          `json:"options,omitempty"`
+}
+
+func (n *CreateExternalSchemaStatement) statementNode() {}
+func (n *CreateExternalSchemaStatement) Children() []Node {
+	return children(n.Name, n.WithConnection, n.Options)
+}
+
+// DefineTableStatement is a DEFINE TABLE <name> (options) statement; see
+// ASTDefineTableStatement in googlesql/parser/parse_tree.h. The options list
+// is required.
+type DefineTableStatement struct {
+	Span
+	Name    *PathExpression `json:"name"`
+	Options *OptionsList    `json:"options"`
+}
+
+func (n *DefineTableStatement) statementNode() {}
+func (n *DefineTableStatement) Children() []Node {
+	return children(n.Name, n.Options)
 }
 
 // CreateConstantStatement is a CREATE CONSTANT statement; see

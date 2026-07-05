@@ -718,6 +718,24 @@ func isReserved(tok token.Token) bool {
 	return tok.Kind == token.IDENT && reservedKeywords[strings.ToUpper(tok.Image)]
 }
 
+// optionsNameOK reports whether tok can start an options-list or hint entry
+// name; see identifier_in_hints in googlesql.tm. The name is any identifier
+// (unreserved keyword or plain identifier) plus the reserved keywords HASH,
+// PROTO, and PARTITION, which are explicitly allowed.
+func optionsNameOK(tok token.Token) bool {
+	if tok.Kind == token.QUOTED_IDENT {
+		return true
+	}
+	if tok.Kind != token.IDENT {
+		return false
+	}
+	switch strings.ToUpper(tok.Image) {
+	case "HASH", "PROTO", "PARTITION":
+		return true
+	}
+	return !reservedKeywords[strings.ToUpper(tok.Image)]
+}
+
 // reservedFunctionNameKeywords are the function_name_from_keyword entries that
 // are also reserved keywords: in expression position they name a function call
 // (requiring "(") rather than being an ordinary path. See
@@ -810,6 +828,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseCallStatement()
 	case isKeyword(tok, "CREATE"):
 		return p.parseCreateStatement()
+	case isKeyword(tok, "DEFINE"):
+		return p.parseDefineTableStatement()
 	case isKeyword(tok, "DELETE"):
 		return p.parseDeleteStatement()
 	case isKeyword(tok, "DROP"):
@@ -2087,6 +2107,34 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if scope != "" && !isOrReplace && isKeyword(p.peek(), "OR") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword OR")
 	}
+	// CREATE DATABASE <name> [OPTIONS(...)]; see create_database_statement in
+	// googlesql.tm. A database takes no OR REPLACE, scope, or IF NOT EXISTS
+	// modifier, so any of those preceding DATABASE makes it an unexpected
+	// keyword.
+	if isKeyword(p.peek(), "DATABASE") {
+		if isOrReplace || scope != "" {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword DATABASE")
+		}
+		return p.parseCreateDatabaseStatement(createTok)
+	}
+	// CREATE [OR REPLACE] SCHEMA ...; see create_schema_statement in
+	// googlesql.tm. A plain schema takes no scope modifier, so a scope
+	// preceding SCHEMA makes it an unexpected keyword. EXTERNAL SCHEMA (which
+	// does accept a scope) is handled separately below.
+	if isKeyword(p.peek(), "SCHEMA") {
+		if scope != "" {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword SCHEMA")
+		}
+		return p.parseCreateSchemaStatement(createTok, isOrReplace)
+	}
+	// CREATE [OR REPLACE] SEQUENCE ...; see create_sequence_statement in
+	// googlesql.tm. A sequence takes no scope modifier.
+	if isKeyword(p.peek(), "SEQUENCE") {
+		if scope != "" {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword SEQUENCE")
+		}
+		return p.parseCreateSequenceStatement(createTok, isOrReplace)
+	}
 	// CREATE [OR REPLACE] [MATERIALIZED|APPROX] [RECURSIVE] VIEW ...; see
 	// create_view_statement in googlesql.tm. MATERIALIZED and APPROX views do
 	// not accept a scope modifier, so a scope followed by one is reported as
@@ -2122,6 +2170,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// create_external_table_statement in googlesql.tm.
 	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "TABLE") {
 		return p.parseCreateExternalTableStatement(createTok, scope, isOrReplace)
+	}
+	// CREATE [OR REPLACE] [scope] EXTERNAL SCHEMA ...; see
+	// create_external_schema_statement in googlesql.tm.
+	if isKeyword(p.peek(), "EXTERNAL") && isKeyword(p.peekAt(1), "SCHEMA") {
+		return p.parseCreateExternalSchemaStatement(createTok, scope, isOrReplace)
 	}
 	// CREATE [OR REPLACE] [scope] EXTERNAL must be followed by SCHEMA or TABLE;
 	// there is no CREATE EXTERNAL MODEL. The error points at the token after
@@ -2171,9 +2224,19 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if p.peek().Kind == token.QUOTED_IDENT {
 		return nil, p.errorf(p.peek().Pos, "%s is not a supported object type", p.peek().Image)
 	}
-	if _, err := p.expectKeyword("TABLE"); err != nil {
-		return nil, err
+	// No recognized object-type keyword follows. A bare identifier (one that is
+	// not any keyword) with no scope modifier is treated as a generic entity
+	// type, which is unsupported; see generic_entity_type in googlesql.tm.
+	// Anything else (a keyword, punctuation, or an identifier after a scope
+	// modifier) is simply unexpected here.
+	if !isKeyword(p.peek(), "TABLE") {
+		tok := p.peek()
+		if scope == "" && tok.Kind == token.IDENT && !keywordNames[strings.ToLower(tok.Image)] {
+			return nil, p.errorf(tok.Pos, "%s is not a supported object type", tok.Image)
+		}
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
+	p.advance() // TABLE
 	if isKeyword(p.peek(), "FUNCTION") {
 		return p.parseCreateTableFunctionStatement(createTok, scope, isOrReplace)
 	}
@@ -2271,6 +2334,170 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = p.prevEnd()
 	}
 	return stmt, nil
+}
+
+// parseCreateDatabaseStatement parses the tail of "CREATE DATABASE <name>
+// [OPTIONS(...)]"; see create_database_statement in googlesql.tm. DATABASE is
+// the next token.
+func (p *parser) parseCreateDatabaseStatement(createTok token.Token) (ast.Statement, error) {
+	p.advance() // DATABASE
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.CreateDatabaseStatement{Span: span(createTok.Pos, name.End()), Name: name}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseCreateSchemaStatement parses the tail of "CREATE [OR REPLACE] SCHEMA
+// [IF NOT EXISTS] <name> [DEFAULT COLLATE ...] [OPTIONS(...)]"; see
+// create_schema_statement in googlesql.tm. SCHEMA is the next token.
+func (p *parser) parseCreateSchemaStatement(createTok token.Token, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // SCHEMA
+	stmt := &ast.CreateSchemaStatement{Span: span(createTok.Pos, 0), IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	// opt_default_collate_clause: "DEFAULT COLLATE <collation>".
+	if isKeyword(p.peek(), "DEFAULT") {
+		p.advance() // DEFAULT
+		if !isKeyword(p.peek(), "COLLATE") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword COLLATE but got %s", describeToken(p.peek()))
+		}
+		collate, err := p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Collate = collate
+		stmt.Stop = collate.End()
+	}
+	// opt_options_list: "OPTIONS(...)".
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseCreateExternalSchemaStatement parses the tail of "CREATE [OR REPLACE]
+// [scope] EXTERNAL SCHEMA [IF NOT EXISTS] <name> [WITH CONNECTION <connection>]
+// OPTIONS(...)"; see create_external_schema_statement in googlesql.tm. EXTERNAL
+// is the next token. The OPTIONS clause is required.
+func (p *parser) parseCreateExternalSchemaStatement(createTok token.Token, scope string, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // EXTERNAL
+	p.advance() // SCHEMA
+	stmt := &ast.CreateExternalSchemaStatement{Span: span(createTok.Pos, 0), Scope: scope, IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	// opt_with_connection_clause: "WITH CONNECTION <connection>".
+	if isKeyword(p.peek(), "WITH") {
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+		stmt.Stop = wc.End()
+	}
+	// options (required, not optional).
+	if !isKeyword(p.peek(), "OPTIONS") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword OPTIONS but got %s", describeToken(p.peek()))
+	}
+	p.advance() // OPTIONS
+	opts, err := p.parseOptionsList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Options = opts
+	stmt.Stop = opts.End()
+	return stmt, nil
+}
+
+// parseCreateSequenceStatement parses the tail of "CREATE [OR REPLACE] SEQUENCE
+// [IF NOT EXISTS] <name> [OPTIONS(...)]"; see create_sequence_statement in
+// googlesql.tm. SEQUENCE is the next token.
+func (p *parser) parseCreateSequenceStatement(createTok token.Token, isOrReplace bool) (ast.Statement, error) {
+	p.advance() // SEQUENCE
+	stmt := &ast.CreateSequenceStatement{Span: span(createTok.Pos, 0), IsOrReplace: isOrReplace}
+	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
+		p.advance()
+		p.advance()
+		p.advance()
+		stmt.IsIfNotExists = true
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	// opt_options_list: "OPTIONS(...)".
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseDefineTableStatement parses "DEFINE TABLE <name> (options)"; see
+// define_table_statement in googlesql.tm. The options list is required and,
+// unlike other statements, is written without a leading OPTIONS keyword.
+func (p *parser) parseDefineTableStatement() (ast.Statement, error) {
+	defineTok := p.advance() // DEFINE
+	if _, err := p.expectKeyword("TABLE"); err != nil {
+		return nil, err
+	}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	// options_list is required and begins with "(". Because a path expression
+	// could also continue with ".", the reference reports both alternatives.
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or "." but got %s`, describeToken(p.peek()))
+	}
+	opts, err := p.parseOptionsList()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.DefineTableStatement{Span: span(defineTok.Pos, opts.End()), Name: name, Options: opts}, nil
 }
 
 // parseClusterBy parses "CLUSTER BY expression, ..."; see
@@ -2906,6 +3133,26 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword DEFINER or keyword INVOKER but got %s", describeToken(p.peek()))
 		}
 	}
+	// opt_partition_by_clause_no_hint and cluster_by_clause_no_hint apply only
+	// to CREATE MATERIALIZED VIEW; see create_view_statement in googlesql.tm.
+	if viewKind == "MATERIALIZED" {
+		if isKeyword(p.peek(), "PARTITION") {
+			pb, err := p.parsePartitionByNoHint()
+			if err != nil {
+				return nil, err
+			}
+			stmt.PartitionBy = pb
+			stmt.Stop = pb.End()
+		}
+		if isKeyword(p.peek(), "CLUSTER") {
+			cb, err := p.parseClusterBy()
+			if err != nil {
+				return nil, err
+			}
+			stmt.ClusterBy = cb
+			stmt.Stop = cb.End()
+		}
+	}
 	// options?
 	if isKeyword(p.peek(), "OPTIONS") {
 		p.advance() // OPTIONS
@@ -2918,6 +3165,21 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 	}
 	if _, err := p.expectKeyword("AS"); err != nil {
 		return nil, err
+	}
+	// A materialized view's body is either a query or "REPLICA OF <path>"; see
+	// create_view_statement in googlesql.tm. Other view kinds take only a query.
+	if viewKind == "MATERIALIZED" && isKeyword(p.peek(), "REPLICA") {
+		p.advance() // REPLICA
+		if _, err := p.expectKeyword("OF"); err != nil {
+			return nil, err
+		}
+		src, err := p.parseMaybeDashedPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.ReplicaSource = src
+		stmt.Stop = src.End()
+		return stmt, nil
 	}
 	queryStart := p.peek().Pos
 	query, err := p.parseQuery()
@@ -5767,7 +6029,7 @@ func (p *parser) parseOptionsList() (*ast.OptionsList, error) {
 		// An options entry must begin with an identifier (the option name). If
 		// it cannot, the list can only be closed, so the reference reports the
 		// missing ")"; see options_list in googlesql.tm.
-		if k := p.peek().Kind; k != token.IDENT && k != token.QUOTED_IDENT {
+		if !optionsNameOK(p.peek()) {
 			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" but got %s`, describeToken(p.peek()))
 		}
 		for {
@@ -5793,7 +6055,7 @@ func (p *parser) parseOptionsList() (*ast.OptionsList, error) {
 // parseOptionsEntry parses "identifier (=|+=|-=) expression".
 func (p *parser) parseOptionsEntry() (*ast.OptionsEntry, error) {
 	tok := p.peek()
-	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+	if !optionsNameOK(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	name := p.parseIdentifierToken(p.advance())
@@ -9936,6 +10198,31 @@ func (p *parser) parsePartitionBy() (*ast.PartitionBy, error) {
 	return partitionBy, nil
 }
 
+// parsePartitionByNoHint parses "PARTITION BY expression, ..." without an
+// optional hint; see partition_by_clause_prefix_no_hint in googlesql.tm. A
+// hint (e.g. "@{...}") is disallowed here, so "PARTITION" must be followed
+// immediately by "BY". PARTITION is the next token.
+func (p *parser) parsePartitionByNoHint() (*ast.PartitionBy, error) {
+	partitionTok := p.advance() // PARTITION
+	if _, err := p.expectKeyword("BY"); err != nil {
+		return nil, err
+	}
+	partitionBy := &ast.PartitionBy{Span: span(partitionTok.Pos, 0)}
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		partitionBy.Expressions = append(partitionBy.Expressions, expr)
+		partitionBy.Stop = p.extEnd(expr)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	return partitionBy, nil
+}
+
 // parseMaybeDashedPathExpression parses a table-name path expression whose
 // first component may be a dashed identifier (e.g. my-project.dataset.table);
 // see maybe_dashed_path_expression in googlesql.tm.
@@ -9966,7 +10253,7 @@ func (p *parser) parseMaybeDashedGeneralizedPathExpression() (ast.Node, error) {
 func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 	tok := p.peek()
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
-		return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	if isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
