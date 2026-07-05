@@ -7923,13 +7923,22 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 				continue
 			}
 			if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
-				if next.Kind == token.STAR && p.allowDotStar {
+				if next.Kind == token.STAR {
 					// Stop in front of a select column's ".*" and record
 					// which expression it binds to; see
 					// select_column_dot_star in googlesql.tm.
-					p.dotStarTarget = expr
+					if p.allowDotStar {
+						p.dotStarTarget = expr
+					}
+					return expr, nil
 				}
-				return expr, nil
+				// A primary expression followed by "." requires an identifier
+				// (generalized field access); commit to the "." and report the
+				// error at the following token rather than treating the "." as
+				// unexpected. See the primary_expression "." identifier rule in
+				// googlesql.tm.
+				p.advance() // .
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 			}
 			p.advance() // .
 			ident := p.parseIdentifierToken(p.advance())

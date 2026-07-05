@@ -190,6 +190,27 @@ func isHexDigit(c byte) bool {
 	return isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
+// hexIntegerLen returns the length of a hex integer literal "0x[0-9a-f]+"
+// starting at position p, or 0 if none is present. Matches the hex_integer
+// lexer rule in googlesql/parser/googlesql.tm.
+func (l *lexer) hexIntegerLen(p int) int {
+	if p+2 < len(l.sql) && l.sql[p] == '0' && (l.sql[p+1] == 'x' || l.sql[p+1] == 'X') && isHexDigit(l.sql[p+2]) {
+		end := p + 2
+		for end < len(l.sql) && isHexDigit(l.sql[end]) {
+			end++
+		}
+		return end - p
+	}
+	return 0
+}
+
+// startsDecimalInteger reports whether a DECIMAL_INTEGER token ("[0-9]+", and
+// not the start of a hex integer) begins at position p. Under maximal munch a
+// leading "0x..." is a HEX_INTEGER, not a decimal one.
+func (l *lexer) startsDecimalInteger(p int) bool {
+	return p < len(l.sql) && isDigit(l.sql[p]) && l.hexIntegerLen(p) == 0
+}
+
 func (l *lexer) next() (token.Token, error) {
 	if err := l.skipSpaceAndComments(); err != nil {
 		return token.Token{}, err
@@ -211,10 +232,12 @@ func (l *lexer) next() (token.Token, error) {
 			l.pos++
 		}
 		return l.emit(token.IDENT, start), nil
-	case isDigit(c) || (c == '.' && isDigit(l.peekAt(1)) && !lookbackAllowsPathDot(l.prev)):
+	case isDigit(c) || (c == '.' && l.startsDecimalInteger(l.pos+1) && !lookbackAllowsPathDot(l.prev)):
 		// A "." after an expression-ending token continues a path expression
 		// rather than starting a float; see TransformDotSymbol in
-		// googlesql/parser/lookahead_transformer.cc.
+		// googlesql/parser/lookahead_transformer.cc. A "." is only the start of
+		// a float when a DECIMAL_INTEGER (not a hex integer) follows it, so
+		// ".0x1" lexes as a "." token followed by the hex integer "0x1".
 		return l.number()
 	case c == '\'' || c == '"':
 		return l.str(start, false, false)
@@ -623,47 +646,97 @@ func (l *lexer) quotedIdent() (token.Token, error) {
 	return token.Token{}, l.errorf(start, "Syntax error: Unclosed identifier literal")
 }
 
-// number scans an integer or floating point literal.
+// number scans an integer or floating point literal. It reproduces the token
+// fusing performed by the reference lookahead transformer
+// (TransformIntegerLiteral, TransformDotSymbol and
+// FuseExponentPartIntoFloatingPointLiteral in
+// googlesql/parser/lookahead_transformer.cc): the base lexer emits separate
+// DECIMAL_INTEGER, HEX_INTEGER, ".", "e"/"E[0-9]+" tokens and only adjacent
+// runs are fused into one literal. In particular a hex integer never starts or
+// extends a float, so inputs like "1.0x1" lex as the float "1." followed by the
+// hex integer "0x1".
 func (l *lexer) number() (token.Token, error) {
 	start := l.pos
-	// Hex integer. Requires at least one hex digit; "0x" with no digit lexes as
-	// the decimal integer "0" followed by the identifier "x" (which the parser
-	// then reports as a missing-whitespace-before-alias error).
-	if l.peek() == '0' && (l.peekAt(1) == 'x' || l.peekAt(1) == 'X') && isHexDigit(l.peekAt(2)) {
-		l.pos += 2
-		for l.pos < len(l.sql) && isHexDigit(l.sql[l.pos]) {
-			l.pos++
-		}
+	// Hex integer. Hex integers are never part of a floating point literal.
+	// "0x" with no hex digit lexes as the decimal integer "0" followed by the
+	// identifier "x" (which the parser then reports as a
+	// missing-whitespace-before-alias error).
+	if hl := l.hexIntegerLen(l.pos); hl > 0 {
+		l.pos += hl
 		return l.emit(token.INT, start), nil
 	}
+
 	isFloat := false
-	for l.pos < len(l.sql) && isDigit(l.sql[l.pos]) {
-		l.pos++
-	}
 	if l.peek() == '.' {
+		// Dot-started float ".D..."; the dispatcher guarantees a decimal
+		// integer (not a hex integer) follows the ".".
 		isFloat = true
-		l.pos++
+		l.pos++ // consume "."
 		for l.pos < len(l.sql) && isDigit(l.sql[l.pos]) {
 			l.pos++
 		}
-	}
-	if c := l.peek(); c == 'e' || c == 'E' {
-		save := l.pos
-		l.pos++
-		if c := l.peek(); c == '+' || c == '-' {
+	} else {
+		// Decimal integer mantissa.
+		for l.pos < len(l.sql) && isDigit(l.sql[l.pos]) {
 			l.pos++
 		}
-		if isDigit(l.peek()) {
+		// A "." immediately after the decimal integer begins the fractional
+		// part, e.g. "1." or "1.5". A hex integer after the "." does not fuse,
+		// so "1.0x1" stops the float at "1.".
+		if l.peek() == '.' {
 			isFloat = true
-			for l.pos < len(l.sql) && isDigit(l.sql[l.pos]) {
-				l.pos++
+			l.pos++ // consume "."
+			if l.hexIntegerLen(l.pos) == 0 {
+				for l.pos < len(l.sql) && isDigit(l.sql[l.pos]) {
+					l.pos++
+				}
 			}
-		} else {
-			l.pos = save
 		}
+	}
+
+	if l.fuseExponent() {
+		isFloat = true
 	}
 	if isFloat {
 		return l.emit(token.FLOAT, start), nil
 	}
 	return l.emit(token.INT, start), nil
+}
+
+// fuseExponent consumes an exponent part immediately following the mantissa at
+// l.pos, matching FuseExponentPartIntoFloatingPointLiteral. It handles the two
+// base-token forms: EXP_IN_FLOAT_NO_SIGN ("E[0-9]+") and STANDALONE_EXPONENT_SIGN
+// ("E") followed by a sign and a decimal integer ("E+10"). It returns true and
+// advances l.pos when an exponent is consumed.
+func (l *lexer) fuseExponent() bool {
+	if c := l.peek(); c != 'e' && c != 'E' {
+		return false
+	}
+	// EXP_IN_FLOAT_NO_SIGN: "E[0-9]+". Under maximal munch this only wins over
+	// an identifier when the digits are not followed by an identifier letter,
+	// so "E10" fuses but "E10x" and "E0x1" are identifiers.
+	if isDigit(l.peekAt(1)) {
+		end := l.pos + 1
+		for end < len(l.sql) && isDigit(l.sql[end]) {
+			end++
+		}
+		if end >= len(l.sql) || !isIdentStart(l.sql[end]) {
+			l.pos = end
+			return true
+		}
+		return false
+	}
+	// STANDALONE_EXPONENT_SIGN: "E" followed by a sign and a decimal integer,
+	// e.g. "E+10". A hex integer after the sign does not fuse.
+	if s := l.peekAt(1); s == '+' || s == '-' {
+		if l.startsDecimalInteger(l.pos + 2) {
+			end := l.pos + 2
+			for end < len(l.sql) && isDigit(l.sql[end]) {
+				end++
+			}
+			l.pos = end
+			return true
+		}
+	}
+	return false
 }
