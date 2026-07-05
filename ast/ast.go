@@ -3127,6 +3127,19 @@ func (n *AlterColumnDropGeneratedAction) Children() []Node {
 	return children(n.Column)
 }
 
+// AlterColumnDropNotNullAction is an "ALTER COLUMN [IF EXISTS] identifier DROP
+// NOT NULL" alter action; see ASTAlterColumnDropNotNullAction in
+// googlesql/parser/parse_tree.h.
+type AlterColumnDropNotNullAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Column     *Identifier `json:"column"`
+}
+
+func (n *AlterColumnDropNotNullAction) Children() []Node {
+	return children(n.Column)
+}
+
 // AlterColumnSetGeneratedAction is an "ALTER COLUMN [IF EXISTS] identifier SET
 // GENERATED generated_column_info" alter action; see
 // ASTAlterColumnSetGeneratedAction in googlesql/parser/parse_tree.h.
@@ -3139,6 +3152,36 @@ type AlterColumnSetGeneratedAction struct {
 
 func (n *AlterColumnSetGeneratedAction) Children() []Node {
 	return children(n.Column, n.Info)
+}
+
+// AlterColumnOptionsAction is an "ALTER COLUMN [IF EXISTS] identifier SET
+// OPTIONS options_list" alter action; see ASTAlterColumnOptionsAction in
+// googlesql/parser/parse_tree.h.
+type AlterColumnOptionsAction struct {
+	Span
+	IsIfExists bool         `json:"is_if_exists,omitempty"`
+	Column     *Identifier  `json:"column"`
+	Options    *OptionsList `json:"options"`
+}
+
+func (n *AlterColumnOptionsAction) Children() []Node {
+	return children(n.Column, n.Options)
+}
+
+// AlterColumnTypeAction is an "ALTER COLUMN [IF EXISTS] identifier SET DATA
+// TYPE field_schema" alter action; see ASTAlterColumnTypeAction in
+// googlesql/parser/parse_tree.h. Collate is a separate top-level collation
+// clause, distinct from any collation inside the schema.
+type AlterColumnTypeAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Column     *Identifier `json:"column"`
+	Schema     Node        `json:"schema"`
+	Collate    *Collate    `json:"collate,omitempty"`
+}
+
+func (n *AlterColumnTypeAction) Children() []Node {
+	return children(n.Column, n.Schema, n.Collate)
 }
 
 // GeneratedColumnInfo describes a generated column: either "AS (expression)
@@ -3475,6 +3518,21 @@ func (n *ExportDataStatement) Children() []Node {
 	return children(n.WithConnection, n.Options, n.Query)
 }
 
+// ExportModelStatement is an "EXPORT MODEL path [WITH CONNECTION ...]
+// [OPTIONS(...)]" statement; see ASTExportModelStatement in
+// googlesql/parser/parse_tree.h.
+type ExportModelStatement struct {
+	Span
+	Name           *PathExpression       `json:"name"`
+	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
+	Options        *OptionsList          `json:"options,omitempty"`
+}
+
+func (n *ExportModelStatement) statementNode() {}
+func (n *ExportModelStatement) Children() []Node {
+	return children(n.Name, n.WithConnection, n.Options)
+}
+
 // CreateExternalTableStatement is a CREATE EXTERNAL TABLE statement; see
 // ASTCreateExternalTableStatement in googlesql/parser/parse_tree.h. Scope is
 // "", "TEMP", "PUBLIC", or "PRIVATE".
@@ -3527,13 +3585,64 @@ func (n *ColumnDefinition) Children() []Node {
 type SimpleColumnSchema struct {
 	Span
 	Type              *PathExpression      `json:"type"`
+	TypeParameters    *TypeParameterList   `json:"type_parameters,omitempty"`
 	Collate           *Collate             `json:"collate,omitempty"`
 	DefaultExpression Node                 `json:"default_expression,omitempty"`
 	Attributes        *ColumnAttributeList `json:"attributes,omitempty"`
+	Options           *OptionsList         `json:"options,omitempty"`
 }
 
 func (n *SimpleColumnSchema) Children() []Node {
-	return children(n.Type, n.Collate, n.DefaultExpression, n.Attributes)
+	return children(n.Type, n.TypeParameters, n.Collate, n.DefaultExpression, n.Attributes, n.Options)
+}
+
+// ArrayColumnSchema is an "ARRAY<field_schema>" column schema; see
+// ASTArrayColumnSchema in googlesql/parser/parse_tree.h. Trailing type
+// parameters, collation, attributes, and an options list attach here through
+// column_schema_inner and field_schema.
+type ArrayColumnSchema struct {
+	Span
+	ElementSchema  Node                 `json:"element_schema"`
+	TypeParameters *TypeParameterList   `json:"type_parameters,omitempty"`
+	Collate        *Collate             `json:"collate,omitempty"`
+	Attributes     *ColumnAttributeList `json:"attributes,omitempty"`
+	Options        *OptionsList         `json:"options,omitempty"`
+}
+
+func (n *ArrayColumnSchema) Children() []Node {
+	return children(n.ElementSchema, n.TypeParameters, n.Collate, n.Attributes, n.Options)
+}
+
+// StructColumnSchema is a "STRUCT<field, ...>" column schema; see
+// ASTStructColumnSchema in googlesql/parser/parse_tree.h.
+type StructColumnSchema struct {
+	Span
+	Fields         []*StructColumnField `json:"fields"`
+	TypeParameters *TypeParameterList   `json:"type_parameters,omitempty"`
+	Collate        *Collate             `json:"collate,omitempty"`
+	Attributes     *ColumnAttributeList `json:"attributes,omitempty"`
+	Options        *OptionsList         `json:"options,omitempty"`
+}
+
+func (n *StructColumnSchema) Children() []Node {
+	out := make([]Node, 0, len(n.Fields)+4)
+	for _, f := range n.Fields {
+		out = append(out, f)
+	}
+	return append(out, children(n.TypeParameters, n.Collate, n.Attributes, n.Options)...)
+}
+
+// StructColumnField is one "[name] field_schema" field of a struct column
+// schema; see ASTStructColumnField in googlesql/parser/parse_tree.h. Name is
+// nil for an unnamed field.
+type StructColumnField struct {
+	Span
+	Name   *Identifier `json:"name,omitempty"`
+	Schema Node        `json:"schema"`
+}
+
+func (n *StructColumnField) Children() []Node {
+	return children(n.Name, n.Schema)
 }
 
 // ColumnAttributeList is the list of column attributes trailing a column

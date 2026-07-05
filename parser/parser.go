@@ -264,6 +264,13 @@ const FeatureRepeat Feature = "REPEAT"
 // "FOR...IN is not supported".
 const FeatureForIn Feature = "FOR_IN"
 
+// FeatureEnableAlterArrayOptions gates the "+=" and "-=" options assignment
+// operators (FEATURE_ENABLE_ALTER_ARRAY_OPTIONS). The grammar always accepts
+// them, but when the feature is off the reference drops them from the set of
+// expected tokens in a syntax error message; see the expectations_set.erase
+// calls in googlesql/parser/parser_internal.cc.
+const FeatureEnableAlterArrayOptions Feature = "ENABLE_ALTER_ARRAY_OPTIONS"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -283,6 +290,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureTtl:                                  true,
 	FeatureRepeat:                               true,
 	FeatureForIn:                                true,
+	FeatureEnableAlterArrayOptions:              true,
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -746,7 +754,7 @@ var reservedKeywords = map[string]bool{
 	"ALL": true, "AND": true, "ARRAY": true, "AS": true, "ASC": true,
 	"ASSERT_ROWS_MODIFIED": true,
 	"BETWEEN":              true,
-	"BY":                   true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
+	"BY":                   true, "CASE": true, "CAST": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
 	"DEFAULT": true,
 	"DESC":    true, "DISTINCT": true,
 	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "EXISTS": true, "FALSE": true, "FOR": true,
@@ -904,6 +912,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseExecuteImmediateStatement()
 	case isKeyword(tok, "EXPORT") && isKeyword(p.peekAt(1), "DATA"):
 		return p.parseExportDataStatement()
+	case isKeyword(tok, "EXPORT") && isKeyword(p.peekAt(1), "MODEL"):
+		return p.parseExportModelStatement()
 	case isKeyword(tok, "IMPORT"):
 		return p.parseImportStatement()
 	case isKeyword(tok, "MODULE"):
@@ -3097,6 +3107,209 @@ func (p *parser) parseTableColumnSchema() (ast.Node, error) {
 	return schema, nil
 }
 
+// parseFieldSchema parses a field_schema: "column_schema_inner
+// opt_collate_clause opt_field_attributes opt_options_list"; see field_schema
+// in googlesql.tm. The only supported field attribute is NOT NULL, matching
+// the grammar's opt_field_attributes.
+func (p *parser) parseFieldSchema() (ast.Node, error) {
+	schema, err := p.parseColumnSchemaInner()
+	if err != nil {
+		return nil, err
+	}
+	return p.parseColumnSchemaTail(schema, true)
+}
+
+// parseColumnSchemaTail parses the trailing "opt_collate_clause
+// opt_field_attributes [opt_options_list]" of a field_schema (or struct
+// column field) and attaches the results to schema, extending its span. When
+// allowOptions is false, a trailing OPTIONS list is not consumed (unnamed
+// struct fields cannot carry OPTIONS; see struct_column_field in
+// googlesql.tm).
+func (p *parser) parseColumnSchemaTail(schema ast.Node, allowOptions bool) (ast.Node, error) {
+	var collate *ast.Collate
+	if isKeyword(p.peek(), "COLLATE") {
+		c, err := p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+		collate = c
+	}
+	var attrs *ast.ColumnAttributeList
+	if isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL") {
+		notTok := p.advance()  // NOT
+		nullTok := p.advance() // NULL
+		attr := &ast.NotNullColumnAttribute{Span: span(notTok.Pos, nullTok.End)}
+		attrs = &ast.ColumnAttributeList{Span: span(notTok.Pos, nullTok.End), Attributes: []ast.Node{attr}}
+	}
+	var options *ast.OptionsList
+	if allowOptions && isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		o, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		options = o
+	}
+	setColumnSchemaTail(schema, collate, attrs, options)
+	return schema, nil
+}
+
+// setColumnSchemaTail attaches an optional collation, attribute list, and
+// options list to a column schema node and extends its end location to the
+// last present component.
+func setColumnSchemaTail(schema ast.Node, collate *ast.Collate, attrs *ast.ColumnAttributeList, options *ast.OptionsList) {
+	end := schema.End()
+	if collate != nil {
+		end = collate.End()
+	}
+	if attrs != nil {
+		end = attrs.End()
+	}
+	if options != nil {
+		end = options.End()
+	}
+	switch s := schema.(type) {
+	case *ast.SimpleColumnSchema:
+		s.Collate, s.Attributes, s.Options, s.Stop = collate, attrs, options, end
+	case *ast.ArrayColumnSchema:
+		s.Collate, s.Attributes, s.Options, s.Stop = collate, attrs, options, end
+	case *ast.StructColumnSchema:
+		s.Collate, s.Attributes, s.Options, s.Stop = collate, attrs, options, end
+	}
+}
+
+// parseColumnSchemaInner parses "raw_column_schema_inner opt_type_parameters";
+// see column_schema_inner in googlesql.tm.
+func (p *parser) parseColumnSchemaInner() (ast.Node, error) {
+	schema, err := p.parseRawColumnSchemaInner()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind == token.LPAREN {
+		params, err := p.parseTypeParameterList()
+		if err != nil {
+			return nil, err
+		}
+		// TypeParameterList excludes its closing ")", which prevEnd supplies;
+		// see the ExtendNodeRight in column_schema_inner in googlesql.tm.
+		end := p.prevEnd()
+		switch s := schema.(type) {
+		case *ast.SimpleColumnSchema:
+			s.TypeParameters, s.Stop = params, end
+		case *ast.ArrayColumnSchema:
+			s.TypeParameters, s.Stop = params, end
+		case *ast.StructColumnSchema:
+			s.TypeParameters, s.Stop = params, end
+		}
+	}
+	return schema, nil
+}
+
+// parseRawColumnSchemaInner parses a simple, array, or struct column schema
+// without trailing type parameters; see raw_column_schema_inner and
+// simple_column_schema_inner in googlesql.tm.
+func (p *parser) parseRawColumnSchemaInner() (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "ARRAY"):
+		return p.parseArrayColumnSchema()
+	case isKeyword(tok, "STRUCT"):
+		return p.parseStructColumnSchema()
+	case isKeyword(tok, "INTERVAL"):
+		// INTERVAL is a reserved keyword but still names a type; see
+		// simple_column_schema_inner in googlesql.tm.
+		id := p.parseIdentifierToken(p.advance())
+		path := &ast.PathExpression{Span: span(tok.Pos, tok.End), Names: []*ast.Identifier{id}}
+		return &ast.SimpleColumnSchema{Span: span(tok.Pos, tok.End), Type: path}, nil
+	}
+	// A column schema must begin with a type name (a path expression). A
+	// non-identifier token here is reported as unexpected, matching the
+	// reference's generic error at this LR state.
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	typePath, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.SimpleColumnSchema{Span: span(typePath.Pos(), typePath.End()), Type: typePath}, nil
+}
+
+// parseArrayColumnSchema parses "ARRAY<field_schema>"; see
+// array_column_schema_inner in googlesql.tm. ARRAY is the next token.
+func (p *parser) parseArrayColumnSchema() (*ast.ArrayColumnSchema, error) {
+	arrayTok := p.advance() // ARRAY
+	// ARRAY has no empty form, so a "<>" token is not split; see parseArrayType.
+	if _, err := p.expect(token.LT, `"<"`); err != nil {
+		return nil, err
+	}
+	elem, err := p.parseFieldSchema()
+	if err != nil {
+		return nil, err
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ArrayColumnSchema{Span: span(arrayTok.Pos, closeTok.End), ElementSchema: elem}, nil
+}
+
+// parseStructColumnSchema parses "STRUCT<field, ...>" (possibly empty); see
+// struct_column_schema_inner in googlesql.tm. STRUCT is the next token.
+func (p *parser) parseStructColumnSchema() (*ast.StructColumnSchema, error) {
+	structTok := p.advance() // STRUCT
+	if _, err := p.expectTemplateOpen(); err != nil {
+		return nil, err
+	}
+	st := &ast.StructColumnSchema{Span: span(structTok.Pos, 0)}
+	if p.peek().Kind != token.GT && p.peek().Kind != token.RSHIFT && p.peek().Kind != token.EOF {
+		for {
+			field, err := p.parseStructColumnField()
+			if err != nil {
+				return nil, err
+			}
+			st.Fields = append(st.Fields, field)
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance()
+		}
+	}
+	closeTok, err := p.expectTemplateClose()
+	if err != nil {
+		return nil, err
+	}
+	st.Stop = closeTok.End
+	return st, nil
+}
+
+// parseStructColumnField parses one struct column field: either "identifier
+// field_schema" (named) or "column_schema_inner opt_collate_clause
+// opt_field_attributes" (unnamed, which cannot carry OPTIONS); see
+// struct_column_field in googlesql.tm.
+func (p *parser) parseStructColumnField() (*ast.StructColumnField, error) {
+	tok := p.peek()
+	named := (tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))) &&
+		startsType(p.peekAt(1))
+	if named {
+		name := p.parseIdentifierToken(p.advance())
+		schema, err := p.parseFieldSchema()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StructColumnField{Span: span(name.Pos(), schema.End()), Name: name, Schema: schema}, nil
+	}
+	schema, err := p.parseColumnSchemaInner()
+	if err != nil {
+		return nil, err
+	}
+	schema, err = p.parseColumnSchemaTail(schema, false)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.StructColumnField{Span: span(schema.Pos(), schema.End()), Schema: schema}, nil
+}
+
 // tryParseColumnAttributes parses a run of column attributes trailing a column
 // schema; see column_attributes in googlesql.tm. Only NOT NULL is implemented
 // (the sole attribute exercised by the external-table tests). It returns nil
@@ -4380,7 +4593,10 @@ func (p *parser) parseCreateFunctionStatement(createTok token.Token, scope strin
 // opt_with_connection_clause in googlesql.tm. WITH is the next token.
 func (p *parser) parseWithConnectionClause() (*ast.WithConnectionClause, error) {
 	withTok := p.advance() // WITH
-	connTok := p.advance() // CONNECTION
+	connTok, err := p.expectKeyword("CONNECTION")
+	if err != nil {
+		return nil, err
+	}
 	var path ast.Node
 	switch tok := p.peek(); {
 	case isKeyword(tok, "DEFAULT"):
@@ -6727,6 +6943,23 @@ func (p *parser) parseAlterColumnAction() (ast.Node, error) {
 				return nil, err
 			}
 			return &ast.AlterColumnSetGeneratedAction{Span: span(alterTok.Pos, info.End()), IsIfExists: ifExists, Column: name, Info: info}, nil
+		case isKeyword(sub, "DATA"):
+			p.advance() // DATA
+			if _, err := p.expectKeyword("TYPE"); err != nil {
+				return nil, err
+			}
+			schema, err := p.parseFieldSchema()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.AlterColumnTypeAction{Span: span(alterTok.Pos, schema.End()), IsIfExists: ifExists, Column: name, Schema: schema}, nil
+		case isKeyword(sub, "OPTIONS"):
+			p.advance() // OPTIONS
+			opts, err := p.parseOptionsList()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.AlterColumnOptionsAction{Span: span(alterTok.Pos, opts.End()), IsIfExists: ifExists, Column: name, Options: opts}, nil
 		}
 		return nil, p.errorf(sub.Pos, "Syntax error: Expected keyword DATA or keyword DEFAULT or keyword GENERATED or keyword OPTIONS but got %s", describeToken(sub))
 	case isKeyword(next, "DROP"):
@@ -6739,6 +6972,13 @@ func (p *parser) parseAlterColumnAction() (ast.Node, error) {
 		case isKeyword(sub, "GENERATED"):
 			end := p.advance().End
 			return &ast.AlterColumnDropGeneratedAction{Span: span(alterTok.Pos, end), IsIfExists: ifExists, Column: name}, nil
+		case isKeyword(sub, "NOT"):
+			p.advance() // NOT
+			nullTok, err := p.expectKeyword("NULL")
+			if err != nil {
+				return nil, err
+			}
+			return &ast.AlterColumnDropNotNullAction{Span: span(alterTok.Pos, nullTok.End), IsIfExists: ifExists, Column: name}, nil
 		}
 		return nil, p.errorf(sub.Pos, "Syntax error: Expected keyword DEFAULT or keyword GENERATED or keyword NOT but got %s", describeToken(sub))
 	}
@@ -6963,6 +7203,13 @@ func (p *parser) parseOptionsEntry() (*ast.OptionsEntry, error) {
 		p.advance()
 		op = "-="
 	default:
+		// The grammar always accepts "=", "+=", and "-=". When the
+		// ENABLE_ALTER_ARRAY_OPTIONS feature is off, the reference drops the
+		// "+=" and "-=" from the expected-token set in the error message; see
+		// the expectations_set.erase calls in parser_internal.cc.
+		if p.features.Enabled(FeatureEnableAlterArrayOptions) {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "+=" or "-=" or "=" but got %s`, describeToken(p.peek()))
+		}
 		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "=" but got %s`, describeToken(p.peek()))
 	}
 	value, err := p.parseExpression()
@@ -8412,6 +8659,37 @@ func (p *parser) parseExportDataStatement() (ast.Statement, error) {
 	return stmt, nil
 }
 
+// parseExportModelStatement parses "EXPORT MODEL path_expression
+// [WITH CONNECTION ...] [OPTIONS(...)]"; see export_model_statement in
+// googlesql.tm. EXPORT is the next token.
+func (p *parser) parseExportModelStatement() (ast.Statement, error) {
+	exportTok := p.advance() // EXPORT
+	p.advance()              // MODEL
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.ExportModelStatement{Span: span(exportTok.Pos, name.End()), Name: name}
+	if isKeyword(p.peek(), "WITH") {
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+		stmt.Stop = wc.End()
+	}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
 // parsePipeCreateTable parses "CREATE TABLE ..." (a create_table_statement
 // without an AS query) after a |> token; see pipe_create_table in
 // googlesql.tm. A trailing AS query is a dedicated error.
@@ -8617,7 +8895,7 @@ func startsExpression(tok token.Token) bool {
 			return true
 		}
 		switch strings.ToUpper(tok.Image) {
-		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "STRUCT", "EXISTS":
+		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "CAST", "STRUCT", "EXISTS":
 			return true
 		}
 	}

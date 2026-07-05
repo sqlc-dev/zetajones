@@ -429,11 +429,26 @@ func nodeString(n ast.Node) string {
 			return "AlterColumnDropGeneratedAction(is_if_exists)"
 		}
 		return "AlterColumnDropGeneratedAction"
+	case *ast.AlterColumnDropNotNullAction:
+		if t.IsIfExists {
+			return "AlterColumnDropNotNullAction(is_if_exists)"
+		}
+		return "AlterColumnDropNotNullAction"
 	case *ast.AlterColumnSetGeneratedAction:
 		if t.IsIfExists {
 			return "AlterColumnSetGeneratedAction(is_if_exists)"
 		}
 		return "AlterColumnSetGeneratedAction"
+	case *ast.AlterColumnOptionsAction:
+		if t.IsIfExists {
+			return "AlterColumnOptionsAction(is_if_exists)"
+		}
+		return "AlterColumnOptionsAction"
+	case *ast.AlterColumnTypeAction:
+		if t.IsIfExists {
+			return "AlterColumnTypeAction(is_if_exists)"
+		}
+		return "AlterColumnTypeAction"
 	case *ast.GeneratedColumnInfo:
 		// See ASTGeneratedColumnInfo::SingleNodeDebugString in parse_tree.cc.
 		if t.StoredMode == "" {
@@ -620,6 +635,12 @@ func nodeString(n ast.Node) string {
 		return "ColumnDefinition"
 	case *ast.SimpleColumnSchema:
 		return "SimpleColumnSchema"
+	case *ast.ArrayColumnSchema:
+		return "ArrayColumnSchema"
+	case *ast.StructColumnSchema:
+		return "StructColumnSchema"
+	case *ast.StructColumnField:
+		return "StructColumnField"
 	case *ast.ColumnAttributeList:
 		return "ColumnAttributeList"
 	case *ast.NotNullColumnAttribute:
@@ -745,6 +766,8 @@ func nodeString(n ast.Node) string {
 		return "PipeTee"
 	case *ast.ExportDataStatement:
 		return "ExportDataStatement"
+	case *ast.ExportModelStatement:
+		return "ExportModelStatement"
 	case *ast.MatchRecognizeClause:
 		return "MatchRecognizeClause"
 	case *ast.SampleClause:
