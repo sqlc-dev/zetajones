@@ -246,8 +246,14 @@ func (l *lexer) next() (token.Token, error) {
 	case c == '@':
 		if l.peekAt(1) == '@' {
 			l.pos += 2
-			for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
-				l.pos++
+			// A system-variable name is an identifier, which cannot start with
+			// a digit; "@@1" is a bare "@@" followed by the number, matching
+			// the reference lexer (system_variable_expression takes a
+			// path_expression, so "@@1" is a syntax error at the "1").
+			if l.pos < len(l.sql) && isIdentStart(l.sql[l.pos]) {
+				for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
+					l.pos++
+				}
 			}
 			return l.emit(token.SYSTEM_VARIABLE, start), nil
 		}

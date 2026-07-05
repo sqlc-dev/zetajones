@@ -473,6 +473,41 @@ func ParseTypeWithOptions(sql string, opts Options) (ast.Node, error) {
 	return typ, nil
 }
 
+// ParseExpression parses a single standalone expression (outside of any
+// query). It corresponds to the reference driver's "mode=expression" test
+// mode.
+func ParseExpression(sql string) (ast.Node, error) {
+	return ParseExpressionWithOptions(sql, Options{})
+}
+
+// ParseExpressionWithOptions parses a single standalone expression; see
+// ParseExpression.
+func ParseExpressionWithOptions(sql string, opts Options) (ast.Node, error) {
+	toks, err := lexer.Lex(sql)
+	if err != nil {
+		var lerr *lexer.Error
+		if errors.As(err, &lerr) {
+			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
+		}
+		return nil, err
+	}
+	// The reference tokenizer terminates a standalone expression with a
+	// sentinel whose syntax-error wording is "end of expression"; stash that
+	// in the EOF token so describeToken reports it.
+	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
+		toks[n-1].Image = "end of expression"
+	}
+	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.EOF {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
+	}
+	return expr, nil
+}
+
 type parser struct {
 	sql      string
 	toks     []token.Token
@@ -902,8 +937,99 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseRunBatchStatement()
 	case isKeyword(tok, "ABORT"):
 		return p.parseAbortBatchStatement()
+	case isKeyword(tok, "ANALYZE"):
+		return p.parseAnalyzeStatement()
+	case isKeyword(tok, "ASSERT"):
+		return p.parseAssertStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseAssertStatement parses "ASSERT expression [AS description]"; see
+// assert_statement in googlesql.tm.
+func (p *parser) parseAssertStatement() (ast.Statement, error) {
+	assertTok := p.advance() // ASSERT
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.AssertStatement{Span: span(assertTok.Pos, p.prevEnd()), Expression: expr}
+	if isKeyword(p.peek(), "AS") {
+		p.advance() // AS
+		if p.peek().Kind != token.STRING {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected string literal but got %s", describeToken(p.peek()))
+		}
+		desc, err := p.parseStringLiteralValue()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Description = desc
+		stmt.Stop = desc.End()
+	}
+	return stmt, nil
+}
+
+// parseAnalyzeStatement parses "ANALYZE [OPTIONS(...)]
+// [table_and_column_info, ...]"; see analyze_statement in googlesql.tm.
+func (p *parser) parseAnalyzeStatement() (ast.Statement, error) {
+	analyzeTok := p.advance() // ANALYZE
+	stmt := &ast.AnalyzeStatement{Span: span(analyzeTok.Pos, analyzeTok.End)}
+	// options_opt: an OPTIONS keyword immediately after ANALYZE commits to the
+	// options list (shift is favored over reducing OPTIONS as an identifier;
+	// see AMBIGUOUS CASE 8 in googlesql.tm), so a missing "(" is an error.
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	// (table_and_column_info separator ",")*
+	if isTableAndColumnInfoStart(p.peek()) {
+		list := &ast.TableAndColumnInfoList{Span: span(p.peek().Pos, 0)}
+		for {
+			info, err := p.parseTableAndColumnInfo()
+			if err != nil {
+				return nil, err
+			}
+			list.Infos = append(list.Infos, info)
+			list.Stop = info.End()
+			if p.peek().Kind != token.COMMA {
+				break
+			}
+			p.advance() // ,
+		}
+		stmt.TableInfo = list
+		stmt.Stop = list.End()
+	}
+	return stmt, nil
+}
+
+// isTableAndColumnInfoStart reports whether tok can begin a
+// table_and_column_info (a maybe_dashed_path_expression, i.e. an identifier).
+func isTableAndColumnInfoStart(tok token.Token) bool {
+	return tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT
+}
+
+// parseTableAndColumnInfo parses "maybe_dashed_path_expression
+// opt_column_list"; see table_and_column_info in googlesql.tm.
+func (p *parser) parseTableAndColumnInfo() (*ast.TableAndColumnInfo, error) {
+	table, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	info := &ast.TableAndColumnInfo{Span: span(table.Pos(), table.End()), Table: table}
+	if p.peek().Kind == token.LPAREN {
+		cols, err := p.parseInsertColumnList()
+		if err != nil {
+			return nil, err
+		}
+		info.Columns = cols
+		info.Stop = cols.End()
+	}
+	return info, nil
 }
 
 // parseSetStatement parses a "SET" assignment statement; see set_statement in
@@ -8548,8 +8674,8 @@ func (p *parser) parsePipeSelectionItemList() (*ast.SelectList, error) {
 func startsExpression(tok token.Token) bool {
 	switch tok.Kind {
 	case token.INT, token.FLOAT, token.STRING, token.BYTES,
-		token.LBRACKET, token.LPAREN, token.MINUS, token.PLUS, token.TILDE,
-		token.QUOTED_IDENT:
+		token.LBRACKET, token.LBRACE, token.LPAREN, token.MINUS, token.PLUS, token.TILDE,
+		token.QUOTED_IDENT, token.PARAM, token.QUESTION, token.SYSTEM_VARIABLE:
 		return true
 	case token.IDENT:
 		if !isReserved(tok) {
@@ -9045,6 +9171,16 @@ func (p *parser) parseTablePrimary() (ast.Node, error) {
 }
 
 func (p *parser) parseTablePrimaryBase() (ast.Node, error) {
+	// A query parameter or system variable cannot appear where a table name is
+	// expected; the reference reports a dedicated error (no "Syntax error:"
+	// prefix) at the "@"/"?"/"@@" token. See the "@", "?", and "@@" table
+	// primary rules in googlesql.tm.
+	switch tok := p.peek(); tok.Kind {
+	case token.PARAM, token.ATSIGN, token.QUESTION:
+		return nil, p.errorf(tok.Pos, "Query parameters cannot be used in place of table names")
+	case token.SYSTEM_VARIABLE:
+		return nil, p.errorf(tok.Pos, "System variables cannot be used in place of table names")
+	}
 	if isKeyword(p.peek(), "LATERAL") {
 		return p.parseLateralTablePrimary()
 	}
@@ -10827,6 +10963,21 @@ func (p *parser) parseUnary() (ast.Node, error) {
 // ". identifier" (generalized field access) and "[ expression ]" (array
 // element access); see the expression_higher_prec_than_and rules in
 // googlesql.tm.
+// checkChainedCallBase reports the reference error for a chained function call
+// whose base is a bare integer or floating point literal (which is only valid
+// when parenthesized, e.g. "(1).x()" rather than "1.x()"). The error is
+// reported at the opening "(" of the call. See the chained-call branch of
+// function_call_expression_base in googlesql.tm.
+func (p *parser) checkChainedCallBase(base ast.Node) error {
+	switch base.(type) {
+	case *ast.IntLiteral, *ast.FloatLiteral:
+		if _, parenthesized := p.extents[base]; !parenthesized {
+			return p.errorf(p.peek().Pos, `Syntax error: Unexpected "("`)
+		}
+	}
+	return nil
+}
+
 func (p *parser) parsePostfix() (ast.Node, error) {
 	expr, err := p.parsePrimary()
 	if err != nil {
@@ -10888,12 +11039,48 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 			}
 		case token.LPAREN:
 			// "expression ( ... )" is a function call, which requires a
-			// (generalized) path expression; chained calls on paths are
-			// handled elsewhere, and anything else is an error (see
+			// (generalized) path expression; anything else is an error (see
 			// function_call_expression_base in googlesql.tm).
-			switch expr.(type) {
-			case *ast.PathExpression, *ast.DotIdentifier:
+			switch e := expr.(type) {
+			case *ast.PathExpression:
 				return expr, nil
+			case *ast.DotIdentifier:
+				// "base.method(...)" is a chained function call, unless the
+				// whole ".method" access is itself parenthesized. The method
+				// name becomes the function path and the base becomes the
+				// first argument. See the chained-call branch of
+				// function_call_expression_base in googlesql.tm.
+				if _, parenthesized := p.extents[e]; !parenthesized {
+					if err := p.checkChainedCallBase(e.Expr); err != nil {
+						return nil, err
+					}
+					methodPath := &ast.PathExpression{Span: span(e.Name.Pos(), e.Name.End()), Names: []*ast.Identifier{e.Name}}
+					call, err := p.finishFunctionCallBase(methodPath, e.Expr, p.extStart(e))
+					if err != nil {
+						return nil, err
+					}
+					expr = call
+					continue
+				}
+				// A parenthesized ".method" access cannot take a call; see the
+				// non-chained else branch of function_call_expression_base in
+				// googlesql.tm.
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Function call cannot be applied to this expression. Function calls require a path, e.g. a.b.c()")
+			case *ast.DotGeneralizedField:
+				// "base.(path)(...)" is a chained function call using the
+				// generalized field's path as the function name.
+				if _, parenthesized := p.extents[e]; !parenthesized {
+					if err := p.checkChainedCallBase(e.Expr); err != nil {
+						return nil, err
+					}
+					call, err := p.finishFunctionCallBase(e.Path, e.Expr, p.extStart(e))
+					if err != nil {
+						return nil, err
+					}
+					expr = call
+					continue
+				}
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Function call cannot be applied to this expression. Function calls require a path, e.g. a.b.c()")
 			case *ast.FunctionCall:
 				// A parenthesized function call falls through to the
 				// "cannot be applied" error below; see the
@@ -11055,6 +11242,41 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		p.advance()
 		name := &ast.Identifier{Span: span(tok.Pos+1, tok.End), Name: tok.Image[1:]}
 		return &ast.ParameterExpr{Span: span(tok.Pos, tok.End), Name: name}, nil
+	case token.ATSIGN:
+		// A bare "@" (the lexer did not fuse it with the following name, e.g.
+		// because of whitespace or a backquoted name) begins a named
+		// parameter "@" identifier. Any keyword immediately after "@" is
+		// treated as an identifier; see the ATSIGN lookback case in
+		// lookahead_transformer.cc.
+		p.advance() // @
+		next := p.peek()
+		if next.Kind == token.FLOAT {
+			// "@" immediately followed by a digit is an integer hint opener
+			// (KW_OPEN_INTEGER_HINT; the lexer's lookahead only treats a
+			// digit-leading number this way). The hint rule then requires an
+			// integer literal, so a floating point literal such as "1.1" is
+			// reported as the wrong literal kind. A float that starts with "."
+			// (e.g. "@.1") is not a hint opener, so it is simply unexpected.
+			// See the ATSIGN case in lookahead_transformer.cc and the hint rule
+			// in googlesql.tm.
+			if next.Image != "" && next.Image[0] >= '0' && next.Image[0] <= '9' {
+				return nil, p.errorf(next.Pos, "Syntax error: Expected integer literal but got %s", describeToken(next))
+			}
+			return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+		}
+		if next.Kind == token.INT {
+			// An integer hint opener followed by the integer literal forms a
+			// complete hint, which is not valid in expression position; the
+			// reference reports the error at the token following the integer.
+			p.advance() // integer literal
+			after := p.peek()
+			return nil, p.errorf(after.Pos, "Syntax error: Unexpected %s", describeToken(after))
+		}
+		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
+		}
+		name := p.parseIdentifierToken(p.advance())
+		return &ast.ParameterExpr{Span: span(tok.Pos, name.End()), Name: name}, nil
 	case token.SYSTEM_VARIABLE:
 		return p.parseSystemVariableExpr()
 	case token.LPAREN:
@@ -11100,6 +11322,12 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// followed by "(" (see keywords.cc); otherwise it falls through
 			// to the identifier cases below.
 			return p.parseExtractExpression()
+		case isKeyword(tok, "REPLACE_FIELDS") && p.peekAt(1).Kind == token.LPAREN:
+			// REPLACE_FIELDS is non-reserved: it is only the replace-fields
+			// keyword when followed by "(" (see the replace_fields_expression
+			// rule in googlesql.tm); otherwise it falls through to the
+			// identifier cases below.
+			return p.parseReplaceFieldsExpression()
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACKET:
 			p.advance() // ARRAY; the constructor's span starts at the keyword.
 			return p.parseArrayConstructor(tok.Pos)
@@ -11607,9 +11835,24 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 // shared by ordinary path calls and by the function_name_from_keyword calls
 // (IF, GROUPING, LEFT, RIGHT, COLLATE, RANGE) whose names are keywords.
 func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) {
+	return p.finishFunctionCallBase(path, nil, path.Pos())
+}
+
+// finishFunctionCallBase parses the argument list and trailing modifiers of a
+// function call whose function path has already been parsed and whose opening
+// "(" is the next token. If base is non-nil the call is a chained function
+// call ("expr.method(...)"): the base expression is added as the first
+// argument and is_chained_call is set, and the call's location starts at
+// start (the base expression's outer start). See the chained-call branch of
+// function_call_expression_base in googlesql.tm.
+func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node, start int) (ast.Node, error) {
 	var err error
 	p.advance() // consume (
-	call := &ast.FunctionCall{Span: span(path.Pos(), 0), Function: path}
+	call := &ast.FunctionCall{Span: span(start, 0), Function: path}
+	if base != nil {
+		call.IsChained = true
+		call.Args = append(call.Args, base)
+	}
 	if isKeyword(p.peek(), "DISTINCT") {
 		p.advance()
 		call.Distinct = true
@@ -11679,6 +11922,13 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 					return nil, err
 				}
 			default:
+				if isKeyword(p.peek(), "SELECT") {
+					// A function argument cannot be a bare query; see the
+					// "SELECT" alternative of function_call_argument in
+					// googlesql.tm. Dedicated error without a "Syntax error: "
+					// prefix.
+					return nil, p.errorf(p.peek().Pos, "Each function argument is an expression, not a query; to use a query as an expression, the query must be wrapped with additional parentheses to make it a scalar subquery expression")
+				}
 				arg, err = p.parseExpression()
 				if err != nil {
 					return nil, err
@@ -12300,14 +12550,24 @@ func (p *parser) parseSystemVariableExpr() (ast.Node, error) {
 		}
 	} else {
 		// A bare "@@" token: the path expression follows as separate tokens.
-		// A token that cannot start a path is reported as unexpected.
+		// A token that cannot start a path is reported as unexpected. Any
+		// keyword immediately after "@@" (or after a "." in the path) is
+		// treated as an identifier; see the KW_DOUBLE_AT and
+		// LB_DOT_IN_PATH_EXPRESSION lookback cases in lookahead_transformer.cc.
 		if next := p.peek(); next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
 		}
-		var err error
-		path, err = p.parsePathExpression()
-		if err != nil {
-			return nil, err
+		first := p.parseIdentifierToken(p.advance())
+		path = &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
+		for p.peek().Kind == token.DOT {
+			p.advance()
+			nextTok := p.peek()
+			if nextTok.Kind != token.IDENT && nextTok.Kind != token.QUOTED_IDENT {
+				return nil, p.errorf(nextTok.Pos, "Syntax error: Unexpected %s", describeToken(nextTok))
+			}
+			ident := p.parseIdentifierToken(p.advance())
+			path.Names = append(path.Names, ident)
+			path.Stop = ident.End()
 		}
 	}
 	return &ast.SystemVariableExpr{Span: span(tok.Pos, path.End()), Path: path}, nil
@@ -12527,6 +12787,118 @@ func (p *parser) parseExtractExpression() (ast.Node, error) {
 	}
 	ext.Span = span(kw.Pos, rparen.End)
 	return ext, nil
+}
+
+// parseReplaceFieldsExpression parses "REPLACE_FIELDS(expression,
+// replace_fields_arg [, ...])"; see the replace_fields_expression,
+// replace_fields_prefix, and replace_fields_arg rules in googlesql.tm.
+func (p *parser) parseReplaceFieldsExpression() (ast.Node, error) {
+	kw := p.advance() // REPLACE_FIELDS
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.ReplaceFieldsExpression{Expr: expr}
+	// At least one "," replace_fields_arg is required.
+	if _, err := p.expect(token.COMMA, `","`); err != nil {
+		return nil, err
+	}
+	for {
+		arg, err := p.parseReplaceFieldsArg()
+		if err != nil {
+			return nil, err
+		}
+		node.Args = append(node.Args, arg)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	node.Span = span(kw.Pos, rparen.End)
+	return node, nil
+}
+
+// parseReplaceFieldsArg parses "expression AS generalized_path_expression" (or
+// "expression AS generalized_extension_path"); see replace_fields_arg in
+// googlesql.tm.
+func (p *parser) parseReplaceFieldsArg() (*ast.ReplaceFieldsArg, error) {
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("AS"); err != nil {
+		return nil, err
+	}
+	path, err := p.parseGeneralizedPathOrExtension()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ReplaceFieldsArg{Span: span(p.extStart(value), p.prevEnd()), Value: value, Path: path}, nil
+}
+
+// parseGeneralizedPathOrExtension parses either a generalized_path_expression
+// (which starts with an identifier) or a generalized_extension_path (which
+// starts with a parenthesized path); see the replace_fields_arg alternatives
+// in googlesql.tm.
+func (p *parser) parseGeneralizedPathOrExtension() (ast.Node, error) {
+	tok := p.peek()
+	if tok.Kind == token.LPAREN {
+		return p.parseGeneralizedExtensionPath()
+	}
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	if isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
+	}
+	return p.parseGeneralizedPathExpression()
+}
+
+// parseGeneralizedExtensionPath parses "( path ) [. ident | . ( path )]...";
+// see generalized_extension_path in googlesql.tm. The parenthesized base path
+// keeps its own (inner) location, but the enclosing DotIdentifier and
+// DotGeneralizedField nodes' locations begin at the opening parenthesis.
+func (p *parser) parseGeneralizedExtensionPath() (ast.Node, error) {
+	lparen := p.advance() // (
+	inner, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+		return nil, err
+	}
+	var expr ast.Node = inner
+	start := lparen.Pos
+	for p.peek().Kind == token.DOT {
+		if p.peekAt(1).Kind == token.LPAREN {
+			p.advance() // .
+			p.advance() // (
+			p2, err := p.parsePathExpression()
+			if err != nil {
+				return nil, err
+			}
+			rp, err := p.expect(token.RPAREN, `")"`)
+			if err != nil {
+				return nil, err
+			}
+			expr = &ast.DotGeneralizedField{Span: span(start, rp.End), Expr: expr, Path: p2}
+			continue
+		}
+		if p.peekAt(1).Kind != token.IDENT && p.peekAt(1).Kind != token.QUOTED_IDENT {
+			break
+		}
+		p.advance() // .
+		ident := p.parseIdentifierToken(p.advance())
+		expr = &ast.DotIdentifier{Span: span(start, ident.End()), Expr: expr, Name: ident}
+	}
+	return expr, nil
 }
 
 // parseFormatClause parses "FORMAT expr [AT TIME ZONE expr]"; see format and

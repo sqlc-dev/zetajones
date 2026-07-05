@@ -460,6 +460,18 @@ func nodeString(n ast.Node) string {
 		return "OptionsList"
 	case *ast.OptionsEntry:
 		return "OptionsEntry"
+	case *ast.AnalyzeStatement:
+		return "AnalyzeStatement"
+	case *ast.TableAndColumnInfoList:
+		return "TableAndColumnInfoList"
+	case *ast.TableAndColumnInfo:
+		return "TableAndColumnInfo"
+	case *ast.AssertStatement:
+		return "AssertStatement"
+	case *ast.ReplaceFieldsExpression:
+		return "ReplaceFieldsExpression"
+	case *ast.ReplaceFieldsArg:
+		return "ReplaceFieldsArg"
 	case *ast.Identifier:
 		return fmt.Sprintf("Identifier(%s)", identifierLiteral(t.Name))
 	case *ast.PathExpression:
@@ -829,8 +841,15 @@ func nodeString(n ast.Node) string {
 	case *ast.PipeStaticDescribe:
 		return "PipeStaticDescribe"
 	case *ast.FunctionCall:
+		var mods []string
 		if t.Distinct {
-			return "FunctionCall(distinct=true)"
+			mods = append(mods, "distinct=true")
+		}
+		if t.IsChained {
+			mods = append(mods, "is_chained_call=true")
+		}
+		if len(mods) > 0 {
+			return "FunctionCall(" + strings.Join(mods, ", ") + ")"
 		}
 		return "FunctionCall"
 	case *ast.CastExpression:

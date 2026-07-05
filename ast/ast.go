@@ -3269,6 +3269,103 @@ func (n *OptionsEntry) Children() []Node {
 	return children(n.Name, n.Value)
 }
 
+// AnalyzeStatement is "ANALYZE [OPTIONS(...)] [table_and_column_info, ...]";
+// see ASTAnalyzeStatement in googlesql/parser/parse_tree.h.
+type AnalyzeStatement struct {
+	Span
+	Options   *OptionsList            `json:"options,omitempty"`
+	TableInfo *TableAndColumnInfoList `json:"table_info,omitempty"`
+}
+
+func (n *AnalyzeStatement) statementNode() {}
+func (n *AnalyzeStatement) Children() []Node {
+	var out []Node
+	if n.Options != nil {
+		out = append(out, n.Options)
+	}
+	if n.TableInfo != nil {
+		out = append(out, n.TableInfo)
+	}
+	return out
+}
+
+// TableAndColumnInfoList is the list of table (and optional column) targets in
+// an ANALYZE statement; see ASTTableAndColumnInfoList in
+// googlesql/parser/parse_tree.h.
+type TableAndColumnInfoList struct {
+	Span
+	Infos []*TableAndColumnInfo `json:"infos"`
+}
+
+func (n *TableAndColumnInfoList) Children() []Node {
+	var out []Node
+	for _, i := range n.Infos {
+		out = append(out, i)
+	}
+	return out
+}
+
+// TableAndColumnInfo is a single "table [column_list]" target in an ANALYZE
+// statement; see ASTTableAndColumnInfo in googlesql/parser/parse_tree.h.
+type TableAndColumnInfo struct {
+	Span
+	Table   *PathExpression `json:"table"`
+	Columns *ColumnList     `json:"columns,omitempty"`
+}
+
+func (n *TableAndColumnInfo) Children() []Node {
+	out := children(n.Table)
+	if n.Columns != nil {
+		out = append(out, n.Columns)
+	}
+	return out
+}
+
+// AssertStatement is "ASSERT expression [AS description]"; see
+// ASTAssertStatement in googlesql/parser/parse_tree.h.
+type AssertStatement struct {
+	Span
+	Expression  Node           `json:"expression"`
+	Description *StringLiteral `json:"description,omitempty"`
+}
+
+func (n *AssertStatement) statementNode() {}
+func (n *AssertStatement) Children() []Node {
+	out := children(n.Expression)
+	if n.Description != nil {
+		out = append(out, n.Description)
+	}
+	return out
+}
+
+// ReplaceFieldsExpression is "REPLACE_FIELDS(expression, arg [, ...])"; see
+// ASTReplaceFieldsExpression in googlesql/parser/parse_tree.h.
+type ReplaceFieldsExpression struct {
+	Span
+	Expr Node                `json:"expr"`
+	Args []*ReplaceFieldsArg `json:"args"`
+}
+
+func (n *ReplaceFieldsExpression) Children() []Node {
+	out := children(n.Expr)
+	for _, a := range n.Args {
+		out = append(out, a)
+	}
+	return out
+}
+
+// ReplaceFieldsArg is a single "expression AS generalized_path" argument to
+// REPLACE_FIELDS; see ASTReplaceFieldsArg in googlesql/parser/parse_tree.h.
+type ReplaceFieldsArg struct {
+	Span
+	Value Node `json:"value"`
+	Path  Node `json:"path"`
+}
+
+func (n *ReplaceFieldsArg) Children() []Node {
+	return children(n.Value, n.Path)
+}
+
 // ExpressionSubquery is a subquery used as an expression: "( query )",
 // "ARRAY( query )", or "EXISTS( query )"; see ASTExpressionSubquery in
 // googlesql/parser/parse_tree.h. The span includes the parentheses (and the
@@ -4126,6 +4223,11 @@ type FunctionCall struct {
 	Function *PathExpression `json:"function"`
 	Args     []Node          `json:"args"`
 	Distinct bool            `json:"distinct,omitempty"`
+	// IsChained is set for a chained function call "expr.method(...)", where
+	// the base expression is stored as the first element of Args; see
+	// ASTFunctionCall::is_chained_call and function_call_expression_base in
+	// googlesql.tm.
+	IsChained bool `json:"is_chained_call,omitempty"`
 	// NullHandling is "IGNORE_NULLS" or "RESPECT_NULLS" when the call has an
 	// "IGNORE NULLS" or "RESPECT NULLS" modifier; empty otherwise. It is not
 	// shown in the debug tree; see ASTFunctionCall::NullHandlingModifier.
