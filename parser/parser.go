@@ -248,6 +248,14 @@ const FeatureCreateFunctionLanguageWithConnection Feature = "CREATE_FUNCTION_LAN
 // character".
 const FeatureAllowDashesInTableName Feature = "ALLOW_DASHES_IN_TABLE_NAME"
 
+// FeatureAllowSlashPaths gates table names that start with "/" and contain
+// non-adjacent "/", "-", and ":" separators before the first dot
+// (e.g. /span/db/my-grp:db.Table); see FEATURE_ALLOW_SLASH_PATHS and
+// slashed_path_expression / maybe_slashed_or_dashed_path_expression in
+// googlesql.tm. When off, such a name reports "Table name contains '/'
+// character. ... needs to be quoted".
+const FeatureAllowSlashPaths Feature = "ALLOW_SLASH_PATHS"
+
 // FeatureOrderedPrimaryKeys gates ASC/DESC and NULLS ordering in a PRIMARY KEY
 // element list (FEATURE_ORDERED_PRIMARY_KEYS); see primary_key_element in
 // googlesql.tm. When off, ordering reports "Ordering for primary keys is not
@@ -299,6 +307,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureRemoteFunction:                       true,
 	FeatureCreateFunctionLanguageWithConnection: true,
 	FeatureAllowDashesInTableName:               true,
+	FeatureAllowSlashPaths:                      true,
 	FeatureOrderedPrimaryKeys:                   false, // in_development
 	FeatureTtl:                                  true,
 	FeatureRepeat:                               true,
@@ -6316,14 +6325,14 @@ func (p *parser) parseDescribeStatement() (ast.Statement, error) {
 	if beginsObjectIdentifier(p.peek()) && beginsObjectIdentifier(p.peekAt(1)) {
 		objectType = p.parseIdentifierToken(p.advance())
 	}
-	name, err := p.parseMaybeDashedPathExpression()
+	name, err := p.parseMaybeSlashedOrDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
 	stmt := &ast.DescribeStatement{Span: span(kwTok.Pos, name.End()), ObjectType: objectType, Name: name}
 	if isKeyword(p.peek(), "FROM") {
 		p.advance() // FROM
-		from, err := p.parseMaybeDashedPathExpression()
+		from, err := p.parseMaybeSlashedOrDashedPathExpression()
 		if err != nil {
 			return nil, err
 		}
@@ -6355,7 +6364,7 @@ func (p *parser) parseShowStatement() (ast.Statement, error) {
 
 	if isKeyword(p.peek(), "FROM") {
 		p.advance() // FROM
-		path, err := p.parseMaybeDashedPathExpression()
+		path, err := p.parseMaybeSlashedOrDashedPathExpression()
 		if err != nil {
 			return nil, err
 		}
@@ -13732,6 +13741,111 @@ func (p *parser) parseMaybeDashedPathExpression() (*ast.PathExpression, error) {
 	path, err := p.parsePathExpression()
 	p.allowDashes = prev
 	return path, err
+}
+
+// parseMaybeSlashedOrDashedPathExpression parses a table-name path that may be
+// a dashed path (my-project.dataset.table) or a slashed path starting with "/"
+// (/span/db/my-grp:db.Table); see maybe_slashed_or_dashed_path_expression in
+// googlesql.tm.
+func (p *parser) parseMaybeSlashedOrDashedPathExpression() (*ast.PathExpression, error) {
+	if p.peek().Kind == token.SLASH {
+		return p.parseSlashedPathExpression()
+	}
+	return p.parseMaybeDashedPathExpression()
+}
+
+// parseSlashedPathExpression parses a slashed_path_expression: a
+// slashed_identifier (a "/"-prefixed run of identifiers/integers joined by
+// adjacent "/", "-", and ":" separators) followed by optional ".identifier"
+// path components; see slashed_identifier and slashed_path_expression in
+// googlesql.tm. When FEATURE_ALLOW_SLASH_PATHS is off, the whole construct is a
+// syntax error naming the slashed identifier as the part that must be quoted.
+func (p *parser) parseSlashedPathExpression() (*ast.PathExpression, error) {
+	slash := p.peek() // "/"
+	start, end, err := p.parseSlashedIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	// The joined identifier text equals the source slice: every part is
+	// adjacent (embedded whitespace is rejected while scanning), so there are
+	// no gaps to elide. This matches SeparatedIdentifierTmpNode::BuildPathParts,
+	// which concatenates the parts of the first path element.
+	joined := p.sql[start:end]
+	first := &ast.Identifier{Span: span(start, end), Name: joined}
+	names := []*ast.Identifier{first}
+	pathEnd := end
+	// slashed_path_expression "." identifier: trailing regular components.
+	for p.peek().Kind == token.DOT {
+		p.advance() // .
+		tok := p.peek()
+		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		ident := p.parseIdentifierToken(p.advance())
+		names = append(names, ident)
+		pathEnd = ident.End()
+	}
+	if !p.features.Enabled(FeatureAllowSlashPaths) {
+		// See maybe_slashed_or_dashed_path_expression in googlesql.tm: without
+		// the feature, a slashed table name must be quoted. The error points at
+		// the "/" and names the slashed identifier as the part to quote; the
+		// wording differs when the path has trailing components.
+		target := "It "
+		if len(names) > 1 {
+			target = "The slashed identifier part of the table name "
+		}
+		return nil, p.errorf(slash.Pos, "Syntax error: Table name contains '/' character. %sneeds to be quoted: %s", target, toIdentifierLiteral(joined))
+	}
+	return &ast.PathExpression{Span: span(start, pathEnd), Names: names}, nil
+}
+
+// parseSlashedIdentifier consumes a slashed_identifier ("/" identifier_or_integer
+// followed by adjacent "sep identifier_or_integer" runs, with separators "/",
+// "-", ":") and returns its source span; see slashed_identifier in googlesql.tm.
+// Every part must be adjacent to its separator: embedded whitespace or a quoted
+// part is a syntax error. Only unquoted identifiers and integers are accepted as
+// parts (the floating-point-in-path forms are not exercised by table names).
+func (p *parser) parseSlashedIdentifier() (start, end int, err error) {
+	slash := p.advance() // "/"
+	start = slash.Pos
+	idTok := p.peek()
+	if idTok.Pos != slash.End || !isSlashPathPart(idTok) {
+		return 0, 0, p.errorf(slash.Pos, "Syntax error: Unexpected \"/\"")
+	}
+	p.advance()
+	end = idTok.End
+	for {
+		sep := p.peek()
+		var img string
+		switch sep.Kind {
+		case token.SLASH:
+			img = "/"
+		case token.MINUS:
+			img = "-"
+		case token.COLON:
+			img = ":"
+		default:
+			return start, end, nil
+		}
+		if sep.Pos != end {
+			// Non-adjacent separator: not part of this identifier.
+			return start, end, nil
+		}
+		next := p.peekAt(1)
+		if next.Pos != sep.End || !isSlashPathPart(next) {
+			return 0, 0, p.errorf(sep.Pos, "Syntax error: Unexpected %q", img)
+		}
+		p.advance() // separator
+		p.advance() // part
+		end = next.End
+	}
+}
+
+// isSlashPathPart reports whether tok is a valid identifier_or_integer part of a
+// slashed identifier: an unquoted identifier or an integer literal. Quoted
+// identifiers are rejected (they trigger an "Unexpected \"/\"" error upstream).
+func isSlashPathPart(tok token.Token) bool {
+	return tok.Kind == token.IDENT || tok.Kind == token.INT
 }
 
 // parseMaybeDashedGeneralizedPathExpression parses the target of a DELETE (or
