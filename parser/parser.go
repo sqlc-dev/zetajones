@@ -595,9 +595,9 @@ func describeToken(tok token.Token) string {
 	case token.FLOAT:
 		return fmt.Sprintf("floating point literal \"%s\"", tok.Image)
 	case token.STRING:
-		return "string literal " + escapeTokenNewlines(tok.Image)
+		return "string literal " + shortenStringLiteralForError(escapeTokenNewlines(tok.Image))
 	case token.BYTES:
-		return "bytes literal " + escapeTokenNewlines(tok.Image)
+		return "bytes literal " + shortenBytesLiteralForError(escapeTokenNewlines(tok.Image))
 	case token.SYSTEM_VARIABLE:
 		// The lexer folds "@@name" into one token, but the reference lexes
 		// "@@" separately and reports just that; see MakeSyntaxErrorAtToken
@@ -612,6 +612,62 @@ func describeToken(tok token.Token) string {
 func escapeTokenNewlines(s string) string {
 	s = strings.ReplaceAll(s, "\r", `\r`)
 	return strings.ReplaceAll(s, "\n", `\n`)
+}
+
+// maxErrorLiteralLength is the longest literal value (in bytes, including the
+// quotes) that we're willing to echo in an error message. Matches
+// kMaxErrorLiteralLength in googlesql/parser/parser_internal.cc.
+const maxErrorLiteralLength = 50
+
+func startsWithFoldPrefix(s string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if len(s) >= len(p) && strings.EqualFold(s[:len(p)], p) {
+			return true
+		}
+	}
+	return false
+}
+
+// shortenStringLiteralForError shortens a too-long string literal for display
+// in an error message, inserting "..." before the final quotes. Ported from
+// ShortenStringLiteralForError in googlesql/parser/parser_internal.cc.
+func shortenStringLiteralForError(literal string) string {
+	if len(literal) <= maxErrorLiteralLength {
+		return literal
+	}
+	numEndQuotes := 1
+	if startsWithFoldPrefix(literal, `"""`, `'''`, `r"""`, `r'''`) {
+		numEndQuotes = 3
+	}
+	excerptSize := maxErrorLiteralLength - numEndQuotes
+	// If we can't remove at least four bytes in addition to the quotes, keep
+	// the original.
+	if excerptSize > len(literal)-numEndQuotes-4 {
+		return literal
+	}
+	// Don't cut the string off in the middle of a multibyte character.
+	for excerptSize > 0 && !utf8.ValidString(literal[:excerptSize]) {
+		excerptSize--
+	}
+	return literal[:excerptSize] + "..." + literal[len(literal)-numEndQuotes:]
+}
+
+// shortenBytesLiteralForError shortens a too-long bytes literal for display in
+// an error message. Ported from ShortenBytesLiteralForError in
+// googlesql/parser/parser_internal.cc.
+func shortenBytesLiteralForError(literal string) string {
+	if len(literal) < maxErrorLiteralLength {
+		return literal
+	}
+	numEndQuotes := 1
+	if startsWithFoldPrefix(literal, `b"""`, `rb"""`, `br"""`, `b'''`, `rb'''`, `br'''`) {
+		numEndQuotes = 3
+	}
+	excerptSize := maxErrorLiteralLength - numEndQuotes
+	if excerptSize > len(literal)-numEndQuotes-4 {
+		return literal
+	}
+	return literal[:excerptSize] + "..." + literal[len(literal)-numEndQuotes:]
 }
 
 // isKeyword reports whether tok is the given keyword (case-insensitive).
