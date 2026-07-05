@@ -692,7 +692,7 @@ var reservedKeywords = map[string]bool{
 	"BETWEEN":              true,
 	"BY":                   true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
 	"DESC": true, "DISTINCT": true,
-	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "FALSE": true, "FOR": true,
+	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "EXISTS": true, "FALSE": true, "FOR": true,
 	"FROM": true,
 	"FULL": true, "GROUP": true, "GROUPS": true, "HASH": true, "HAVING": true,
 	"IGNORE": true, "IN": true,
@@ -2485,6 +2485,26 @@ func (p *parser) parseTableColumnSchema() (ast.Node, error) {
 		return nil, err
 	}
 	schema := &ast.SimpleColumnSchema{Span: span(typePath.Pos(), typePath.End()), Type: typePath}
+	// opt_collate_clause
+	if isKeyword(p.peek(), "COLLATE") {
+		collate, err := p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+		schema.Collate = collate
+		schema.Stop = collate.End()
+	}
+	// opt_column_info: an optional "DEFAULT expression" (default_column_info).
+	// The GENERATED forms of a column definition are not implemented yet.
+	if isKeyword(p.peek(), "DEFAULT") {
+		p.advance() // DEFAULT
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		schema.DefaultExpression = expr
+		schema.Stop = p.extEnd(expr)
+	}
 	if attrs := p.tryParseColumnAttributes(); attrs != nil {
 		schema.Attributes = attrs
 		schema.Stop = attrs.End()
@@ -2497,11 +2517,35 @@ func (p *parser) parseTableColumnSchema() (ast.Node, error) {
 // (the sole attribute exercised by the external-table tests). It returns nil
 // when no attribute is present.
 func (p *parser) tryParseColumnAttributes() *ast.ColumnAttributeList {
-	if !(isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL")) {
+	startsAttr := func() bool {
+		return (isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL")) ||
+			(isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY"))
+	}
+	if !startsAttr() {
 		return nil
 	}
 	list := &ast.ColumnAttributeList{}
-	for isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL") {
+	for startsAttr() {
+		if isKeyword(p.peek(), "PRIMARY") {
+			primaryTok := p.advance() // PRIMARY
+			keyTok := p.advance()     // KEY
+			attr := &ast.PrimaryKeyColumnAttribute{Span: span(primaryTok.Pos, keyTok.End), Enforced: true}
+			if len(list.Attributes) == 0 {
+				list.Start = primaryTok.Pos
+			}
+			list.Stop = keyTok.End
+			list.Attributes = append(list.Attributes, attr)
+			// A trailing constraint_enforcement binds to the primary key
+			// attribute, extending its (and the list's) end location; see the
+			// "column_attributes constraint_enforcement" production in
+			// googlesql.tm.
+			if enforced, endPos, ok, err := p.tryParseConstraintEnforcement(); err == nil && ok {
+				attr.Enforced = enforced
+				attr.Stop = endPos
+				list.Stop = endPos
+			}
+			continue
+		}
 		notTok := p.advance()  // NOT
 		nullTok := p.advance() // NULL
 		if len(list.Attributes) == 0 {
@@ -2636,6 +2680,163 @@ func (p *parser) parseCheckConstraint() (*ast.CheckConstraint, error) {
 		cc.Stop = opts.End()
 	}
 	return cc, nil
+}
+
+// parseForeignKey parses "FOREIGN KEY (columns) foreign_key_reference
+// [ENFORCED|NOT ENFORCED] [OPTIONS(...)]"; see table_constraint_spec in
+// googlesql.tm. FOREIGN is the next token. The reference's enforced flag is
+// set from the trailing opt_constraint_enforcement.
+func (p *parser) parseForeignKey() (*ast.ForeignKey, error) {
+	foreignTok := p.advance() // FOREIGN
+	if _, err := p.expectKeyword("KEY"); err != nil {
+		return nil, err
+	}
+	cols, err := p.parseColumnListParen()
+	if err != nil {
+		return nil, err
+	}
+	ref, err := p.parseForeignKeyReference()
+	if err != nil {
+		return nil, err
+	}
+	fk := &ast.ForeignKey{Span: span(foreignTok.Pos, ref.End()), ColumnList: cols, Reference: ref}
+	// opt_constraint_enforcement (default true) is applied to the reference and
+	// extends the foreign key node's span.
+	enforced, endPos, ok, err := p.tryParseConstraintEnforcement()
+	if err != nil {
+		return nil, err
+	}
+	ref.Enforced = enforced
+	if ok {
+		fk.Stop = endPos
+	}
+	// opt_options_list
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		fk.Options = opts
+		fk.Stop = opts.End()
+	}
+	return fk, nil
+}
+
+// parseForeignKeyReference parses "REFERENCES path (columns)
+// [MATCH mode] [actions]"; see foreign_key_reference in googlesql.tm. The
+// enforced flag is left at its default (true) and set by the caller.
+func (p *parser) parseForeignKeyReference() (*ast.ForeignKeyReference, error) {
+	refTok, err := p.expectKeyword("REFERENCES")
+	if err != nil {
+		return nil, err
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	cols, err := p.parseColumnListParen()
+	if err != nil {
+		return nil, err
+	}
+	ref := &ast.ForeignKeyReference{Span: span(refTok.Pos, 0), Match: "SIMPLE", Enforced: true, Reference: path, ColumnList: cols}
+	// opt_foreign_key_match
+	matchEnd := cols.End()
+	if isKeyword(p.peek(), "MATCH") {
+		p.advance() // MATCH
+		switch {
+		case isKeyword(p.peek(), "SIMPLE"):
+			ref.Match = "SIMPLE"
+			matchEnd = p.advance().End
+		case isKeyword(p.peek(), "FULL"):
+			ref.Match = "FULL"
+			matchEnd = p.advance().End
+		case isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "DISTINCT"):
+			p.advance() // NOT
+			ref.Match = "NOT DISTINCT"
+			matchEnd = p.advance().End
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword FULL or keyword SIMPLE but got %s", describeToken(p.peek()))
+		}
+	}
+	// opt_foreign_key_actions
+	actions, actEnd, err := p.parseForeignKeyActions(matchEnd)
+	if err != nil {
+		return nil, err
+	}
+	ref.Actions = actions
+	ref.Stop = actEnd
+	return ref, nil
+}
+
+// parseForeignKeyActions parses opt_foreign_key_actions: an ON UPDATE and/or ON
+// DELETE clause in either order; see opt_foreign_key_actions in googlesql.tm.
+// emptyPos is the location used for the (always-present) actions node when no
+// clause is given. It returns the actions node and the offset just past it.
+func (p *parser) parseForeignKeyActions(emptyPos int) (*ast.ForeignKeyActions, int, error) {
+	actions := &ast.ForeignKeyActions{UpdateAction: "NO ACTION", DeleteAction: "NO ACTION"}
+	start := -1
+	end := emptyPos
+	for isKeyword(p.peek(), "ON") && (isKeyword(p.peekAt(1), "UPDATE") || isKeyword(p.peekAt(1), "DELETE")) {
+		onTok := p.advance() // ON
+		isUpdate := isKeyword(p.advance(), "UPDATE")
+		act, actEnd, err := p.parseForeignKeyAction()
+		if err != nil {
+			return nil, 0, err
+		}
+		if isUpdate {
+			actions.UpdateAction = act
+		} else {
+			actions.DeleteAction = act
+		}
+		if start < 0 {
+			start = onTok.Pos
+		}
+		end = actEnd
+	}
+	if start < 0 {
+		actions.Span = span(emptyPos, emptyPos)
+	} else {
+		actions.Span = span(start, end)
+	}
+	return actions, end, nil
+}
+
+// parseForeignKeyAction parses foreign_key_action: NO ACTION, RESTRICT,
+// CASCADE, or SET NULL; see foreign_key_action in googlesql.tm. It returns the
+// canonical action string and the offset just past the clause.
+func (p *parser) parseForeignKeyAction() (string, int, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "NO"):
+		p.advance() // NO
+		action, err := p.expectKeyword("ACTION")
+		if err != nil {
+			return "", 0, err
+		}
+		return "NO ACTION", action.End, nil
+	case isKeyword(tok, "RESTRICT"):
+		return "RESTRICT", p.advance().End, nil
+	case isKeyword(tok, "CASCADE"):
+		return "CASCADE", p.advance().End, nil
+	case isKeyword(tok, "SET"):
+		p.advance() // SET
+		null, err := p.expectKeyword("NULL")
+		if err != nil {
+			return "", 0, err
+		}
+		return "SET NULL", null.End, nil
+	}
+	return "", 0, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parseColumnListParen parses a parenthesized column_list, requiring the
+// opening parenthesis to be the next token; see column_list in googlesql.tm.
+func (p *parser) parseColumnListParen() (*ast.ColumnList, error) {
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected \"(\" but got %s", describeToken(p.peek()))
+	}
+	return p.parseInsertColumnList()
 }
 
 // tryParseConstraintEnforcement parses an optional "ENFORCED" or "NOT ENFORCED"
@@ -5013,6 +5214,9 @@ func (p *parser) parseAlterAction() (ast.Node, error) {
 	case isKeyword(tok, "DROP"):
 		return p.parseDropAlterAction()
 	case isKeyword(tok, "ALTER"):
+		if isKeyword(p.peekAt(1), "COLUMN") {
+			return p.parseAlterColumnAction()
+		}
 		return p.parseAlterConstraintAlterAction()
 	case isKeyword(tok, "REPLACE"):
 		return p.parseReplaceAlterAction()
@@ -5159,6 +5363,9 @@ func (p *parser) parseAddNamedConstraintAction(addTok token.Token) (ast.Node, er
 	case *ast.PrimaryKey:
 		c.ConstraintName = name
 		c.Start = name.Pos()
+	case *ast.ForeignKey:
+		c.ConstraintName = name
+		c.Start = name.Pos()
 	}
 	return &ast.AddConstraintAction{Span: span(addTok.Pos, constraint.End()), IsIfNotExists: ifNotExists, Constraint: constraint}, nil
 }
@@ -5174,7 +5381,7 @@ func (p *parser) parseConstraintSpec() (ast.Node, error) {
 	case isKeyword(tok, "PRIMARY"):
 		return p.parsePrimaryKey()
 	case isKeyword(tok, "FOREIGN"):
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		return p.parseForeignKey()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword CHECK or keyword FOREIGN or keyword PRIMARY but got %s", describeToken(tok))
 }
@@ -5333,6 +5540,220 @@ func (p *parser) parseAlterConstraintAlterAction() (ast.Node, error) {
 		return &ast.AlterConstraintSetOptionsAction{Span: span(alterTok.Pos, opts.End()), IsIfExists: ifExists, Name: name, Options: opts}, nil
 	}
 	return nil, p.errorf(next.Pos, "Syntax error: Expected keyword ENFORCED or keyword NOT or keyword SET but got %s", describeToken(next))
+}
+
+// parseAlterColumnAction parses the "ALTER COLUMN [IF EXISTS] identifier ..."
+// alter actions: SET DEFAULT, DROP DEFAULT, SET GENERATED, and DROP GENERATED;
+// see the "ALTER" "COLUMN" productions in googlesql.tm. ALTER is the next
+// token.
+func (p *parser) parseAlterColumnAction() (ast.Node, error) {
+	alterTok := p.advance() // ALTER
+	p.advance()             // COLUMN
+	ifExists, err := p.parseOptIfExists()
+	if err != nil {
+		return nil, err
+	}
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	next := p.peek()
+	switch {
+	case isKeyword(next, "SET"):
+		p.advance() // SET
+		sub := p.peek()
+		switch {
+		case isKeyword(sub, "DEFAULT"):
+			p.advance() // DEFAULT
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.AlterColumnSetDefaultAction{Span: span(alterTok.Pos, p.extEnd(expr)), IsIfExists: ifExists, Column: name, DefaultExpression: expr}, nil
+		case isKeyword(sub, "GENERATED"):
+			p.advance() // GENERATED
+			info, err := p.parseGeneratedColumnInfoForAlter()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.AlterColumnSetGeneratedAction{Span: span(alterTok.Pos, info.End()), IsIfExists: ifExists, Column: name, Info: info}, nil
+		}
+		return nil, p.errorf(sub.Pos, "Syntax error: Expected keyword DATA or keyword DEFAULT or keyword GENERATED or keyword OPTIONS but got %s", describeToken(sub))
+	case isKeyword(next, "DROP"):
+		p.advance() // DROP
+		sub := p.peek()
+		switch {
+		case isKeyword(sub, "DEFAULT"):
+			end := p.advance().End
+			return &ast.AlterColumnDropDefaultAction{Span: span(alterTok.Pos, end), IsIfExists: ifExists, Column: name}, nil
+		case isKeyword(sub, "GENERATED"):
+			end := p.advance().End
+			return &ast.AlterColumnDropGeneratedAction{Span: span(alterTok.Pos, end), IsIfExists: ifExists, Column: name}, nil
+		}
+		return nil, p.errorf(sub.Pos, "Syntax error: Expected keyword DEFAULT or keyword GENERATED or keyword NOT but got %s", describeToken(sub))
+	}
+	return nil, p.errorf(next.Pos, "Syntax error: Expected keyword DROP or keyword SET but got %s", describeToken(next))
+}
+
+// parseGeneratedColumnInfoForAlter parses
+// generated_column_info_for_alter_column_action: an optional generated mode
+// ("ALWAYS AS" / "AS" / "BY DEFAULT AS") followed by an identity column body;
+// see generated_column_info_for_alter_column_action in googlesql.tm. GENERATED
+// has already been consumed.
+func (p *parser) parseGeneratedColumnInfoForAlter() (*ast.GeneratedColumnInfo, error) {
+	// generated_mode_for_alter_column_action: "ALWAYS"? "AS" | "BY" "DEFAULT" "AS"
+	start := p.peek().Pos
+	mode := "ALWAYS"
+	switch {
+	case isKeyword(p.peek(), "ALWAYS"):
+		p.advance() // ALWAYS
+		if _, err := p.expectKeyword("AS"); err != nil {
+			return nil, err
+		}
+	case isKeyword(p.peek(), "BY"):
+		p.advance() // BY
+		if _, err := p.expectKeyword("DEFAULT"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("AS"); err != nil {
+			return nil, err
+		}
+		mode = "BY_DEFAULT"
+	case isKeyword(p.peek(), "AS"):
+		p.advance() // AS
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword ALWAYS or keyword AS or keyword BY but got %s", describeToken(p.peek()))
+	}
+	identity, err := p.parseIdentityColumnInfo()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GeneratedColumnInfo{Span: span(start, identity.End()), GeneratedMode: mode, Identity: identity}, nil
+}
+
+// parseIdentityColumnInfo parses "IDENTITY ( [START WITH n] [INCREMENT BY n]
+// [MAXVALUE n] [MINVALUE n] [CYCLE|NO CYCLE] )"; see identity_column_info in
+// googlesql.tm.
+func (p *parser) parseIdentityColumnInfo() (*ast.IdentityColumnInfo, error) {
+	identityTok, err := p.expectKeyword("IDENTITY")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	info := &ast.IdentityColumnInfo{Span: span(identityTok.Pos, 0)}
+	if isKeyword(p.peek(), "START") {
+		startTok := p.advance() // START
+		if _, err := p.expectKeyword("WITH"); err != nil {
+			return nil, err
+		}
+		value, err := p.parseSignedNumericalLiteral()
+		if err != nil {
+			return nil, err
+		}
+		info.StartWith = &ast.IdentityColumnStartWith{Span: span(startTok.Pos, p.extEnd(value)), Value: value}
+	}
+	if isKeyword(p.peek(), "INCREMENT") {
+		incTok := p.advance() // INCREMENT
+		if _, err := p.expectKeyword("BY"); err != nil {
+			return nil, err
+		}
+		value, err := p.parseSignedNumericalLiteral()
+		if err != nil {
+			return nil, err
+		}
+		info.IncrementBy = &ast.IdentityColumnIncrementBy{Span: span(incTok.Pos, p.extEnd(value)), Value: value}
+	}
+	if isKeyword(p.peek(), "MAXVALUE") {
+		maxTok := p.advance() // MAXVALUE
+		value, err := p.parseSignedNumericalLiteral()
+		if err != nil {
+			return nil, err
+		}
+		info.MaxValue = &ast.IdentityColumnMaxValue{Span: span(maxTok.Pos, p.extEnd(value)), Value: value}
+	}
+	if isKeyword(p.peek(), "MINVALUE") {
+		minTok := p.advance() // MINVALUE
+		value, err := p.parseSignedNumericalLiteral()
+		if err != nil {
+			return nil, err
+		}
+		info.MinValue = &ast.IdentityColumnMinValue{Span: span(minTok.Pos, p.extEnd(value)), Value: value}
+	}
+	// opt_cycle: "CYCLE" | "NO" "CYCLE" | empty. The flag is not represented in
+	// the debug output, so it is parsed and discarded.
+	if isKeyword(p.peek(), "CYCLE") {
+		p.advance()
+	} else if isKeyword(p.peek(), "NO") && isKeyword(p.peekAt(1), "CYCLE") {
+		p.advance()
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	info.Stop = rparen.End
+	return info, nil
+}
+
+// parseSignedNumericalLiteral parses signed_numerical_literal: an integer,
+// floating point, NUMERIC/DECIMAL or BIGNUMERIC/BIGDECIMAL literal, optionally
+// negated (only integers and floats may carry a leading "-"); see
+// signed_numerical_literal in googlesql.tm.
+func (p *parser) parseSignedNumericalLiteral() (ast.Node, error) {
+	if p.peek().Kind == token.MINUS {
+		minusTok := p.advance() // -
+		tok := p.peek()
+		switch tok.Kind {
+		case token.INT:
+			p.advance()
+			inner := &ast.IntLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
+			return &ast.UnaryExpression{Span: span(minusTok.Pos, tok.End), Op: "-", Operand: inner}, nil
+		case token.FLOAT:
+			p.advance()
+			inner := &ast.FloatLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
+			return &ast.UnaryExpression{Span: span(minusTok.Pos, tok.End), Op: "-", Operand: inner}, nil
+		}
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	tok := p.peek()
+	switch {
+	case tok.Kind == token.INT:
+		p.advance()
+		return &ast.IntLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}, nil
+	case tok.Kind == token.FLOAT:
+		p.advance()
+		return &ast.FloatLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}, nil
+	case tok.Kind == token.IDENT && isNumericTypedLiteralPrefix(tok.Image) && p.peekAt(1).Kind == token.STRING:
+		return p.parseTypedLiteral()
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// isNumericTypedLiteralPrefix reports whether image introduces a NUMERIC or
+// BIGNUMERIC typed literal usable as a signed_numerical_literal.
+func isNumericTypedLiteralPrefix(image string) bool {
+	switch strings.ToUpper(image) {
+	case "NUMERIC", "DECIMAL", "BIGNUMERIC", "BIGDECIMAL":
+		return true
+	}
+	return false
+}
+
+// parseOptIfExists consumes an "IF EXISTS" clause if present, reporting whether
+// it was consumed; see opt_if_exists in googlesql.tm. As in the bison grammar,
+// seeing "IF" commits to parsing "IF" "EXISTS", so "IF" must be followed by
+// "EXISTS" or a syntax error is reported.
+func (p *parser) parseOptIfExists() (bool, error) {
+	if !isKeyword(p.peek(), "IF") {
+		return false, nil
+	}
+	p.advance() // IF
+	if _, err := p.expectKeyword("EXISTS"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // parseOptionsList parses "( [options_entry, ...] )".
@@ -6475,7 +6896,7 @@ func startsExpression(tok token.Token) bool {
 			return true
 		}
 		switch strings.ToUpper(tok.Image) {
-		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "STRUCT":
+		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "STRUCT", "EXISTS":
 			return true
 		}
 	}

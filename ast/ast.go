@@ -2610,6 +2610,128 @@ func (n *AlterConstraintSetOptionsAction) Children() []Node {
 	return children(n.Name, n.Options)
 }
 
+// AlterColumnSetDefaultAction is an "ALTER COLUMN [IF EXISTS] identifier SET
+// DEFAULT expression" alter action; see ASTAlterColumnSetDefaultAction in
+// googlesql/parser/parse_tree.h.
+type AlterColumnSetDefaultAction struct {
+	Span
+	IsIfExists        bool        `json:"is_if_exists,omitempty"`
+	Column            *Identifier `json:"column"`
+	DefaultExpression Node        `json:"default_expression"`
+}
+
+func (n *AlterColumnSetDefaultAction) Children() []Node {
+	return children(n.Column, n.DefaultExpression)
+}
+
+// AlterColumnDropDefaultAction is an "ALTER COLUMN [IF EXISTS] identifier DROP
+// DEFAULT" alter action; see ASTAlterColumnDropDefaultAction in
+// googlesql/parser/parse_tree.h.
+type AlterColumnDropDefaultAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Column     *Identifier `json:"column"`
+}
+
+func (n *AlterColumnDropDefaultAction) Children() []Node {
+	return children(n.Column)
+}
+
+// AlterColumnDropGeneratedAction is an "ALTER COLUMN [IF EXISTS] identifier
+// DROP GENERATED" alter action; see ASTAlterColumnDropGeneratedAction in
+// googlesql/parser/parse_tree.h.
+type AlterColumnDropGeneratedAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Column     *Identifier `json:"column"`
+}
+
+func (n *AlterColumnDropGeneratedAction) Children() []Node {
+	return children(n.Column)
+}
+
+// AlterColumnSetGeneratedAction is an "ALTER COLUMN [IF EXISTS] identifier SET
+// GENERATED generated_column_info" alter action; see
+// ASTAlterColumnSetGeneratedAction in googlesql/parser/parse_tree.h.
+type AlterColumnSetGeneratedAction struct {
+	Span
+	IsIfExists bool                 `json:"is_if_exists,omitempty"`
+	Column     *Identifier          `json:"column"`
+	Info       *GeneratedColumnInfo `json:"info"`
+}
+
+func (n *AlterColumnSetGeneratedAction) Children() []Node {
+	return children(n.Column, n.Info)
+}
+
+// GeneratedColumnInfo describes a generated column: either "AS (expression)
+// [STORED [VOLATILE]]" or an identity column. GeneratedMode is "ALWAYS" or
+// "BY_DEFAULT"; StoredMode is "", "STORED", or "STORED_VOLATILE". See
+// ASTGeneratedColumnInfo in googlesql/parser/parse_tree.h.
+type GeneratedColumnInfo struct {
+	Span
+	GeneratedMode string              `json:"generated_mode"`
+	StoredMode    string              `json:"stored_mode,omitempty"`
+	Expression    Node                `json:"expression,omitempty"`
+	Identity      *IdentityColumnInfo `json:"identity,omitempty"`
+}
+
+func (n *GeneratedColumnInfo) Children() []Node {
+	return children(n.Expression, n.Identity)
+}
+
+// IdentityColumnInfo is the "IDENTITY(...)" body of a generated identity
+// column; see ASTIdentityColumnInfo in googlesql/parser/parse_tree.h. The
+// sequence attributes appear as child nodes in source order; the CYCLE flag is
+// not represented as a child.
+type IdentityColumnInfo struct {
+	Span
+	StartWith   *IdentityColumnStartWith   `json:"start_with,omitempty"`
+	IncrementBy *IdentityColumnIncrementBy `json:"increment_by,omitempty"`
+	MaxValue    *IdentityColumnMaxValue    `json:"max_value,omitempty"`
+	MinValue    *IdentityColumnMinValue    `json:"min_value,omitempty"`
+}
+
+func (n *IdentityColumnInfo) Children() []Node {
+	return children(n.StartWith, n.IncrementBy, n.MaxValue, n.MinValue)
+}
+
+// IdentityColumnStartWith is the "START WITH value" clause of an identity
+// column; see ASTIdentityColumnStartWith in googlesql/parser/parse_tree.h.
+type IdentityColumnStartWith struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *IdentityColumnStartWith) Children() []Node { return children(n.Value) }
+
+// IdentityColumnIncrementBy is the "INCREMENT BY value" clause of an identity
+// column; see ASTIdentityColumnIncrementBy in googlesql/parser/parse_tree.h.
+type IdentityColumnIncrementBy struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *IdentityColumnIncrementBy) Children() []Node { return children(n.Value) }
+
+// IdentityColumnMaxValue is the "MAXVALUE value" clause of an identity column;
+// see ASTIdentityColumnMaxValue in googlesql/parser/parse_tree.h.
+type IdentityColumnMaxValue struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *IdentityColumnMaxValue) Children() []Node { return children(n.Value) }
+
+// IdentityColumnMinValue is the "MINVALUE value" clause of an identity column;
+// see ASTIdentityColumnMinValue in googlesql/parser/parse_tree.h.
+type IdentityColumnMinValue struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *IdentityColumnMinValue) Children() []Node { return children(n.Value) }
+
 // AddTtlAction is an "ADD ROW DELETION POLICY [IF NOT EXISTS] (expression)"
 // alter action; see ASTAddTtlAction in googlesql/parser/parse_tree.h.
 type AddTtlAction struct {
@@ -2814,12 +2936,14 @@ func (n *ColumnDefinition) Children() []Node {
 // optional ColumnAttributeList holds trailing attributes such as NOT NULL.
 type SimpleColumnSchema struct {
 	Span
-	Type       *PathExpression      `json:"type"`
-	Attributes *ColumnAttributeList `json:"attributes,omitempty"`
+	Type              *PathExpression      `json:"type"`
+	Collate           *Collate             `json:"collate,omitempty"`
+	DefaultExpression Node                 `json:"default_expression,omitempty"`
+	Attributes        *ColumnAttributeList `json:"attributes,omitempty"`
 }
 
 func (n *SimpleColumnSchema) Children() []Node {
-	return children(n.Type, n.Attributes)
+	return children(n.Type, n.Collate, n.DefaultExpression, n.Attributes)
 }
 
 // ColumnAttributeList is the list of column attributes trailing a column
@@ -2841,6 +2965,16 @@ type NotNullColumnAttribute struct {
 }
 
 func (n *NotNullColumnAttribute) Children() []Node { return nil }
+
+// PrimaryKeyColumnAttribute is the "PRIMARY KEY [ENFORCED|NOT ENFORCED]" column
+// attribute; see ASTPrimaryKeyColumnAttribute in
+// googlesql/parser/parse_tree.h. Enforced defaults to true.
+type PrimaryKeyColumnAttribute struct {
+	Span
+	Enforced bool `json:"enforced"`
+}
+
+func (n *PrimaryKeyColumnAttribute) Children() []Node { return nil }
 
 // PrimaryKey is a "PRIMARY KEY (elements) [ENFORCED|NOT ENFORCED]" table
 // constraint; see ASTPrimaryKey in googlesql/parser/parse_tree.h. Enforced
@@ -2899,6 +3033,51 @@ type CheckConstraint struct {
 func (n *CheckConstraint) Children() []Node {
 	return children(n.Expression, n.Options, n.ConstraintName)
 }
+
+// ForeignKey is a "FOREIGN KEY (columns) REFERENCES ... [ENFORCED|NOT
+// ENFORCED] [OPTIONS(...)]" table constraint; see ASTForeignKey in
+// googlesql/parser/parse_tree.h. When the constraint is named, ConstraintName
+// is set and the node's start is moved to the name.
+type ForeignKey struct {
+	Span
+	ColumnList     *ColumnList          `json:"column_list"`
+	Reference      *ForeignKeyReference `json:"reference"`
+	Options        *OptionsList         `json:"options,omitempty"`
+	ConstraintName *Identifier          `json:"constraint_name,omitempty"`
+}
+
+func (n *ForeignKey) Children() []Node {
+	return children(n.ColumnList, n.Reference, n.Options, n.ConstraintName)
+}
+
+// ForeignKeyReference is a "REFERENCES path (columns) [MATCH mode] [actions]"
+// clause of a foreign key; see ASTForeignKeyReference in
+// googlesql/parser/parse_tree.h. Match is "SIMPLE", "FULL", or "NOT DISTINCT".
+// Enforced defaults to true.
+type ForeignKeyReference struct {
+	Span
+	Match      string             `json:"match"`
+	Enforced   bool               `json:"enforced"`
+	Reference  *PathExpression    `json:"path"`
+	ColumnList *ColumnList        `json:"column_list"`
+	Actions    *ForeignKeyActions `json:"actions"`
+}
+
+func (n *ForeignKeyReference) Children() []Node {
+	return children(n.Reference, n.ColumnList, n.Actions)
+}
+
+// ForeignKeyActions holds the ON UPDATE / ON DELETE referential actions of a
+// foreign key; see ASTForeignKeyActions in googlesql/parser/parse_tree.h. Each
+// action is "NO ACTION", "RESTRICT", "CASCADE", or "SET NULL" (default "NO
+// ACTION").
+type ForeignKeyActions struct {
+	Span
+	UpdateAction string `json:"update_action"`
+	DeleteAction string `json:"delete_action"`
+}
+
+func (n *ForeignKeyActions) Children() []Node { return nil }
 
 // WithPartitionColumnsClause is "WITH PARTITION COLUMNS [(table elements)]" in
 // a CREATE EXTERNAL TABLE statement; see ASTWithPartitionColumnsClause in

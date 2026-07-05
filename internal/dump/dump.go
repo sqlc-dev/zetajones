@@ -363,6 +363,42 @@ func nodeString(n ast.Node) string {
 			return "AlterConstraintSetOptionsAction(is_if_exists)"
 		}
 		return "AlterConstraintSetOptionsAction"
+	case *ast.AlterColumnSetDefaultAction:
+		if t.IsIfExists {
+			return "AlterColumnSetDefaultAction(is_if_exists)"
+		}
+		return "AlterColumnSetDefaultAction"
+	case *ast.AlterColumnDropDefaultAction:
+		if t.IsIfExists {
+			return "AlterColumnDropDefaultAction(is_if_exists)"
+		}
+		return "AlterColumnDropDefaultAction"
+	case *ast.AlterColumnDropGeneratedAction:
+		if t.IsIfExists {
+			return "AlterColumnDropGeneratedAction(is_if_exists)"
+		}
+		return "AlterColumnDropGeneratedAction"
+	case *ast.AlterColumnSetGeneratedAction:
+		if t.IsIfExists {
+			return "AlterColumnSetGeneratedAction(is_if_exists)"
+		}
+		return "AlterColumnSetGeneratedAction"
+	case *ast.GeneratedColumnInfo:
+		// See ASTGeneratedColumnInfo::SingleNodeDebugString in parse_tree.cc.
+		if t.StoredMode == "" {
+			return "GeneratedColumnInfo(generated_mode=" + t.GeneratedMode + ")"
+		}
+		return "GeneratedColumnInfo(generated_mode=" + t.GeneratedMode + ", stored_mode=" + t.StoredMode + ")"
+	case *ast.IdentityColumnInfo:
+		return "IdentityColumnInfo"
+	case *ast.IdentityColumnStartWith:
+		return "IdentityColumnStartWith"
+	case *ast.IdentityColumnIncrementBy:
+		return "IdentityColumnIncrementBy"
+	case *ast.IdentityColumnMaxValue:
+		return "IdentityColumnMaxValue"
+	case *ast.IdentityColumnMinValue:
+		return "IdentityColumnMinValue"
 	case *ast.AddTtlAction:
 		return "AddTtlAction"
 	case *ast.ReplaceTtlAction:
@@ -525,6 +561,11 @@ func nodeString(n ast.Node) string {
 		return "ColumnAttributeList"
 	case *ast.NotNullColumnAttribute:
 		return "NotNullColumnAttribute"
+	case *ast.PrimaryKeyColumnAttribute:
+		if t.Enforced {
+			return "PrimaryKeyColumnAttribute(ENFORCED)"
+		}
+		return "PrimaryKeyColumnAttribute(NOT ENFORCED)"
 	case *ast.PrimaryKey:
 		if t.Enforced {
 			return "PrimaryKey(ENFORCED)"
@@ -546,6 +587,18 @@ func nodeString(n ast.Node) string {
 			return "CheckConstraint(ENFORCED)"
 		}
 		return "CheckConstraint(NOT ENFORCED)"
+	case *ast.ForeignKey:
+		return "ForeignKey"
+	case *ast.ForeignKeyReference:
+		// See ASTForeignKeyReference::SingleNodeDebugString in parse_tree.cc.
+		enforced := " "
+		if !t.Enforced {
+			enforced = " NOT "
+		}
+		return "ForeignKeyReference(MATCH " + t.Match + enforced + "ENFORCED)"
+	case *ast.ForeignKeyActions:
+		// See ASTForeignKeyActions::SingleNodeDebugString in parse_tree.cc.
+		return "ForeignKeyActions(ON UPDATE " + t.UpdateAction + " ON DELETE " + t.DeleteAction + ")"
 	case *ast.WithPartitionColumnsClause:
 		return "WithPartitionColumnsClause"
 	case *ast.CallStatement:
