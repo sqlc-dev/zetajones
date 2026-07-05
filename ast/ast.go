@@ -366,6 +366,30 @@ type ContinueStatement struct {
 func (n *ContinueStatement) statementNode()   {}
 func (n *ContinueStatement) Children() []Node { return nil }
 
+// MacroBody is the body of a DEFINE MACRO statement: the raw source text
+// (including whitespace and comments) from the first body token to the last,
+// stored verbatim. See ASTMacroBody in googlesql/parser/parse_tree.h; it is an
+// ASTPrintableLeaf whose debug string is "MacroBody(<image>)".
+type MacroBody struct {
+	Span
+	Image string `json:"image"`
+}
+
+func (n *MacroBody) Children() []Node { return nil }
+
+// DefineMacroStatement is "DEFINE MACRO <name> <body>"; see
+// ASTDefineMacroStatement in googlesql/parser/parse_tree.h.
+type DefineMacroStatement struct {
+	Span
+	Name *Identifier `json:"name"`
+	Body *MacroBody  `json:"body"`
+}
+
+func (n *DefineMacroStatement) statementNode() {}
+func (n *DefineMacroStatement) Children() []Node {
+	return []Node{n.Name, n.Body}
+}
+
 // VariableDeclaration is "DECLARE identifier_list [type] [DEFAULT expr]"; see
 // ASTVariableDeclaration in googlesql/parser/parse_tree.h.
 type VariableDeclaration struct {

@@ -370,6 +370,11 @@ type Options struct {
 	// supported_generic_sub_entity_types in run_parser_test.cc. Matching is
 	// case-insensitive.
 	SupportedGenericSubEntityTypes []string
+	// MacroExpansionMode selects how macro constructs are handled: "none"
+	// (the default; DEFINE MACRO and "$"-macro tokens are rejected), "lenient",
+	// or "strict". See macro_expansion_mode in run_parser_test.cc and
+	// ParserOptions in googlesql/parser/parser.h.
+	MacroExpansionMode string
 }
 
 // stringSet builds a case-insensitive (upper-cased) lookup set from a list.
@@ -398,7 +403,7 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		}
 		return nil, err
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
 	stmt, err := p.parseStatement()
 	if err != nil {
 		return nil, err
@@ -451,7 +456,11 @@ func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of script"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
+	// Script mode force-emits SCRIPT_LABEL for "<name> : <block-keyword>" at a
+	// statement-start position; see LookaheadTransformer::IsCurrentTokenScriptLabel
+	// in googlesql/parser/lookahead_transformer.cc.
+	markScriptLabels(toks)
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
 	// An empty script resolves to a Script wrapping an empty statement list.
 	if p.peek().Kind == token.EOF {
 		empty := &ast.StatementList{Span: span(0, 0)}
@@ -484,6 +493,112 @@ func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
 	return &ast.Script{Span: span(list.Start, list.Stop), Statements: list}, nil
 }
 
+// markScriptLabels retags qualifying identifier tokens as SCRIPT_LABEL, as the
+// reference lookahead transformer does in script mode. A token becomes a
+// SCRIPT_LABEL when it is an identifier or keyword immediately followed by ":"
+// and one of the block-opening keywords BEGIN/WHILE/LOOP/REPEAT/FOR, and it
+// sits at a statement-start position (the very start, after ";", after
+// ELSE/THEN, after a statement-list-opening keyword, or after a statement-level
+// hint). See LookaheadTransformer::IsCurrentTokenScriptLabel in
+// googlesql/parser/lookahead_transformer.cc (Apache 2.0).
+func markScriptLabels(toks []token.Token) {
+	for i := 0; i+2 < len(toks); i++ {
+		if toks[i].Kind != token.IDENT {
+			continue
+		}
+		if toks[i+1].Kind != token.COLON {
+			continue
+		}
+		n2 := toks[i+2]
+		if !isKeyword(n2, "BEGIN") && !isKeyword(n2, "WHILE") && !isKeyword(n2, "LOOP") &&
+			!isKeyword(n2, "REPEAT") && !isKeyword(n2, "FOR") {
+			continue
+		}
+		if scriptLabelLookbackOK(toks, i) {
+			toks[i].Kind = token.SCRIPT_LABEL
+		}
+	}
+}
+
+// scriptLabelLookbackOK reports whether position i sits at a script
+// statement-start position, i.e. the lookback token is one of those permitted
+// before a SCRIPT_LABEL. See IsCurrentTokenScriptLabel in
+// googlesql/parser/lookahead_transformer.cc.
+func scriptLabelLookbackOK(toks []token.Token, i int) bool {
+	if i == 0 {
+		return true
+	}
+	prev := toks[i-1]
+	switch {
+	case prev.Kind == token.SEMICOLON:
+		return true
+	case isKeyword(prev, "ELSE"), isKeyword(prev, "THEN"):
+		return true
+	case isStatementListOpener(prev):
+		return true
+	case isStatementHintEnd(toks, i-1):
+		return true
+	}
+	return false
+}
+
+// isStatementListOpener reports whether tok is a keyword that opens a script
+// statement list (so the following token is at a statement-start position):
+// BEGIN (block), LOOP, REPEAT, and DO. These carry the LB_OPEN_STATEMENT_BLOCK
+// lookback override in googlesql.tm.
+func isStatementListOpener(tok token.Token) bool {
+	return isKeyword(tok, "BEGIN") || isKeyword(tok, "LOOP") ||
+		isKeyword(tok, "REPEAT") || isKeyword(tok, "DO")
+}
+
+// isStatementHintEnd reports whether toks[k] is the final token of a
+// statement-level hint ("@int" or "@[int]{...}") that itself begins a
+// statement. Such a hint carries the LB_END_OF_STATEMENT_LEVEL_HINT lookback
+// override in googlesql.tm.
+func isStatementHintEnd(toks []token.Token, k int) bool {
+	if k < 1 {
+		return false
+	}
+	switch toks[k].Kind {
+	case token.INT:
+		// "@int": ATSIGN INT.
+		return toks[k-1].Kind == token.ATSIGN && atStatementStart(toks, k-1)
+	case token.RBRACE:
+		// "@{...}" or "@int{...}": find the matching "{".
+		depth := 0
+		for j := k; j >= 0; j-- {
+			switch toks[j].Kind {
+			case token.RBRACE:
+				depth++
+			case token.LBRACE:
+				depth--
+				if depth == 0 {
+					if j >= 1 && toks[j-1].Kind == token.ATSIGN && atStatementStart(toks, j-1) {
+						return true
+					}
+					if j >= 2 && toks[j-1].Kind == token.INT && toks[j-2].Kind == token.ATSIGN &&
+						atStatementStart(toks, j-2) {
+						return true
+					}
+					return false
+				}
+			}
+		}
+	}
+	return false
+}
+
+// atStatementStart reports whether toks[idx] is the first token of a script
+// statement (used to confirm a leading hint really begins a statement).
+func atStatementStart(toks []token.Token, idx int) bool {
+	if idx == 0 {
+		return true
+	}
+	prev := toks[idx-1]
+	return prev.Kind == token.SEMICOLON || isKeyword(prev, "ELSE") ||
+		isKeyword(prev, "THEN") || isStatementListOpener(prev)
+}
+
 // ParseType parses a single standalone type (outside of any query), allowing
 // an optional trailing semicolon. It corresponds to the reference driver's
 // "mode=type" test mode.
@@ -507,7 +622,7 @@ func ParseTypeWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of type"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
 	typ, err := p.parseType()
 	if err != nil {
 		return nil, err
@@ -545,7 +660,7 @@ func ParseExpressionWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of expression"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
 	expr, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -566,6 +681,9 @@ type parser struct {
 	// actions; see Options.SupportedGenericEntityTypes.
 	entityTypes    map[string]bool
 	subEntityTypes map[string]bool
+	// macroMode is the effective macro expansion mode ("none", "lenient", or
+	// "strict"); an empty value means "none". It gates DEFINE MACRO statements.
+	macroMode string
 	// extents records the full token extent of expressions that were
 	// parenthesized. In ZetaSQL's parse tree a parenthesized expression
 	// keeps the location of the inner expression, but any enclosing
@@ -707,6 +825,12 @@ func describeToken(tok token.Token) string {
 	case token.QUOTED_IDENT:
 		// Don't put extra quotes around an already-backquoted identifier.
 		return "identifier " + tok.Image
+	case token.SCRIPT_LABEL:
+		// A SCRIPT_LABEL token is reported as just the quoted image, without
+		// the "identifier" qualifier: it is neither IDENTIFIER nor a keyword to
+		// MakeSyntaxErrorAtToken (googlesql/parser/parser_internal.cc), so it
+		// falls through to the plain-quoted default.
+		return `"` + tok.Image + `"`
 	case token.INT:
 		return fmt.Sprintf("integer literal \"%s\"", tok.Image)
 	case token.FLOAT:
@@ -925,6 +1049,12 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		if err != nil {
 			return nil, err
 		}
+		if isKeyword(p.peek(), "DEFINE") && isKeyword(p.peekAt(1), "MACRO") {
+			// Hints are not allowed on DEFINE MACRO statements; the error points
+			// at the hint. See the statement_level_hint "DEFINE" "MACRO" rule in
+			// googlesql.tm.
+			return nil, p.errorf(hint.Pos(), "Hints are not allowed on DEFINE MACRO statements.")
+		}
 		inner, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -962,6 +1092,9 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	case isKeyword(tok, "CREATE"):
 		return p.parseCreateStatement()
 	case isKeyword(tok, "DEFINE"):
+		if isKeyword(p.peekAt(1), "MACRO") {
+			return p.parseDefineMacroStatement()
+		}
 		return p.parseDefineTableStatement()
 	case isKeyword(tok, "DELETE"):
 		return p.parseDeleteStatement()
@@ -2983,6 +3116,61 @@ func (p *parser) parseDefineTableStatement() (ast.Statement, error) {
 		return nil, err
 	}
 	return &ast.DefineTableStatement{Span: span(defineTok.Pos, opts.End()), Name: name, Options: opts}, nil
+}
+
+// parseDefineMacroStatement parses "DEFINE MACRO <name> <body>"; see
+// define_macro_statement in googlesql.tm. DEFINE and MACRO are the next two
+// tokens. The macro name is the first raw body token; the body is the verbatim
+// source text (whitespace and comments included) from the first body token to
+// the last, terminated by ";" or end of input. Because our base lexer already
+// respects string and comment boundaries, we recover the body as a raw text
+// span over the already-tokenized stream rather than running a dedicated
+// macro-body tokenizer mode.
+func (p *parser) parseDefineMacroStatement() (ast.Statement, error) {
+	startIdx := p.pos
+	defineTok := p.advance() // DEFINE
+	p.advance()              // MACRO
+	// Macros must be enabled; otherwise the DEFINE keyword is reported as
+	// unsupported. See ValidateMacroSupport in googlesql.tm. When macro
+	// expansion is disabled the base tokenizer never marks DEFINE as the
+	// special KW_DEFINE_FOR_MACROS, so this check comes first.
+	if p.macroMode == "" || p.macroMode == "none" {
+		return nil, p.errorf(defineTok.Pos, "Syntax error: DEFINE MACRO statements are not supported because macro expansions are disabled")
+	}
+	// The macro expander only marks DEFINE as KW_DEFINE_FOR_MACROS (an
+	// "original" macro definition) when it is the first token of a statement,
+	// i.e. at the start of the input or immediately after a ";" (ignoring
+	// comments). A DEFINE MACRO anywhere else is treated as though it were
+	// produced by expanding another macro and is rejected. See
+	// LoadPotentiallySplicingTokens in googlesql/parser/macros/macro_expander.cc
+	// and the "DEFINE" "MACRO" production in googlesql.tm.
+	if startIdx != 0 && p.toks[startIdx-1].Kind != token.SEMICOLON {
+		return nil, p.errorf(defineTok.Pos, "Syntax error: DEFINE MACRO statements cannot be composed from other expansions")
+	}
+	// The macro name is the first body token; it must be an identifier or
+	// keyword. See IsIdentifierOrKeyword in googlesql.tm.
+	nameTok := p.peek()
+	if nameTok.Kind != token.IDENT && nameTok.Kind != token.QUOTED_IDENT {
+		return nil, p.errorf(nameTok.Pos, "Syntax error: Expected macro name but got %s", describeToken(nameTok))
+	}
+	p.advance() // name
+	name := p.parseIdentifierToken(nameTok)
+	// The body runs from the token after the name up to the terminating ";" or
+	// end of input, with all tokens in between forming MACRO_BODY_TOKENs.
+	bodyFirst := p.pos
+	for p.peek().Kind != token.SEMICOLON && p.peek().Kind != token.EOF {
+		p.advance()
+	}
+	var body *ast.MacroBody
+	if p.pos > bodyFirst {
+		start := p.toks[bodyFirst].Pos
+		end := p.toks[p.pos-1].End
+		body = &ast.MacroBody{Span: span(start, end), Image: p.sql[start:end]}
+	} else {
+		// An empty macro body: an empty leaf at the position after the name.
+		body = &ast.MacroBody{Span: span(nameTok.End, nameTok.End)}
+	}
+	return &ast.DefineMacroStatement{Span: span(defineTok.Pos, body.End()), Name: name, Body: body}, nil
 }
 
 // parseClusterBy parses "CLUSTER BY expression, ..."; see
@@ -5657,6 +5845,12 @@ func (p *parser) parseScriptStatementList(emptyPos int, isEnd func() bool) (*ast
 		if err != nil {
 			return nil, err
 		}
+		// A DEFINE MACRO statement is only allowed at the top level of a
+		// script, not inside a block's statement list; see
+		// unterminated_non_empty_statement_list in googlesql.tm.
+		if _, ok := stmt.(*ast.DefineMacroStatement); ok {
+			return nil, p.errorf(stmt.Pos(), "DEFINE MACRO statements cannot be nested under other statements or blocks.")
+		}
 		list.Statements = append(list.Statements, stmt)
 		semi, err := p.expect(token.SEMICOLON, `";"`)
 		if err != nil {
@@ -5833,10 +6027,6 @@ func (p *parser) parseRepeatStatement() (ast.Statement, error) {
 // FOR"; see for_in_statement in googlesql.tm. FOR is the next token.
 func (p *parser) parseForInStatement() (ast.Statement, error) {
 	forTok := p.advance() // FOR
-	if !p.features.Enabled(FeatureForIn) {
-		// No "Syntax error: " prefix; see for_in_statement in googlesql.tm.
-		return nil, p.errorf(forTok.Pos, "FOR...IN is not supported")
-	}
 	variable, err := p.parseIdentifier()
 	if err != nil {
 		return nil, err
@@ -5864,6 +6054,13 @@ func (p *parser) parseForInStatement() (ast.Statement, error) {
 	endTok, err := p.expectKeyword("FOR")
 	if err != nil {
 		return nil, err
+	}
+	if !p.features.Enabled(FeatureForIn) {
+		// The FOR...IN feature is validated at rule reduction, i.e. after the
+		// whole statement (including its body) has parsed, so an error inside
+		// the body surfaces first. No "Syntax error: " prefix; see
+		// for_in_statement in googlesql.tm.
+		return nil, p.errorf(forTok.Pos, "FOR...IN is not supported")
 	}
 	return &ast.ForInStatement{Span: span(forTok.Pos, endTok.End), Variable: variable, Query: query, Body: body}, nil
 }

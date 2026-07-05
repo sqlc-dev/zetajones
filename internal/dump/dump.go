@@ -1303,6 +1303,10 @@ func nodeString(n ast.Node) string {
 		return "BreakStatement"
 	case *ast.ContinueStatement:
 		return "ContinueStatement"
+	case *ast.DefineMacroStatement:
+		return "DefineMacroStatement"
+	case *ast.MacroBody:
+		return fmt.Sprintf("MacroBody(%s)", t.Image)
 	case *ast.VariableDeclaration:
 		return "VariableDeclaration"
 	case *ast.IfStatement:

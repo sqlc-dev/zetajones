@@ -17,6 +17,12 @@ const (
 	PARAM           // @named query parameter
 	SYSTEM_VARIABLE // @@system_variable
 	ATSIGN          // bare @ (hint prefix)
+	// MACRO_INVOCATION covers the "$"-prefixed macro tokens recognized by the
+	// base lexer: "$name" (invocation), "$$name" (builtin invocation), and
+	// "$digits" (argument reference). See the MACRO_* rules in
+	// googlesql/parser/googlesql.tm. The parser rejects a bare one as
+	// unexpected (macros are expanded away before parsing).
+	MACRO_INVOCATION
 
 	// Operators and punctuation
 	PLUS       // +
@@ -54,6 +60,15 @@ const (
 	PIPE_INPUT // |>
 	BACKSLASH  // \ (only for lenient macro expansion)
 	EXCL       // ! (standalone; the parser rejects it as unexpected)
+
+	// SCRIPT_LABEL is an identifier that opens a labeled script statement, e.g.
+	// the "L1" in "L1: BEGIN ... END". The lexer force-emits this in place of
+	// an identifier/keyword when the token is followed by ":" and a
+	// block-opening keyword at a statement-start position; see
+	// LookaheadTransformer::IsCurrentTokenScriptLabel in
+	// googlesql/parser/lookahead_transformer.cc. Its error description omits
+	// the "identifier" qualifier.
+	SCRIPT_LABEL
 )
 
 // Token is a single lexical token with its position in the input.

@@ -16,10 +16,12 @@ func main() {
 	feats := flag.String("features", "NONE", "")
 	noloc := flag.Bool("noloc", false, "")
 	mode := flag.String("mode", "statement", "statement or script")
+	macro := flag.String("macro", "none", "macro_expansion_mode: none, lenient, or strict")
 	flag.Parse()
 	sql := strings.Join(flag.Args(), " ")
 	var opts parser.Options
 	opts.Features = parser.ParseFeatureSet(*feats)
+	opts.MacroExpansionMode = *macro
 	var (
 		node ast.Node
 		err  error

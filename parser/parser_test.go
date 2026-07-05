@@ -29,6 +29,9 @@ func runCase(c *testfile.Case) string {
 	// [default ...] options. The reference test driver defaults to NONE; see
 	// run_parser_test.cc.
 	opts.Features = parser.ParseFeatureSet("NONE")
+	// The reference test driver defaults macro_expansion_mode to "none"; see
+	// run_parser_test.cc.
+	opts.MacroExpansionMode = "none"
 	mode := "statement"
 	for _, opt := range c.Options {
 		if spec, ok := strings.CutPrefix(opt, "language_features="); ok {
@@ -36,6 +39,9 @@ func runCase(c *testfile.Case) string {
 		}
 		if m, ok := strings.CutPrefix(opt, "mode="); ok {
 			mode = m
+		}
+		if spec, ok := strings.CutPrefix(opt, "macro_expansion_mode="); ok {
+			opts.MacroExpansionMode = spec
 		}
 		// The reference driver splits these configs on "," (an empty config
 		// yields a single empty element); see run_parser_test.cc.

@@ -270,6 +270,36 @@ func (l *lexer) next() (token.Token, error) {
 		return l.emit(token.ATSIGN, start), nil
 	}
 
+	if c == '$' {
+		// Macro tokens recognized by maximal munch: "$$name" (builtin), "$name"
+		// (invocation), and "$digits" (argument reference). A bare "$" (row
+		// pattern anchor) is emitted otherwise. See the MACRO_* rules in
+		// googlesql/parser/googlesql.tm.
+		if l.peekAt(1) == '$' && isIdentStart(l.peekAt(2)) {
+			l.pos += 2
+			for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
+				l.pos++
+			}
+			return l.emit(token.MACRO_INVOCATION, start), nil
+		}
+		if isIdentStart(l.peekAt(1)) {
+			l.pos++
+			for l.pos < len(l.sql) && isIdentPart(l.sql[l.pos]) {
+				l.pos++
+			}
+			return l.emit(token.MACRO_INVOCATION, start), nil
+		}
+		if isDigit(l.peekAt(1)) {
+			l.pos++
+			for l.pos < len(l.sql) && isDigit(l.sql[l.pos]) {
+				l.pos++
+			}
+			return l.emit(token.MACRO_INVOCATION, start), nil
+		}
+		l.pos++
+		return l.emit(token.DOLLAR, start), nil
+	}
+
 	// Operators and punctuation, longest match first.
 	two := ""
 	if l.pos+2 <= len(l.sql) {
@@ -312,7 +342,6 @@ func (l *lexer) next() (token.Token, error) {
 		'(': token.LPAREN, ')': token.RPAREN, '[': token.LBRACKET, ']': token.RBRACKET,
 		'{': token.LBRACE, '}': token.RBRACE, ',': token.COMMA, '.': token.DOT,
 		';': token.SEMICOLON, ':': token.COLON, '?': token.QUESTION,
-		'$': token.DOLLAR,
 	}
 	if kind, ok := single[c]; ok {
 		l.pos++
