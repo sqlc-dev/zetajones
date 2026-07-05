@@ -723,8 +723,6 @@ func nodeString(n ast.Node) string {
 		return "PipeWith"
 	case *ast.PipeInsert:
 		return "PipeInsert"
-	case *ast.OnConflictClause:
-		return "OnConflictClause(conflict_action=" + t.ConflictAction + ")"
 	case *ast.PipeRecursiveUnion:
 		return "PipeRecursiveUnion"
 	case *ast.AliasedQueryModifiers:
