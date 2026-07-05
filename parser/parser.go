@@ -207,6 +207,12 @@ const FeatureWithGroupRows Feature = "WITH_GROUP_ROWS"
 // FeaturePipes gates pipe query syntax (FEATURE_PIPES).
 const FeaturePipes Feature = "PIPES"
 
+// FeatureStatementWithPipeOperators gates attaching pipe-operator suffixes to
+// non-query statements that can produce a table (SHOW, DESCRIBE, EXECUTE
+// IMMEDIATE, RUN, CALL), forming an ASTStatementWithPipeOperators
+// (FEATURE_STATEMENT_WITH_PIPE_OPERATORS).
+const FeatureStatementWithPipeOperators Feature = "STATEMENT_WITH_PIPE_OPERATORS"
+
 // FeatureAllowConsecutiveOn gates consecutive ON/USING clauses in join
 // expressions (FEATURE_ALLOW_CONSECUTIVE_ON).
 const FeatureAllowConsecutiveOn Feature = "ALLOW_CONSECUTIVE_ON"
@@ -593,6 +599,14 @@ type parser struct {
 	// dedicated error rather than a valid clause; see pipe_create_table in
 	// googlesql.tm.
 	inPipeCreateTable bool
+	// inFromQuery is set while parsing the FROM clause of a standalone FROM
+	// query (the from_query alternative of query_primary_or_from_query in
+	// googlesql.tm). In that context a trailing "QUALIFY expression" is not a
+	// postfix table operator on the table primary; the LALR grammar leaves the
+	// QUALIFY unshifted so it surfaces as a top-level "Expected end of input"
+	// (or, without pipes, the "Unexpected FROM" error). It is reset while
+	// parsing any nested query so select-clause QUALIFY still works.
+	inFromQuery bool
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -900,6 +914,15 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		}
 		return &ast.HintedStatement{Span: span(hint.Pos(), inner.End()), Hint: hint, Statement: inner}, nil
 	}
+	// A statement may itself be a standalone subpipeline "|> op ..."; see
+	// subpipeline_statement in googlesql.tm.
+	if tok.Kind == token.PIPE_INPUT {
+		sub, err := p.parseSubpipelineNoParens()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SubpipelineStatement{Span: span(sub.Pos(), sub.End()), Subpipeline: sub}, nil
+	}
 	switch {
 	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"),
 		isKeyword(tok, "TABLE"), tok.Kind == token.LPAREN:
@@ -914,7 +937,11 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	case isKeyword(tok, "ALTER"):
 		return p.parseAlterStatement()
 	case isKeyword(tok, "CALL"):
-		return p.parseCallStatement()
+		stmt, err := p.parseCallStatement()
+		if err != nil {
+			return nil, err
+		}
+		return p.maybeStatementWithPipeOperators(stmt)
 	case isKeyword(tok, "CREATE"):
 		return p.parseCreateStatement()
 	case isKeyword(tok, "DEFINE"):
@@ -928,11 +955,23 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	case isKeyword(tok, "REVOKE"):
 		return p.parseGrantOrRevokeStatement(true)
 	case isKeyword(tok, "SHOW"):
-		return p.parseShowStatement()
+		stmt, err := p.parseShowStatement()
+		if err != nil {
+			return nil, err
+		}
+		return p.maybeStatementWithPipeOperators(stmt)
 	case isKeyword(tok, "DESCRIBE"), isKeyword(tok, "DESC"):
-		return p.parseDescribeStatement()
+		stmt, err := p.parseDescribeStatement()
+		if err != nil {
+			return nil, err
+		}
+		return p.maybeStatementWithPipeOperators(stmt)
 	case isKeyword(tok, "EXECUTE"):
-		return p.parseExecuteImmediateStatement()
+		stmt, err := p.parseExecuteImmediateStatement()
+		if err != nil {
+			return nil, err
+		}
+		return p.maybeStatementWithPipeOperators(stmt)
 	case isKeyword(tok, "EXPORT") && isKeyword(p.peekAt(1), "DATA"):
 		return p.parseExportDataStatement()
 	case isKeyword(tok, "EXPORT") && isKeyword(p.peekAt(1), "MODEL"):
@@ -2310,7 +2349,10 @@ func (p *parser) parseCallStatement() (ast.Statement, error) {
 	stmt := &ast.CallStatement{Span: span(callTok.Pos, 0), Procedure: proc}
 	if p.peek().Kind != token.RPAREN {
 		for {
-			arg, err := p.parseTVFArgument()
+			// CALL argument parsing preserves its existing "unexpected token"
+			// diagnostics; the empty-list "Expected \")\"" rewrite applies only
+			// to table-valued function calls.
+			arg, err := p.parseTVFArgument(false)
 			if err != nil {
 				return nil, err
 			}
@@ -2481,6 +2523,13 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// reported as an unexpected OR keyword rather than a missing object type.
 	if scope != "" && !isOrReplace && isKeyword(p.peek(), "OR") {
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword OR")
+	}
+	// A |> CREATE pipe operator uses the create_table_statement_prefix rule,
+	// which only accepts TABLE as the object type; see pipe_create_table in
+	// googlesql.tm. Any other (or missing) object type is reported as a missing
+	// TABLE keyword rather than dispatching to the general object-type handlers.
+	if p.inPipeCreateTable && !isKeyword(p.peek(), "TABLE") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword TABLE but got %s", describeToken(p.peek()))
 	}
 	// CREATE DATABASE <name> [OPTIONS(...)]; see create_database_statement in
 	// googlesql.tm. A database takes no OR REPLACE, scope, or IF NOT EXISTS
@@ -7476,6 +7525,13 @@ func hasLockMode(n ast.Node) bool {
 // UPDATE]" followed by any pipe operators; see query and
 // query_without_pipe_operators in googlesql.tm.
 func (p *parser) parseQuery() (*ast.Query, error) {
+	// A nested query (subquery, parenthesized query, etc.) is a fresh context:
+	// its own FROM clause is not the standalone FROM query's, so QUALIFY there
+	// is handled normally. Restore on exit so an enclosing FROM query's flag is
+	// preserved.
+	savedInFromQuery := p.inFromQuery
+	p.inFromQuery = false
+	defer func() { p.inFromQuery = savedInFromQuery }()
 	start := p.peek().Pos
 	var with *ast.WithClause
 	if isKeyword(p.peek(), "WITH") {
@@ -7876,7 +7932,10 @@ func (p *parser) parsePipeOperators(query *ast.Query, start int) (*ast.Query, er
 // Clauses that would be valid after a FROM clause in a normal query produce
 // dedicated errors suggesting pipe operators.
 func (p *parser) parseFromQueryTail(start int, with *ast.WithClause) (*ast.Query, error) {
+	savedInFromQuery := p.inFromQuery
+	p.inFromQuery = true
 	from, err := p.parseFromClause()
+	p.inFromQuery = savedInFromQuery
 	if err != nil {
 		return nil, err
 	}
@@ -8725,6 +8784,53 @@ func (p *parser) parseSubpipeline() (*ast.Subpipeline, error) {
 	}
 	sub.Stop = rparen.End
 	return sub, nil
+}
+
+// parseSubpipelineNoParens parses one or more "|> operator" pipe operators
+// without enclosing parentheses into a Subpipeline; at least one operator is
+// required. The first "|>" is the next token. See subpipeline_no_parens in
+// googlesql.tm.
+func (p *parser) parseSubpipelineNoParens() (*ast.Subpipeline, error) {
+	start := p.peek().Pos
+	sub := &ast.Subpipeline{Span: span(start, start)}
+	for p.peek().Kind == token.PIPE_INPUT {
+		op, err := p.parsePipeOperator()
+		if err != nil {
+			return nil, err
+		}
+		sub.PipeOperators = append(sub.PipeOperators, op)
+		sub.Stop = op.End()
+	}
+	return sub, nil
+}
+
+// maybeStatementWithPipeOperators attaches a "|> op ..." suffix to a statement
+// that can produce a table (SHOW, DESCRIBE, EXECUTE IMMEDIATE, RUN, CALL),
+// forming an ASTStatementWithPipeOperators. When no "|>" follows, the statement
+// is returned unchanged. The pipe operators are parsed before the feature is
+// checked, matching the grammar's reduction order (so an invalid pipe operator
+// is reported ahead of the feature error). See sql_statement_body and
+// sql_statement_body_maybe_pipe_suffix in googlesql.tm.
+func (p *parser) maybeStatementWithPipeOperators(stmt ast.Statement) (ast.Statement, error) {
+	if p.peek().Kind != token.PIPE_INPUT {
+		return stmt, nil
+	}
+	pipeStart := p.peek().Pos
+	sub, err := p.parseSubpipelineNoParens()
+	if err != nil {
+		return nil, err
+	}
+	if !p.features.Enabled(FeatureStatementWithPipeOperators) {
+		// This diagnostic deliberately omits the "Syntax error: " prefix, as in
+		// the reference (see sql_statement_body in googlesql.tm).
+		return nil, p.errorf(pipeStart, "Pipe operators are not supported on this statement")
+	}
+	suffix := &ast.SubpipelineStatement{Span: span(sub.Pos(), sub.End()), Subpipeline: sub}
+	return &ast.StatementWithPipeOperators{
+		Span:       span(stmt.Pos(), suffix.End()),
+		Statement:  stmt,
+		PipeSuffix: suffix,
+	}, nil
 }
 
 // parsePipePivot parses "PIVOT(...) [[AS] alias]" after a |> token; see
@@ -9985,11 +10091,13 @@ func (p *parser) parseTVFCore(path *ast.PathExpression) (*ast.TVF, error) {
 	p.advance() // (
 	tvf := &ast.TVF{Span: span(path.Pos(), 0), Name: path}
 	if p.peek().Kind != token.RPAREN {
+		first := true
 		for {
-			arg, err := p.parseTVFArgument()
+			arg, err := p.parseTVFArgument(first)
 			if err != nil {
 				return nil, err
 			}
+			first = false
 			tvf.Args = append(tvf.Args, arg)
 			if p.peek().Kind != token.COMMA {
 				break
@@ -10092,7 +10200,7 @@ func (p *parser) parseDescriptorArgument() (*ast.Descriptor, error) {
 // tvf_argument in googlesql.tm. The keyword forms apply only when the
 // keyword is followed by a token that can start the clause's operand, so a
 // plain column reference named "table" still parses as an expression.
-func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
+func (p *parser) parseTVFArgument(emptyListAllowed bool) (*ast.TVFArgument, error) {
 	tok := p.peek()
 	isPathStart := func(t token.Token) bool {
 		return (t.Kind == token.IDENT || t.Kind == token.QUOTED_IDENT) && !isReserved(t)
@@ -10195,8 +10303,19 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 		}
 		return &ast.TVFArgument{Span: named.Span, Expr: named}, nil
 	}
+	startPos := p.pos
 	expr, err := p.parseExpression()
 	if err != nil {
+		// A token that cannot begin an expression (and none of the argument
+		// forms above) leaves the argument slot empty. When an empty argument
+		// list (an immediate ")") would also be valid here, the reference
+		// reports the expected closing parenthesis rather than an "unexpected"
+		// error. See tvf in googlesql.tm; e.g. "tvf(from t)". This only applies
+		// to the first argument slot; after a comma an argument is required, so
+		// the plain expression error stands.
+		if emptyListAllowed && p.pos == startPos {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" but got %s`, describeToken(p.peek()))
+		}
 		return nil, err
 	}
 	return &ast.TVFArgument{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}, nil

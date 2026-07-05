@@ -17,7 +17,7 @@ func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
 	// position is a QUALIFY clause that is not preceded by a WHERE, GROUP BY
 	// or HAVING clause. The reference grammar rejects this via the
 	// qualify_clause_nonreserved alternative of pivot_or_unpivot_clause.
-	if p.isPostfixQualify() {
+	if p.isPostfixQualify() && !p.inFromQuery {
 		qualifyTok := p.advance() // QUALIFY
 		// Parse the expression so any error inside it is reported before the
 		// clause-position errors below (matching the reference reduction order).

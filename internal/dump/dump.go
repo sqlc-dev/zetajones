@@ -722,6 +722,10 @@ func nodeString(n ast.Node) string {
 		return "PipeSetOperation"
 	case *ast.Subpipeline:
 		return "Subpipeline"
+	case *ast.SubpipelineStatement:
+		return "SubpipelineStatement"
+	case *ast.StatementWithPipeOperators:
+		return "StatementWithPipeOperators"
 	case *ast.PipeLog:
 		return "PipeLog"
 	case *ast.PipeSelect:

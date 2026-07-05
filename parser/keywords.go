@@ -232,6 +232,7 @@ var keywordNames = map[string]bool{
 	"property":             true,
 	"proto":                true,
 	"public":               true,
+	"qualify":              true,
 	"raise":                true,
 	"range":                true,
 	"read":                 true,

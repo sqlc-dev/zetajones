@@ -2512,6 +2512,34 @@ func (n *Subpipeline) Children() []Node {
 	return append([]Node(nil), n.PipeOperators...)
 }
 
+// SubpipelineStatement is a standalone subpipeline used as a statement (e.g.
+// "|> WHERE x") or the pipe-operator suffix carried by a
+// StatementWithPipeOperators; see ASTSubpipelineStatement in
+// googlesql/parser/parse_tree.h.
+type SubpipelineStatement struct {
+	Span
+	Subpipeline *Subpipeline `json:"subpipeline"`
+}
+
+func (n *SubpipelineStatement) statementNode() {}
+func (n *SubpipelineStatement) Children() []Node {
+	return children(n.Subpipeline)
+}
+
+// StatementWithPipeOperators is a statement followed by a subpipeline suffix,
+// e.g. "SHOW tables |> WHERE x"; see ASTStatementWithPipeOperators in
+// googlesql/parser/parse_tree.h.
+type StatementWithPipeOperators struct {
+	Span
+	Statement  Statement             `json:"statement"`
+	PipeSuffix *SubpipelineStatement `json:"pipe_suffix"`
+}
+
+func (n *StatementWithPipeOperators) statementNode() {}
+func (n *StatementWithPipeOperators) Children() []Node {
+	return children(n.Statement, n.PipeSuffix)
+}
+
 // PipeLog is a |> LOG pipe operator with an optional subpipeline.
 type PipeLog struct {
 	Span
