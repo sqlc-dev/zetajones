@@ -1487,9 +1487,12 @@ func (n *WhereClause) Children() []Node {
 // GroupBy is a GROUP BY clause.
 type GroupBy struct {
 	Span
-	Hint  *Hint           `json:"hint,omitempty"`
-	All   *GroupByAll     `json:"all,omitempty"`
-	Items []*GroupingItem `json:"items"`
+	Hint *Hint       `json:"hint,omitempty"`
+	All  *GroupByAll `json:"all,omitempty"`
+	// AndOrderBy is true when a pipe AGGREGATE's GROUP BY was written as
+	// "GROUP AND ORDER BY"; see group_by_preamble_in_pipe in googlesql.tm.
+	AndOrderBy bool            `json:"and_order_by,omitempty"`
+	Items      []*GroupingItem `json:"items"`
 }
 
 func (n *GroupBy) Children() []Node {
@@ -1510,15 +1513,80 @@ type GroupByAll struct {
 
 func (n *GroupByAll) Children() []Node { return nil }
 
-// GroupingItem is a single GROUP BY item.
+// GroupingItem is a single GROUP BY item: an expression (a regular group by
+// key), a ROLLUP list, a CUBE list, a GROUPING SETS list, or the empty item
+// "()". See ASTGroupingItem in googlesql/parser/parse_tree.h. Alias and Order
+// may only be present for the expression case in pipe AGGREGATE.
 type GroupingItem struct {
 	Span
-	Expr Node `json:"expr"`
+	Expr            Node               `json:"expr,omitempty"`
+	Rollup          *Rollup            `json:"rollup,omitempty"`
+	Cube            *Cube              `json:"cube,omitempty"`
+	GroupingSetList *GroupingSetList   `json:"grouping_set_list,omitempty"`
+	Alias           *Alias             `json:"alias,omitempty"`
+	Order           *GroupingItemOrder `json:"grouping_item_order,omitempty"`
 }
 
 func (n *GroupingItem) Children() []Node {
-	return children(n.Expr)
+	return children(n.Expr, n.Rollup, n.Cube, n.GroupingSetList, n.Alias, n.Order)
 }
+
+// Rollup is a "ROLLUP(expr, ...)" grouping specification; see ASTRollup in
+// googlesql/parser/parse_tree.h.
+type Rollup struct {
+	Span
+	Expressions []Node `json:"expressions"`
+}
+
+func (n *Rollup) Children() []Node { return children(n.Expressions...) }
+
+// Cube is a "CUBE(expr, ...)" grouping specification; see ASTCube in
+// googlesql/parser/parse_tree.h.
+type Cube struct {
+	Span
+	Expressions []Node `json:"expressions"`
+}
+
+func (n *Cube) Children() []Node { return children(n.Expressions...) }
+
+// GroupingSet is one grouping set inside GROUPING SETS: the empty set "()", a
+// single expression, a ROLLUP, or a CUBE. See ASTGroupingSet in
+// googlesql/parser/parse_tree.h.
+type GroupingSet struct {
+	Span
+	Expr   Node    `json:"expr,omitempty"`
+	Rollup *Rollup `json:"rollup,omitempty"`
+	Cube   *Cube   `json:"cube,omitempty"`
+}
+
+func (n *GroupingSet) Children() []Node { return children(n.Expr, n.Rollup, n.Cube) }
+
+// GroupingSetList is the list of grouping sets in "GROUPING SETS(...)"; see
+// ASTGroupingSetList in googlesql/parser/parse_tree.h.
+type GroupingSetList struct {
+	Span
+	GroupingSets []*GroupingSet `json:"grouping_sets"`
+}
+
+func (n *GroupingSetList) Children() []Node {
+	out := make([]Node, 0, len(n.GroupingSets))
+	for _, gs := range n.GroupingSets {
+		out = append(out, gs)
+	}
+	return out
+}
+
+// GroupingItemOrder is the ASC/DESC and/or NULLS FIRST/LAST suffix on a pipe
+// AGGREGATE grouping item; see ASTGroupingItemOrder in
+// googlesql/parser/parse_tree.h. Spec is "ASC", "DESC", or "UNSPECIFIED"; the
+// last is used when only a null order was written.
+type GroupingItemOrder struct {
+	Span
+	Spec      string     `json:"spec"`
+	NullOrder *NullOrder `json:"null_order,omitempty"`
+}
+
+func (n *GroupingItemOrder) Children() []Node { return children(n.NullOrder) }
 
 // Having is a HAVING clause.
 type Having struct {
@@ -3665,8 +3733,14 @@ type FunctionCall struct {
 	// NullHandling is "IGNORE_NULLS" or "RESPECT_NULLS" when the call has an
 	// "IGNORE NULLS" or "RESPECT NULLS" modifier; empty otherwise. It is not
 	// shown in the debug tree; see ASTFunctionCall::NullHandlingModifier.
-	NullHandling   string                  `json:"null_handling_modifier,omitempty"`
-	Having         *HavingModifier         `json:"having_modifier,omitempty"`
+	NullHandling string          `json:"null_handling_modifier,omitempty"`
+	Where        *WhereClause    `json:"where,omitempty"`
+	Having       *HavingModifier `json:"having_modifier,omitempty"`
+	// GroupBy and HavingClause are the multi-level aggregation modifiers
+	// "GROUP BY ..." and the full "HAVING expr" that may follow it inside a
+	// function call; see function_call_expression in googlesql.tm.
+	GroupBy        *GroupBy                `json:"group_by,omitempty"`
+	HavingClause   *Having                 `json:"having,omitempty"`
 	ClampedBetween *ClampedBetweenModifier `json:"clamped_between_modifier,omitempty"`
 	OrderBy        *OrderBy                `json:"order_by,omitempty"`
 	LimitOffset    *LimitOffset            `json:"limit_offset,omitempty"`
@@ -3675,8 +3749,17 @@ type FunctionCall struct {
 func (n *FunctionCall) Children() []Node {
 	out := children(n.Function)
 	out = append(out, n.Args...)
+	if n.Where != nil {
+		out = append(out, n.Where)
+	}
 	if n.Having != nil {
 		out = append(out, n.Having)
+	}
+	if n.GroupBy != nil {
+		out = append(out, n.GroupBy)
+	}
+	if n.HavingClause != nil {
+		out = append(out, n.HavingClause)
 	}
 	if n.ClampedBetween != nil {
 		out = append(out, n.ClampedBetween)

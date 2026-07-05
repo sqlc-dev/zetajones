@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 
@@ -553,6 +554,21 @@ func (p *parser) extEnd(n ast.Node) int {
 		return ext[1]
 	}
 	return n.End()
+}
+
+// setNodeEnd sets the end (Stop) of a node's embedded ast.Span, mimicking
+// ZetaSQL's WithEndLocation. Every AST node embeds ast.Span, so reflection can
+// locate and update it. This is used where the reference grammar extends an
+// existing node's location (see parseGroupingSet).
+func setNodeEnd(n ast.Node, end int) {
+	v := reflect.ValueOf(n)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return
+	}
+	f := v.Elem().FieldByName("Span")
+	if f.IsValid() && f.CanSet() {
+		f.FieldByName("Stop").SetInt(int64(end))
+	}
 }
 
 func (p *parser) peek() token.Token { return p.toks[p.pos] }
@@ -7315,7 +7331,7 @@ func (p *parser) parsePipeAggregate(pipeTok token.Token) (ast.Node, error) {
 	sel.SelectList = list
 	sel.Stop = list.End()
 	if isKeyword(p.peek(), "GROUP") {
-		groupBy, err := p.parseGroupBy(false)
+		groupBy, err := p.parseGroupBy(groupByPipe)
 		if err != nil {
 			return nil, err
 		}
@@ -7466,7 +7482,7 @@ func (p *parser) parseSelect() (*ast.Select, error) {
 		sel.Stop = where.End()
 	}
 	if isKeyword(p.peek(), "GROUP") {
-		groupBy, err := p.parseGroupBy(true)
+		groupBy, err := p.parseGroupBy(groupByRegular)
 		if err != nil {
 			return nil, err
 		}
@@ -8252,7 +8268,25 @@ func (p *parser) parseExpressionWithOptAlias() (*ast.ExpressionWithOptAlias, err
 	return node, nil
 }
 
-func (p *parser) parseGroupBy(allowAll bool) (*ast.GroupBy, error) {
+// groupByMode selects which GROUP BY grammar to parse; see the group_by_*
+// rules in googlesql.tm.
+type groupByMode int
+
+const (
+	// groupByRegular is a standard-syntax GROUP BY: it permits GROUP BY ALL
+	// and plain grouping_items (no alias or ordering), and no trailing comma.
+	groupByRegular groupByMode = iota
+	// groupByFunc is the group_by_clause_prefix used as a multi-level
+	// aggregation modifier inside a function call: no ALL, plain grouping
+	// items, no trailing comma.
+	groupByFunc
+	// groupByPipe is pipe AGGREGATE's GROUP BY: no ALL, grouping items that
+	// accept an alias and an ASC/DESC/NULLS ordering suffix, an optional
+	// "AND ORDER" preamble, and a trailing comma.
+	groupByPipe
+)
+
+func (p *parser) parseGroupBy(mode groupByMode) (*ast.GroupBy, error) {
 	groupTok, err := p.expectKeyword("GROUP")
 	if err != nil {
 		return nil, err
@@ -8261,30 +8295,240 @@ func (p *parser) parseGroupBy(allowAll bool) (*ast.GroupBy, error) {
 	if err != nil {
 		return nil, err
 	}
+	andOrderBy := false
+	if mode == groupByPipe && isKeyword(p.peek(), "AND") {
+		p.advance() // AND
+		if _, err := p.expectKeyword("ORDER"); err != nil {
+			return nil, err
+		}
+		andOrderBy = true
+	}
 	if _, err := p.expectKeyword("BY"); err != nil {
 		return nil, err
 	}
-	groupBy := &ast.GroupBy{Span: span(groupTok.Pos, groupTok.End), Hint: hint}
-	if allowAll && isKeyword(p.peek(), "ALL") {
+	groupBy := &ast.GroupBy{Span: span(groupTok.Pos, groupTok.End), Hint: hint, AndOrderBy: andOrderBy}
+	if mode == groupByRegular && isKeyword(p.peek(), "ALL") {
 		allTok := p.advance()
 		groupBy.All = &ast.GroupByAll{Span: span(allTok.Pos, allTok.End)}
 		groupBy.Stop = allTok.End
 		return groupBy, nil
 	}
 	for {
-		expr, err := p.parseExpression()
+		item, err := p.parseGroupingItem(mode == groupByPipe)
 		if err != nil {
 			return nil, err
 		}
-		item := &ast.GroupingItem{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
 		groupBy.Items = append(groupBy.Items, item)
 		groupBy.Stop = item.End()
 		if p.peek().Kind != token.COMMA {
 			break
 		}
-		p.advance()
+		comma := p.advance()
+		if mode == groupByPipe && !startsExpression(p.peek()) {
+			// Trailing comma; it is included in the clause's location. See
+			// group_by_clause_in_pipe in googlesql.tm.
+			groupBy.Stop = comma.End
+			break
+		}
 	}
 	return groupBy, nil
+}
+
+// parseGroupingItem parses one grouping item; see grouping_item and
+// grouping_item_in_pipe in googlesql.tm. A grouping item is the empty item
+// "()", a ROLLUP/CUBE list, a GROUPING SETS list, or an expression. In pipe
+// AGGREGATE (inPipe) the expression form also accepts an alias and an
+// ASC/DESC/NULLS ordering suffix.
+func (p *parser) parseGroupingItem(inPipe bool) (*ast.GroupingItem, error) {
+	// grouping_item_base: "(" ")"
+	if p.peek().Kind == token.LPAREN && p.peekAt(1).Kind == token.RPAREN {
+		lp := p.advance()
+		rp := p.advance()
+		return &ast.GroupingItem{Span: span(lp.Pos, rp.End)}, nil
+	}
+	// grouping_item_base: ROLLUP / CUBE list.
+	if isKeyword(p.peek(), "ROLLUP") || isKeyword(p.peek(), "CUBE") {
+		rollup, cube, err := p.parseRollupOrCube()
+		if err != nil {
+			return nil, err
+		}
+		if rollup != nil {
+			return &ast.GroupingItem{Span: span(rollup.Pos(), rollup.End()), Rollup: rollup}, nil
+		}
+		return &ast.GroupingItem{Span: span(cube.Pos(), cube.End()), Cube: cube}, nil
+	}
+	// grouping_item_base: GROUPING SETS ( ... ).
+	if isKeyword(p.peek(), "GROUPING") && isKeyword(p.peekAt(1), "SETS") {
+		list, err := p.parseGroupingSetList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.GroupingItem{Span: span(list.Pos(), list.End()), GroupingSetList: list}, nil
+	}
+	// Expression form.
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	item := &ast.GroupingItem{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
+	if inPipe {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		if alias != nil {
+			item.Alias = alias
+			item.Stop = alias.End()
+		}
+		order, err := p.parseGroupingItemOrder()
+		if err != nil {
+			return nil, err
+		}
+		if order != nil {
+			item.Order = order
+			item.Stop = order.End()
+		}
+	}
+	return item, nil
+}
+
+// parseRollupOrCube parses a "ROLLUP(expr, ...)" or "CUBE(expr, ...)" list;
+// see rollup_list and cube_list in googlesql.tm. Exactly one of the returned
+// nodes is non-nil.
+func (p *parser) parseRollupOrCube() (*ast.Rollup, *ast.Cube, error) {
+	kwTok := p.advance() // ROLLUP or CUBE
+	isRollup := strings.EqualFold(kwTok.Image, "ROLLUP")
+	if p.peek().Kind != token.LPAREN {
+		return nil, nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // (
+	exprs, end, err := p.parseGroupingExpressionList()
+	if err != nil {
+		return nil, nil, err
+	}
+	if isRollup {
+		return &ast.Rollup{Span: span(kwTok.Pos, end), Expressions: exprs}, nil, nil
+	}
+	return nil, &ast.Cube{Span: span(kwTok.Pos, end), Expressions: exprs}, nil
+}
+
+// parseGroupingExpressionList parses "expression (, expression)* )" with the
+// opening "(" already consumed, returning the expressions and the end offset
+// of the closing ")". At least one expression is required.
+func (p *parser) parseGroupingExpressionList() ([]ast.Node, int, error) {
+	var exprs []ast.Node
+	for {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, 0, err
+		}
+		exprs = append(exprs, expr)
+		switch p.peek().Kind {
+		case token.COMMA:
+			p.advance()
+		case token.RPAREN:
+			rp := p.advance()
+			return exprs, rp.End, nil
+		default:
+			return nil, 0, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or "," but got %s`, describeToken(p.peek()))
+		}
+	}
+}
+
+// parseGroupingSetList parses "GROUPING SETS ( grouping_set, ... )"; see
+// grouping_item_base and grouping_set_list in googlesql.tm.
+func (p *parser) parseGroupingSetList() (*ast.GroupingSetList, error) {
+	groupingTok := p.advance() // GROUPING
+	p.advance()                // SETS
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+	}
+	p.advance() // (
+	list := &ast.GroupingSetList{Span: span(groupingTok.Pos, 0)}
+	for {
+		gs, err := p.parseGroupingSet()
+		if err != nil {
+			return nil, err
+		}
+		list.GroupingSets = append(list.GroupingSets, gs)
+		switch p.peek().Kind {
+		case token.COMMA:
+			p.advance()
+		case token.RPAREN:
+			rp := p.advance()
+			list.Stop = rp.End
+			return list, nil
+		default:
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or "," but got %s`, describeToken(p.peek()))
+		}
+	}
+}
+
+// parseGroupingSet parses one grouping set: the empty set "()", a ROLLUP or
+// CUBE list, or an expression; see grouping_set in googlesql.tm.
+func (p *parser) parseGroupingSet() (*ast.GroupingSet, error) {
+	if p.peek().Kind == token.LPAREN && p.peekAt(1).Kind == token.RPAREN {
+		lp := p.advance()
+		rp := p.advance()
+		return &ast.GroupingSet{Span: span(lp.Pos, rp.End)}, nil
+	}
+	if isKeyword(p.peek(), "ROLLUP") || isKeyword(p.peek(), "CUBE") {
+		rollup, cube, err := p.parseRollupOrCube()
+		if err != nil {
+			return nil, err
+		}
+		if rollup != nil {
+			return &ast.GroupingSet{Span: span(rollup.Pos(), rollup.End()), Rollup: rollup}, nil
+		}
+		return &ast.GroupingSet{Span: span(cube.Pos(), cube.End()), Cube: cube}, nil
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	// The reference wraps the expression with WithEndLocation($1, @$), which
+	// extends the expression node's own end to the grouping set's end (the
+	// closing parenthesis of a "(expr)" form). See grouping_set in
+	// googlesql.tm.
+	start := p.extStart(expr)
+	end := p.extEnd(expr)
+	setNodeEnd(expr, end)
+	return &ast.GroupingSet{Span: span(start, end), Expr: expr}, nil
+}
+
+// parseGroupingItemOrder parses the optional ASC/DESC and/or NULLS FIRST/LAST
+// ordering suffix on a pipe AGGREGATE grouping item; see opt_grouping_item_order
+// in googlesql.tm. It returns nil when no ordering suffix is present.
+func (p *parser) parseGroupingItemOrder() (*ast.GroupingItemOrder, error) {
+	var order *ast.GroupingItemOrder
+	switch {
+	case isKeyword(p.peek(), "ASC"):
+		tok := p.advance()
+		order = &ast.GroupingItemOrder{Span: span(tok.Pos, tok.End), Spec: "ASC"}
+	case isKeyword(p.peek(), "DESC"):
+		tok := p.advance()
+		order = &ast.GroupingItemOrder{Span: span(tok.Pos, tok.End), Spec: "DESC"}
+	case isKeyword(p.peek(), "NULLS"):
+		order = &ast.GroupingItemOrder{Span: span(p.peek().Pos, p.peek().Pos), Spec: "UNSPECIFIED"}
+	default:
+		return nil, nil
+	}
+	if isKeyword(p.peek(), "NULLS") {
+		nullsTok := p.advance()
+		var nullsFirst bool
+		switch {
+		case isKeyword(p.peek(), "FIRST"):
+			nullsFirst = true
+		case isKeyword(p.peek(), "LAST"):
+			nullsFirst = false
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword FIRST or keyword LAST but got %s", describeToken(p.peek()))
+		}
+		endTok := p.advance()
+		order.NullOrder = &ast.NullOrder{Span: span(nullsTok.Pos, endTok.End), NullsFirst: nullsFirst}
+		order.Stop = endTok.End
+	}
+	return order, nil
 }
 
 // parseOrderBy parses "ORDER [hint] BY ordering_expression, ...". When
@@ -10034,9 +10278,11 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 	nullHandlingAhead := func() bool {
 		return isKeyword(p.peek(), "IGNORE") || isKeyword(p.peek(), "RESPECT")
 	}
-	// HAVING, ORDER, and LIMIT are reserved keywords that cannot start an
-	// expression; with an empty argument list they begin trailing modifiers.
+	// WHERE, GROUP, HAVING, ORDER, and LIMIT are reserved keywords that cannot
+	// start an expression; with an empty argument list they begin trailing
+	// modifiers.
 	if p.peek().Kind != token.RPAREN && !nullHandlingAhead() &&
+		!isKeyword(p.peek(), "WHERE") && !isKeyword(p.peek(), "GROUP") &&
 		!isKeyword(p.peek(), "HAVING") && !isKeyword(p.peek(), "ORDER") &&
 		!isKeyword(p.peek(), "LIMIT") {
 		for {
@@ -10124,6 +10370,15 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 			return nil, err
 		}
 	}
+	// opt_where_clause in function_call_expression: a multi-level aggregation
+	// WHERE modifier; see googlesql.tm.
+	if isKeyword(p.peek(), "WHERE") {
+		where, err := p.parseWhereClause()
+		if err != nil {
+			return nil, err
+		}
+		call.Where = where
+	}
 	// having_modifier in googlesql.tm: "HAVING" ("MAX" | "MIN") expression.
 	if isKeyword(p.peek(), "HAVING") {
 		havingTok := p.advance()
@@ -10148,6 +10403,24 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 			Span: span(havingTok.Pos, p.extEnd(expr)),
 			Kind: kind,
 			Expr: expr,
+		}
+	}
+	// (group_by_clause_prefix having_clause?)? in function_call_expression: a
+	// multi-level aggregation GROUP BY modifier, optionally followed by a full
+	// HAVING clause; see googlesql.tm.
+	if isKeyword(p.peek(), "GROUP") {
+		groupBy, err := p.parseGroupBy(groupByFunc)
+		if err != nil {
+			return nil, err
+		}
+		call.GroupBy = groupBy
+		if isKeyword(p.peek(), "HAVING") {
+			havingTok := p.advance()
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			call.HavingClause = &ast.Having{Span: span(havingTok.Pos, p.extEnd(expr)), Expr: expr}
 		}
 	}
 	// clamped_between_modifier in googlesql.tm. It requires at least one

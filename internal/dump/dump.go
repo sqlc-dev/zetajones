@@ -208,11 +208,24 @@ func nodeString(n ast.Node) string {
 	case *ast.WhereClause:
 		return "WhereClause"
 	case *ast.GroupBy:
+		if t.AndOrderBy {
+			return "GroupBy(and_order_by=true)"
+		}
 		return "GroupBy"
 	case *ast.GroupByAll:
 		return "GroupByAll"
 	case *ast.GroupingItem:
 		return "GroupingItem"
+	case *ast.Rollup:
+		return "Rollup"
+	case *ast.Cube:
+		return "Cube"
+	case *ast.GroupingSet:
+		return "GroupingSet"
+	case *ast.GroupingSetList:
+		return "GroupingSetList"
+	case *ast.GroupingItemOrder:
+		return "GroupingItemOrder(" + t.Spec + ")"
 	case *ast.Having:
 		return "Having"
 	case *ast.Qualify:
