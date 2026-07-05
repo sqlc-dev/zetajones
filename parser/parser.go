@@ -9115,8 +9115,14 @@ func (p *parser) extendDashedIdentifier(first *ast.Identifier) ([]*ast.Identifie
 			name += "-" + strings.TrimSuffix(img, ".")
 			// The float's "." was the path separator; the dashed run ends at
 			// the last digit and the trailing identifier is a new component.
-			dashedID := &ast.Identifier{Span: span(start, next.End-1), Name: name}
-			tailID := &ast.Identifier{Span: span(ident.Pos, ident.End), Name: ident.Image}
+			// In googlesql.tm this is one dashed_identifier reduction
+			// ("identifier - FLOAT identifier") whose two path parts are both
+			// built by SeparatedIdentifierTmpNode::BuildPathParts with the same
+			// bison location (@1) spanning the whole run, so both identifiers
+			// share that location.
+			whole := span(start, ident.End)
+			dashedID := &ast.Identifier{Span: whole, Name: name}
+			tailID := &ast.Identifier{Span: whole, Name: ident.Image}
 			return []*ast.Identifier{dashedID, tailID}, nil
 		default:
 			return nil, p.errorf(dash.Pos, "Syntax error: Unexpected \"-\"")
