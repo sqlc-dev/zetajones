@@ -27,6 +27,18 @@ import (
 // statement; see gql_statement / gql_query in googlesql.tm. The result is a
 // QueryStatement wrapping Query > GqlQuery > GraphTableQuery.
 func (p *parser) parseGraphStatement() (ast.Statement, error) {
+	q, err := p.parseGraphQuery()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.QueryStatement{Span: span(q.Pos(), q.End()), Query: q}, nil
+}
+
+// parseGraphQuery parses "GRAPH <name> <operation_block>" and returns the
+// Query > GqlQuery > GraphTableQuery wrapper; see gql_query in googlesql.tm.
+// It is shared by the top-level GQL statement and the DDL/EXPORT
+// query_after_as position (query_after_as: query | gql_query).
+func (p *parser) parseGraphQuery() (*ast.Query, error) {
 	graphTok := p.advance() // GRAPH
 	graph, err := p.parsePathExpression()
 	if err != nil {
@@ -39,8 +51,7 @@ func (p *parser) parseGraphStatement() (ast.Statement, error) {
 	end := ops.End()
 	gt := &ast.GraphTableQuery{Span: span(graphTok.Pos, end), Graph: graph, Op: ops}
 	gq := &ast.GqlQuery{Span: span(graphTok.Pos, end), Query: gt}
-	q := &ast.Query{Span: span(graphTok.Pos, end), QueryExpr: gq}
-	return &ast.QueryStatement{Span: span(graphTok.Pos, end), Query: q}, nil
+	return &ast.Query{Span: span(graphTok.Pos, end), QueryExpr: gq}, nil
 }
 
 // parseGraphTableQuery parses "GRAPH_TABLE( <name> <match> [COLUMNS(...)] )" or
@@ -1153,7 +1164,7 @@ func (p *parser) parseGraphPathPattern() (*ast.GraphPathPattern, error) {
 	// assignment unless it is a path-mode keyword or begins a search prefix. A
 	// path factor never starts with an identifier, so an identifier that is
 	// neither must be an assignment target (which requires "=").
-	if t := p.peek(); ((t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT) && !isGraphPathModeKeyword(t) {
+	if t := p.peek(); ((t.Kind == token.IDENT && !p.isReserved(t)) || t.Kind == token.QUOTED_IDENT) && !isGraphPathModeKeyword(t) {
 		if p.peekAt(1).Kind == token.EQ || !p.startsGraphSearchPrefix() {
 			pathName = p.parseIdentifierToken(p.advance())
 			if p.peek().Kind != token.EQ {
@@ -1390,7 +1401,7 @@ func (p *parser) parenStartsNodePattern() bool {
 	if isGraphPathModeKeyword(t1) {
 		return false
 	}
-	if ((t1.Kind == token.IDENT && !isReserved(t1)) || t1.Kind == token.QUOTED_IDENT) && p.peekAt(2).Kind == token.EQ {
+	if ((t1.Kind == token.IDENT && !p.isReserved(t1)) || t1.Kind == token.QUOTED_IDENT) && p.peekAt(2).Kind == token.EQ {
 		return false
 	}
 	return true
@@ -1633,7 +1644,7 @@ func (p *parser) parseGraphElementPatternFiller() (*ast.GraphElementPatternFille
 		hint = h
 		end = hint.End()
 	}
-	if t := p.peek(); (t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT {
+	if t := p.peek(); (t.Kind == token.IDENT && !p.isReserved(t)) || t.Kind == token.QUOTED_IDENT {
 		name = p.parseIdentifierToken(p.advance())
 		end = name.End()
 	}
@@ -1796,7 +1807,7 @@ func (p *parser) parseGraphLabelPrimary() (ast.Node, error) {
 			op.Parenthesized = true
 		}
 		return inner, nil
-	case p.peek().Kind == token.IDENT && !isReserved(p.peek()), p.peek().Kind == token.QUOTED_IDENT:
+	case p.peek().Kind == token.IDENT && !p.isReserved(p.peek()), p.peek().Kind == token.QUOTED_IDENT:
 		ident := p.parseIdentifierToken(p.advance())
 		return &ast.GraphElementLabel{Span: span(ident.Pos(), ident.End()), Name: ident}, nil
 	}

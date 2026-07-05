@@ -971,8 +971,29 @@ var reservedKeywords = map[string]bool{
 	"WINDOW": true, "WITH": true,
 }
 
-func isReserved(tok token.Token) bool {
+// isReservedStatic reports whether tok is an unconditionally reserved keyword.
+// The parser method isReserved additionally honors the conditionally reserved
+// GRAPH_TABLE (see reserve_graph_table); a few context-detection helpers that
+// have no parser receiver use this static form.
+func isReservedStatic(tok token.Token) bool {
 	return tok.Kind == token.IDENT && reservedKeywords[strings.ToUpper(tok.Image)]
+}
+
+func (p *parser) isReserved(tok token.Token) bool {
+	if tok.Kind != token.IDENT {
+		return false
+	}
+	if reservedKeywords[strings.ToUpper(tok.Image)] {
+		return true
+	}
+	// GRAPH_TABLE is conditionally reserved: when reserve_graph_table is on it
+	// becomes a reserved keyword and cannot be used as an identifier. See
+	// KW_GRAPH_TABLE_RESERVED / kConditionallyReserved in
+	// googlesql/parser/keywords.cc.
+	if p.reserveGraphTable && strings.EqualFold(tok.Image, "GRAPH_TABLE") {
+		return true
+	}
+	return false
 }
 
 // optionsNameOK reports whether tok can start an options-list or hint entry
@@ -1516,7 +1537,7 @@ func (p *parser) parseModuleStatement() (ast.Statement, error) {
 func (p *parser) parseRequiredAsAlias() (*ast.Alias, error) {
 	asTok := p.advance() // AS
 	tok := p.peek()
-	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok)) {
 		ident := p.parseIdentifierToken(p.advance())
 		return &ast.Alias{Span: span(asTok.Pos, ident.End()), Identifier: ident}, nil
 	}
@@ -1528,7 +1549,7 @@ func (p *parser) parseRequiredAsAlias() (*ast.Alias, error) {
 func (p *parser) parseIntoAlias() (*ast.IntoAlias, error) {
 	intoTok := p.advance() // INTO
 	tok := p.peek()
-	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok)) {
 		ident := p.parseIdentifierToken(p.advance())
 		return &ast.IntoAlias{Span: span(intoTok.Pos, ident.End()), Identifier: ident}, nil
 	}
@@ -1920,7 +1941,7 @@ func (p *parser) parseInsertColumnList() (*ast.ColumnList, error) {
 	list := &ast.ColumnList{Span: span(lparen.Pos, 0)}
 	for {
 		tok := p.peek()
-		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || p.isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
 		list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
@@ -2101,7 +2122,7 @@ func (p *parser) parseUpdateItem() (*ast.UpdateItem, error) {
 	// The set-value target is a generalized path expression. When it cannot
 	// begin one, the LALR parser is still expecting the "(" of a nested DML, so
 	// the error names "(" rather than "identifier".
-	if tok := p.peek(); tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+	if tok := p.peek(); tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
 		return nil, p.errorf(tok.Pos, `Syntax error: Expected "(" but got %s`, describeToken(tok))
 	}
 	path, err := p.parseGeneralizedPathExpression()
@@ -2460,7 +2481,7 @@ func (p *parser) parseGeneralizedPathExpression() (ast.Node, error) {
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	if isReserved(tok) {
+	if p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	first := p.parseIdentifierToken(p.advance())
@@ -2620,7 +2641,7 @@ func (p *parser) parseIdentifierList() (*ast.IdentifierList, error) {
 // in googlesql.tm.
 func (p *parser) parseIdentifier() (*ast.Identifier, error) {
 	tok := p.peek()
-	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	return p.parseIdentifierToken(p.advance()), nil
@@ -2955,7 +2976,7 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "AS") {
 		p.advance()
 		queryStart := p.peek().Pos
-		query, err := p.parseQuery()
+		query, err := p.parseQueryAfterAs()
 		if err != nil {
 			return nil, err
 		}
@@ -3794,7 +3815,7 @@ func (p *parser) parseStructColumnSchema() (*ast.StructColumnSchema, error) {
 // struct_column_field in googlesql.tm.
 func (p *parser) parseStructColumnField() (*ast.StructColumnField, error) {
 	tok := p.peek()
-	named := (tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))) &&
+	named := (tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok))) &&
 		startsType(p.peekAt(1))
 	if named {
 		name := p.parseIdentifierToken(p.advance())
@@ -4302,7 +4323,7 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 		return stmt, nil
 	}
 	queryStart := p.peek().Pos
-	query, err := p.parseQuery()
+	query, err := p.parseQueryAfterAs()
 	if err != nil {
 		return nil, err
 	}
@@ -4475,7 +4496,7 @@ func (p *parser) parseCreateModelStatement(createTok token.Token, scope string, 
 			stmt.Stop = p.prevEnd()
 		} else {
 			queryStart := p.peek().Pos
-			query, err := p.parseQuery()
+			query, err := p.parseQueryAfterAs()
 			if err != nil {
 				return nil, err
 			}
@@ -4507,7 +4528,7 @@ func isAliasedQueryStart(first, second token.Token) bool {
 	if first.Kind != token.IDENT && first.Kind != token.QUOTED_IDENT {
 		return false
 	}
-	if isReserved(first) {
+	if isReservedStatic(first) {
 		return false
 	}
 	return isKeyword(second, "AS")
@@ -4549,7 +4570,7 @@ func (p *parser) parseAliasedQuery() (*ast.AliasedQuery, error) {
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	if isReserved(tok) {
+	if p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	ident := p.parseIdentifierToken(p.advance())
@@ -5178,7 +5199,7 @@ func (p *parser) parseWithConnectionClause() (*ast.WithConnectionClause, error) 
 	case isKeyword(tok, "DEFAULT"):
 		p.advance()
 		path = &ast.DefaultLiteral{Span: span(tok.Pos, tok.End)}
-	case (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok):
+	case (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !p.isReserved(tok):
 		pathExpr, err := p.parsePathExpression()
 		if err != nil {
 			return nil, err
@@ -5276,7 +5297,7 @@ func (p *parser) beginsParameterType(tok token.Token) bool {
 	switch {
 	case tok.Kind == token.QUOTED_IDENT:
 		return true
-	case tok.Kind == token.IDENT && !isReserved(tok):
+	case tok.Kind == token.IDENT && !p.isReserved(tok):
 		return true
 	case isKeyword(tok, "ARRAY"), isKeyword(tok, "STRUCT"), isKeyword(tok, "RANGE"), isKeyword(tok, "INTERVAL"), isKeyword(tok, "ANY"):
 		return true
@@ -5785,7 +5806,7 @@ func (p *parser) parseTransactionMode() (ast.Node, error) {
 // identifier or a non-reserved keyword/identifier).
 func (p *parser) atIdentifier() bool {
 	tok := p.peek()
-	return tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))
+	return tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok))
 }
 
 // parseCommitStatement parses "COMMIT [TRANSACTION]"; see commit_statement in
@@ -6604,7 +6625,7 @@ func (p *parser) parseShowStatement() (ast.Statement, error) {
 // object-type word in a GRANT/REVOKE statement: a quoted identifier or a
 // non-reserved (bare or unreserved-keyword) identifier.
 func beginsObjectIdentifier(tok token.Token) bool {
-	return tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))
+	return tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReservedStatic(tok))
 }
 
 // parsePrivileges parses "ALL [PRIVILEGES]" or a comma-separated privilege
@@ -6850,7 +6871,7 @@ func (p *parser) parseAlterEntityStatement(alterTok token.Token) (ast.Statement,
 // of a DROP CONSTRAINT action.
 func (p *parser) hasEntityAlterPath() bool {
 	tok := p.peek()
-	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
 		return false
 	}
 	return !p.tokenStartsAlterAction()
@@ -8143,6 +8164,18 @@ func hasLockMode(n ast.Node) bool {
 	return false
 }
 
+// parseQueryAfterAs parses the query in a DDL/EXPORT "AS" position, which
+// accepts either an ordinary query or a graph query; see query_after_as
+// (query | gql_query) in googlesql.tm. The gql_query alternative is part of
+// the grammar independent of the SQL_GRAPH language feature (feature gating
+// happens in the analyzer), so a leading GRAPH keyword always selects it.
+func (p *parser) parseQueryAfterAs() (*ast.Query, error) {
+	if isKeyword(p.peek(), "GRAPH") {
+		return p.parseGraphQuery()
+	}
+	return p.parseQuery()
+}
+
 // parseQuery parses "[WITH ...] query_primary [ORDER BY] [LIMIT] [FOR
 // UPDATE]" followed by any pipe operators; see query and
 // query_without_pipe_operators in googlesql.tm.
@@ -8332,7 +8365,7 @@ func (p *parser) parseWithClause() (*ast.WithClause, error) {
 			// See with_clause_with_trailing_comma in googlesql.tm.
 			return nil, p.errorf(next.Pos, "Syntax error: Trailing comma after the WITH clause before the main query is not allowed")
 		}
-		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || p.isReserved(next) {
 			// Only another WITH entry (starting with an identifier) or the
 			// main query may follow the comma; the reference LALR state
 			// reports only SELECT here.
@@ -8360,7 +8393,7 @@ func (p *parser) parseWithClauseEntry() (*ast.WithClauseEntry, error) {
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	if isReserved(tok) {
+	if p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	ident := p.parseIdentifierToken(p.advance())
@@ -8521,7 +8554,7 @@ func (p *parser) parsePipeWith(pipeTok token.Token) (ast.Node, error) {
 		}
 		// Continue to another entry only when the comma is followed by an entry
 		// start; otherwise the comma is pipe WITH's optional trailing comma.
-		if next := p.peekAt(1); (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+		if next := p.peekAt(1); (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || p.isReserved(next) {
 			break
 		}
 		p.advance() // ,
@@ -8821,7 +8854,7 @@ func (p *parser) parseColumnList() (*ast.ColumnList, error) {
 		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
-		if isReserved(tok) {
+		if p.isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
 		list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
@@ -9149,7 +9182,7 @@ func (p *parser) parsePipeRecursiveUnion(pipeTok token.Token) (ast.Node, error) 
 		}
 		node.Alias = alias
 		node.Stop = alias.End()
-	case (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && !isReserved(p.peek()):
+	case (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && !p.isReserved(p.peek()):
 		// as_alias_with_required_as: a bare identifier alias is rejected with a
 		// dedicated error; see pipe_recursive_union in googlesql.tm.
 		return nil, p.errorf(p.peek().Pos, `Syntax error: The keyword "AS" is required before the alias for pipe RECURSIVE UNION`)
@@ -9231,7 +9264,7 @@ func (p *parser) parsePipeSet(pipeTok token.Token) (ast.Node, error) {
 	node := &ast.PipeSet{Span: span(pipeTok.Pos, 0)}
 	for {
 		tok := p.peek()
-		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || p.isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
 		ident := p.parseIdentifierToken(p.advance())
@@ -9254,7 +9287,7 @@ func (p *parser) parsePipeSet(pipeTok token.Token) (ast.Node, error) {
 		}
 		comma := p.advance()
 		next := p.peek()
-		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || p.isReserved(next) {
 			// Trailing comma; it is included in the operator's location.
 			node.Stop = comma.End
 			break
@@ -9293,7 +9326,7 @@ func (p *parser) parsePipeRename(pipeTok token.Token) (ast.Node, error) {
 		}
 		p.advance() // ,
 		next := p.peek()
-		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || p.isReserved(next) {
 			// Trailing comma; it is not included in the operator's location.
 			break
 		}
@@ -9347,7 +9380,7 @@ func (p *parser) parsePipeDrop(pipeTok token.Token) (ast.Node, error) {
 		}
 		comma := p.advance()
 		next := p.peek()
-		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+		if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || p.isReserved(next) {
 			// Trailing comma; included in the operator's location only.
 			node.Stop = comma.End
 			break
@@ -9398,7 +9431,7 @@ func (p *parser) parseSubpipeline() (*ast.Subpipeline, error) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Expected subpipeline starting with |>, not a subquery")
 	case tok.Kind == token.LPAREN,
 		tok.Kind == token.QUOTED_IDENT,
-		tok.Kind == token.IDENT && !isReserved(tok),
+		tok.Kind == token.IDENT && !p.isReserved(tok),
 		isKeyword(tok, "WHERE"), isKeyword(tok, "LIMIT"), isKeyword(tok, "JOIN"),
 		isKeyword(tok, "ORDER"), isKeyword(tok, "GROUP"):
 		return nil, p.errorf(tok.Pos, "Syntax error: Expected subpipeline starting with |>")
@@ -9619,7 +9652,7 @@ func (p *parser) parseExportDataStatement() (ast.Statement, error) {
 		return nil, err
 	}
 	_ = asTok
-	query, err := p.parseQuery()
+	query, err := p.parseQueryAfterAs()
 	if err != nil {
 		return nil, err
 	}
@@ -9946,7 +9979,7 @@ func startsExpression(tok token.Token) bool {
 		token.QUOTED_IDENT, token.PARAM, token.QUESTION, token.SYSTEM_VARIABLE:
 		return true
 	case token.IDENT:
-		if !isReserved(tok) {
+		if !isReservedStatic(tok) {
 			return true
 		}
 		if reservedFunctionNameKeywords[strings.ToUpper(tok.Image)] {
@@ -10335,7 +10368,7 @@ func (p *parser) parseOptionalStarModifiers() (*ast.StarModifiers, error) {
 			if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 				return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 			}
-			if isReserved(tok) {
+			if p.isReserved(tok) {
 				return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 			}
 			list.Identifiers = append(list.Identifiers, p.parseIdentifierToken(p.advance()))
@@ -10365,7 +10398,7 @@ func (p *parser) parseOptionalStarModifiers() (*ast.StarModifiers, error) {
 			}
 			p.advance() // AS
 			tok := p.peek()
-			if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+			if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
 				return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
 			}
 			alias := p.parseIdentifierToken(p.advance())
@@ -10431,7 +10464,7 @@ func (p *parser) parseOptionalAlias() (*ast.Alias, error) {
 		hasAs = true
 	}
 	tok := p.peek()
-	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok)) {
 		ident := p.parseIdentifierToken(p.advance())
 		return &ast.Alias{Span: span(start, ident.End()), Identifier: ident}, nil
 	}
@@ -10547,7 +10580,7 @@ func (p *parser) parseLateralTablePrimary() (ast.Node, error) {
 	}
 	// Anything other than a subquery must be a TVF call: a path expression
 	// followed by an argument list.
-	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	path, err := p.parsePathExpression()
@@ -10795,7 +10828,7 @@ func (p *parser) parsePipeCall(pipeTok token.Token) (ast.Node, error) {
 	p.advance() // CALL
 	// The TVF name is a path expression (the IF keyword is also allowed as a
 	// name); an "@" hint or anything that cannot start a path is an error here.
-	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT || isReserved(tok)) && !isKeyword(tok, "IF") {
+	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT || p.isReserved(tok)) && !isKeyword(tok, "IF") {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	path, err := p.parsePathExpression()
@@ -10871,7 +10904,7 @@ func (p *parser) parseDescriptorArgument() (*ast.Descriptor, error) {
 func (p *parser) parseTVFArgument(emptyListAllowed bool) (*ast.TVFArgument, error) {
 	tok := p.peek()
 	isPathStart := func(t token.Token) bool {
-		return (t.Kind == token.IDENT || t.Kind == token.QUOTED_IDENT) && !isReserved(t)
+		return (t.Kind == token.IDENT || t.Kind == token.QUOTED_IDENT) && !p.isReserved(t)
 	}
 	switch {
 	case p.atInputTableArgument():
@@ -11006,7 +11039,7 @@ func (p *parser) parseUnnestExpression() (*ast.UnnestExpression, error) {
 		// may follow the expression list; see unnest_expression in googlesql.tm.
 		if len(node.Expressions) > 0 && p.peekAt(1).Kind == token.LAMBDA &&
 			(p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
-			!isReserved(p.peek()) {
+			!p.isReserved(p.peek()) {
 			name := p.parseIdentifierToken(p.advance())
 			p.advance() // consume =>
 			value, err := p.parseExpression()
@@ -11079,7 +11112,7 @@ func (p *parser) parseExpressionWithOptAlias() (*ast.ExpressionWithOptAlias, err
 	if isKeyword(p.peek(), "AS") {
 		asTok := p.advance()
 		tok := p.peek()
-		if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+		if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
 		}
 		ident := p.parseIdentifierToken(p.advance())
@@ -11587,7 +11620,7 @@ func (p *parser) parseIdentifierInHints() (*ast.Identifier, error) {
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
 	}
-	if isReserved(tok) && !isKeyword(tok, "HASH") && !isKeyword(tok, "PROTO") && !isKeyword(tok, "PARTITION") {
+	if p.isReserved(tok) && !isKeyword(tok, "HASH") && !isKeyword(tok, "PROTO") && !isKeyword(tok, "PARTITION") {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	return p.parseIdentifierToken(p.advance()), nil
@@ -11952,6 +11985,41 @@ func (p *parser) parseComparison() (ast.Node, error) {
 				return nil, err
 			}
 			return p.finishComparison(wrapped)
+		case isKeyword(tok, "LABELED"):
+			// IS [NOT] LABELED <label_expression>; see is_labeled_operator and
+			// the graph_expression production in googlesql.tm.
+			p.advance() // LABELED
+			labelExpr, err := p.parseGraphLabelOr()
+			if err != nil {
+				return nil, err
+			}
+			return p.finishComparison(&ast.GraphIsLabeledPredicate{
+				Span:    span(p.extStart(lhs), p.prevEnd()),
+				IsNot:   isNot,
+				Operand: lhs,
+				Label:   labelExpr,
+			})
+		case isKeyword(tok, "SOURCE"), isKeyword(tok, "DESTINATION"):
+			// IS [NOT] SOURCE [OF] / IS [NOT] DESTINATION [OF] <expr>; see the
+			// edge_source_endpoint_operator / edge_dest_endpoint_operator and
+			// graph_expression productions in googlesql.tm. The optional OF is
+			// dropped and the operator always renders with "OF".
+			kw := strings.ToUpper(tok.Image)
+			p.advance() // SOURCE / DESTINATION
+			if isKeyword(p.peek(), "OF") {
+				p.advance() // OF
+			}
+			rhs, err := p.parseBitwiseOr()
+			if err != nil {
+				return nil, err
+			}
+			return p.finishComparison(&ast.BinaryExpression{
+				Span:  span(p.extStart(lhs), p.extEnd(rhs)),
+				Op:    "IS " + kw + " OF",
+				IsNot: isNot,
+				Left:  lhs,
+				Right: rhs,
+			})
 		case isKeyword(tok, "NULL"):
 			p.advance()
 			rhs = &ast.NullLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
@@ -12570,7 +12638,7 @@ func (p *parser) applyPostfix(expr ast.Node) (ast.Node, error) {
 // "." (see the generalized field access rules in googlesql.tm).
 func (p *parser) parseGeneralizedFieldInnerPath() (*ast.PathExpression, error) {
 	tok := p.peek()
-	if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+	if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	first := p.parseIdentifierToken(p.advance())
@@ -12897,7 +12965,7 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
 			}
 			return p.finishFunctionCall(path)
-		case isReserved(tok):
+		case p.isReserved(tok):
 			if err := p.exceptClashError(); err != nil {
 				return nil, err
 			}
@@ -13082,7 +13150,7 @@ func (p *parser) parseStructConstructorArg() (*ast.StructConstructorArg, error) 
 func (p *parser) startsWithExpression() bool {
 	return isKeyword(p.peek(), "WITH") && p.peekAt(1).Kind == token.LPAREN &&
 		(p.peekAt(2).Kind == token.IDENT || p.peekAt(2).Kind == token.QUOTED_IDENT) &&
-		!isReserved(p.peekAt(2)) && isKeyword(p.peekAt(3), "AS")
+		!p.isReserved(p.peekAt(2)) && isKeyword(p.peekAt(3), "AS")
 }
 
 // parseWithExpression parses "WITH ( var AS expr [, ...], result_expr )" with
@@ -13113,7 +13181,7 @@ func (p *parser) parseWithExpression() (ast.Node, error) {
 		// Another "name AS ..." starts another variable; otherwise what follows
 		// the comma is the trailing result expression.
 		if !((p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
-			!isReserved(p.peek()) && isKeyword(p.peekAt(1), "AS")) {
+			!p.isReserved(p.peek()) && isKeyword(p.peekAt(1), "AS")) {
 			break
 		}
 	}
@@ -13210,7 +13278,7 @@ func (p *parser) parseNewConstructorArg() (*ast.NewConstructorArg, error) {
 			return arg, nil
 		}
 		tok := p.peek()
-		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+		if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || p.isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
 		ident := p.parseIdentifierToken(p.advance())
@@ -13257,7 +13325,7 @@ func (p *parser) parseBracedConstructor() (*ast.BracedConstructor, error) {
 			// expression (see braced_constructor_field_following_omitted_comma
 			// in googlesql.tm); anything else is a syntax error.
 			next := p.peek()
-			if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			if (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || p.isReserved(next) {
 				return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
 			}
 			commaSeparated = false
@@ -13290,7 +13358,7 @@ func (p *parser) parseBracedConstructorField(commaSeparated bool) (*ast.BracedCo
 		}
 		lhs.Expression = path
 		lhs.Stop = rparen.End
-	case (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok):
+	case (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !p.isReserved(tok):
 		path, err := p.parsePathExpression()
 		if err != nil {
 			return nil, err
@@ -13479,7 +13547,7 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 				arg = &ast.SequenceArg{Span: span(seqTok.Pos, seqPath.End()), Sequence: seqPath}
 			case p.peekAt(1).Kind == token.LAMBDA &&
 				(p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
-				!isReserved(p.peek()):
+				!p.isReserved(p.peek()):
 				// named_argument: identifier "=>" (expression |
 				// input_table_argument); see function_call_argument in
 				// googlesql.tm.
@@ -13737,7 +13805,7 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 	tok := p.peek()
 	if tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT {
-		if isReserved(tok) {
+		if p.isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
 		ident := p.parseIdentifierToken(p.advance())
@@ -13749,7 +13817,7 @@ func (p *parser) parseWindowSpecification() (*ast.WindowSpecification, error) {
 	lparen := p.advance()
 	windowSpec := &ast.WindowSpecification{Span: span(lparen.Pos, 0)}
 	tok = p.peek()
-	if (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !isReserved(tok) &&
+	if (tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT) && !p.isReserved(tok) &&
 		!isKeyword(tok, "PARTITION") && !isKeyword(tok, "ORDER") &&
 		!isKeyword(tok, "ROWS") && !isKeyword(tok, "RANGE") {
 		windowSpec.Name = p.parseIdentifierToken(p.advance())
@@ -13814,7 +13882,7 @@ func (p *parser) parseWindowClause(allowTrailingComma bool) (*ast.WindowClause, 
 		}
 		comma := p.advance()
 		next := p.peek()
-		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT || isReserved(next) {
+		if next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT || p.isReserved(next) {
 			// Trailing comma; it is included in the clause's location.
 			if !allowTrailingComma {
 				return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
@@ -13830,7 +13898,7 @@ func (p *parser) parseWindowClause(allowTrailingComma bool) (*ast.WindowClause, 
 // window_definition in googlesql.tm.
 func (p *parser) parseWindowDefinition() (*ast.WindowDefinition, error) {
 	tok := p.peek()
-	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT || isReserved(tok) {
+	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT || p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	name := p.parseIdentifierToken(p.advance())
@@ -14109,7 +14177,7 @@ func isSlashPathPart(tok token.Token) bool {
 // immediately followed by a dash it is parsed as a plain dashed path.
 func (p *parser) parseMaybeDashedGeneralizedPathExpression() (ast.Node, error) {
 	tok := p.peek()
-	if tok.Kind == token.IDENT && !isReserved(tok) {
+	if tok.Kind == token.IDENT && !p.isReserved(tok) {
 		if dash := p.peekAt(1); dash.Kind == token.MINUS && dash.Pos == tok.End {
 			return p.parseMaybeDashedPathExpression()
 		}
@@ -14122,7 +14190,7 @@ func (p *parser) parsePathExpression() (*ast.PathExpression, error) {
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	if isReserved(tok) {
+	if p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	first := p.parseIdentifierToken(p.advance())
@@ -14612,7 +14680,7 @@ func (p *parser) parseGeneralizedPathOrExtension() (ast.Node, error) {
 	if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	if isReserved(tok) {
+	if p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	return p.parseGeneralizedPathExpression()
@@ -14694,7 +14762,7 @@ func startsType(tok token.Token) bool {
 	if tok.Kind != token.IDENT {
 		return false
 	}
-	if !isReserved(tok) {
+	if !isReservedStatic(tok) {
 		return true
 	}
 	return isKeyword(tok, "ARRAY") || isKeyword(tok, "STRUCT") ||
@@ -14838,7 +14906,7 @@ func (p *parser) parseRawType() (ast.Node, error) {
 	}
 	// A reserved keyword such as PROTO or ENUM cannot name a type; the
 	// non-type-introducing reserved keywords were already handled above.
-	if tok.Kind == token.IDENT && isReserved(tok) {
+	if tok.Kind == token.IDENT && p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 	}
 	path, err := p.parsePathExpression()
@@ -14984,7 +15052,7 @@ func (p *parser) parseIntervalExpr() (ast.Node, error) {
 // identifier (e.g. HOUR, MINUTE) is accepted.
 func (p *parser) parseIntervalDatePart() (*ast.Identifier, error) {
 	tok := p.peek()
-	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok)) {
+	if tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok)) {
 		return p.parseIdentifierToken(p.advance()), nil
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Expected identifier but got %s", describeToken(tok))
@@ -15026,7 +15094,7 @@ func (p *parser) parseStructType() (*ast.StructType, error) {
 // in googlesql.tm.
 func (p *parser) parseStructField() (*ast.StructField, error) {
 	tok := p.peek()
-	named := (tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))) &&
+	named := (tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !p.isReserved(tok))) &&
 		startsType(p.peekAt(1))
 	var name *ast.Identifier
 	if named {

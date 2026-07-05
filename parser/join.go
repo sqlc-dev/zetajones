@@ -197,7 +197,7 @@ func (p *parser) parseUsingClause() (*ast.UsingClause, error) {
 		if tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
-		if isReserved(tok) {
+		if p.isReserved(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(tok.Image))
 		}
 		uc.Keys = append(uc.Keys, p.parseIdentifierToken(p.advance()))

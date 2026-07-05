@@ -209,7 +209,7 @@ func (p *parser) parseOptionalSampleSuffix(graphMode bool) (*ast.SampleSuffix, e
 		// In graph mode only an explicit "AS" alias is allowed.
 		startsRepeatable := isKeyword(p.peek(), "REPEATABLE") && p.peekAt(1).Kind == token.LPAREN
 		allowBareAlias := !graphMode
-		if isKeyword(p.peek(), "AS") || (allowBareAlias && !startsRepeatable && p.peek().Kind == token.IDENT && !isReserved(p.peek())) || (allowBareAlias && p.peek().Kind == token.QUOTED_IDENT) {
+		if isKeyword(p.peek(), "AS") || (allowBareAlias && !startsRepeatable && p.peek().Kind == token.IDENT && !p.isReserved(p.peek())) || (allowBareAlias && p.peek().Kind == token.QUOTED_IDENT) {
 			alias, err := p.parseOptionalAlias()
 			if err != nil {
 				return nil, err
@@ -439,7 +439,7 @@ func (p *parser) parseWithExpressionVariableList() (*ast.SelectList, error) {
 // "Unexpected" error otherwise.
 func (p *parser) parseAliasIdentifier() (*ast.Identifier, error) {
 	tok := p.peek()
-	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	return p.parseIdentifierToken(p.advance()), nil
@@ -548,7 +548,7 @@ func (p *parser) atRowPatternFactorStart() bool {
 	case token.QUOTED_IDENT, token.LPAREN, token.CARET, token.DOLLAR:
 		return true
 	case token.IDENT:
-		return !isReserved(tok)
+		return !p.isReserved(tok)
 	}
 	return false
 }
@@ -924,7 +924,7 @@ func (p *parser) parseUnpivotClause() (ast.Node, error) {
 // clause, reporting the reference parser's generic "Unexpected" error (rather
 // than "Expected identifier") when the next token cannot start a path.
 func (p *parser) parseUnpivotPathExpression() (*ast.PathExpression, error) {
-	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || p.isReserved(tok) {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	return p.parsePathExpression()

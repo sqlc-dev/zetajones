@@ -543,6 +543,10 @@ func nodeString(n ast.Node) string {
 				op = "NOT LIKE"
 			case "IS DISTINCT FROM":
 				op = "IS NOT DISTINCT FROM"
+			case "IS SOURCE OF":
+				op = "IS NOT SOURCE OF"
+			case "IS DESTINATION OF":
+				op = "IS NOT DESTINATION OF"
 			}
 		}
 		return fmt.Sprintf("BinaryExpression(%s)", op)
@@ -1428,6 +1432,8 @@ func nodeString(n ast.Node) string {
 		return "GraphWildcardLabel"
 	case *ast.GraphLabelOperation:
 		return "GraphLabelOperation(" + t.Op + ")"
+	case *ast.GraphIsLabeledPredicate:
+		return "GraphIsLabeledPredicate"
 	case *ast.GraphPropertySpecification:
 		return "GraphPropertySpecification"
 	case *ast.GraphPropertyNameAndValue:

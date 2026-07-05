@@ -120,6 +120,7 @@ var keywordNames = map[string]bool{
 	"generated":            true,
 	"grant":                true,
 	"graph":                true,
+	"graph_table":          true,
 	"group":                true,
 	"group_rows":           true,
 	"grouping":             true,

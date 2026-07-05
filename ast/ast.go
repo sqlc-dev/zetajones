@@ -5896,6 +5896,19 @@ type GraphLabelOperation struct {
 
 func (n *GraphLabelOperation) Children() []Node { return append([]Node(nil), n.Operands...) }
 
+// GraphIsLabeledPredicate is an "<operand> IS [NOT] LABELED <label_expr>"
+// predicate; see ASTGraphIsLabeledPredicate in googlesql/parser/parse_tree.h.
+// IsNot records the NOT; it is not shown in the debug string. Children are the
+// operand expression followed by the label expression.
+type GraphIsLabeledPredicate struct {
+	Span
+	IsNot   bool `json:"is_not,omitempty"`
+	Operand Node `json:"operand"`
+	Label   Node `json:"label_expression"`
+}
+
+func (n *GraphIsLabeledPredicate) Children() []Node { return children(n.Operand, n.Label) }
+
 // GqlSetOperation is a GQL composite query: a set operation (UNION / INTERSECT
 // / EXCEPT) between two or more linear query operations; see ASTGqlSetOperation
 // in googlesql/parser/parse_tree.h. Metadata holds one entry per operator and
