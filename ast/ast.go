@@ -5602,14 +5602,15 @@ type GqlFilter struct {
 func (n *GqlFilter) Children() []Node { return children(n.Where) }
 
 // GqlReturn is a "RETURN <items>" operator; see ASTGqlReturn in
-// googlesql/parser/parse_tree.h. Its child is a Select holding the return
-// item list.
+// googlesql/parser/parse_tree.h. Its first child is a Select holding the return
+// item list; OrderByPage holds an optional trailing ORDER BY / OFFSET / LIMIT.
 type GqlReturn struct {
 	Span
-	Select *Select `json:"select"`
+	Select      *Select            `json:"select"`
+	OrderByPage *GqlOrderByAndPage `json:"order_by_and_page,omitempty"`
 }
 
-func (n *GqlReturn) Children() []Node { return children(n.Select) }
+func (n *GqlReturn) Children() []Node { return children(n.Select, n.OrderByPage) }
 
 // GqlSample is a "TABLESAMPLE ..." operator in a graph linear query; see
 // ASTGqlSample in googlesql/parser/parse_tree.h. Its single child is a
@@ -5806,3 +5807,57 @@ type GraphLabelOperation struct {
 }
 
 func (n *GraphLabelOperation) Children() []Node { return append([]Node(nil), n.Operands...) }
+
+// GqlSetOperation is a GQL composite query: a set operation (UNION / INTERSECT
+// / EXCEPT) between two or more linear query operations; see ASTGqlSetOperation
+// in googlesql/parser/parse_tree.h. Metadata holds one entry per operator and
+// Inputs holds the GqlOperatorList operands.
+type GqlSetOperation struct {
+	Span
+	Metadata *SetOperationMetadataList `json:"metadata"`
+	Inputs   []Node                    `json:"inputs"`
+}
+
+func (n *GqlSetOperation) Children() []Node {
+	out := children(n.Metadata)
+	return append(out, n.Inputs...)
+}
+
+// GqlOrderByAndPage is a GQL ORDER BY and/or paging (OFFSET/LIMIT) operator;
+// see ASTGqlOrderByAndPage in googlesql/parser/parse_tree.h. Either or both of
+// OrderBy and Page may be present.
+type GqlOrderByAndPage struct {
+	Span
+	OrderBy *OrderBy `json:"order_by,omitempty"`
+	Page    *GqlPage `json:"page,omitempty"`
+}
+
+func (n *GqlOrderByAndPage) Children() []Node { return children(n.OrderBy, n.Page) }
+
+// GqlPage holds a GQL OFFSET/SKIP and/or LIMIT clause; see ASTGqlPage in
+// googlesql/parser/parse_tree.h.
+type GqlPage struct {
+	Span
+	Offset *GqlPageOffset `json:"offset,omitempty"`
+	Limit  *GqlPageLimit  `json:"limit,omitempty"`
+}
+
+func (n *GqlPage) Children() []Node { return children(n.Offset, n.Limit) }
+
+// GqlPageOffset is a GQL "OFFSET <value>" or "SKIP <value>" clause; see
+// ASTGqlPageOffset in googlesql/parser/parse_tree.h.
+type GqlPageOffset struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *GqlPageOffset) Children() []Node { return children(n.Value) }
+
+// GqlPageLimit is a GQL "LIMIT <value>" clause; see ASTGqlPageLimit in
+// googlesql/parser/parse_tree.h.
+type GqlPageLimit struct {
+	Span
+	Value Node `json:"value"`
+}
+
+func (n *GqlPageLimit) Children() []Node { return children(n.Value) }

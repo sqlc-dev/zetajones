@@ -138,14 +138,14 @@ func (p *parser) parseGraphShapeClause() (*ast.SelectList, error) {
 // operator already consumed for the first block (used when disambiguating the
 // GRAPH_TABLE single-match / operation-block forms).
 func (p *parser) parseGraphOperationBlock(firstOp ast.Node) (*ast.GqlOperatorList, error) {
-	block, err := p.parseGraphLinearQueryOperation(firstOp)
+	block, err := p.parseGraphCompositeQueryBlock(firstOp)
 	if err != nil {
 		return nil, err
 	}
 	blocks := []ast.Node{block}
 	for isKeyword(p.peek(), "NEXT") {
 		p.advance() // NEXT
-		block, err := p.parseGraphLinearQueryOperation(nil)
+		block, err := p.parseGraphCompositeQueryBlock(nil)
 		if err != nil {
 			return nil, err
 		}
@@ -154,38 +154,167 @@ func (p *parser) parseGraphOperationBlock(firstOp ast.Node) (*ast.GqlOperatorLis
 	return &ast.GqlOperatorList{Span: span(blocks[0].Pos(), blocks[len(blocks)-1].End()), Operators: blocks}, nil
 }
 
+// parseGraphCompositeQueryBlock parses a single NEXT-separated block: either a
+// lone linear query operation or a composite query (a set operation between two
+// or more linear query operations); see graph_composite_query_block /
+// graph_composite_query_prefix in googlesql.tm. firstOp, if non-nil, is a
+// linear operator already consumed for the leftmost operand.
+func (p *parser) parseGraphCompositeQueryBlock(firstOp ast.Node) (ast.Node, error) {
+	left, err := p.parseGraphLinearQueryOperation(firstOp)
+	if err != nil {
+		return nil, err
+	}
+	if !p.atSetOpMetadataStart() {
+		return left, nil
+	}
+
+	var metas []*ast.SetOperationMetadata
+	inputs := []ast.Node{left}
+	for p.atSetOpMetadataStart() {
+		md, err := p.parseGraphSetOperationMetadata()
+		if err != nil {
+			return nil, err
+		}
+		metas = append(metas, md)
+		right, err := p.parseGraphLinearQueryOperation(nil)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, right)
+	}
+	mdl := &ast.SetOperationMetadataList{
+		Span:    span(metas[0].Pos(), metas[len(metas)-1].End()),
+		Entries: metas,
+	}
+	return &ast.GqlSetOperation{
+		Span:     span(inputs[0].Pos(), inputs[len(inputs)-1].End()),
+		Metadata: mdl,
+		Inputs:   inputs,
+	}, nil
+}
+
+// parseGraphSetOperationMetadata parses one GQL set operator:
+// "[outer_mode] (UNION|INTERSECT|EXCEPT) (ALL|DISTINCT)"; see
+// graph_set_operation_metadata in googlesql.tm. Unlike the SQL set operation
+// metadata, GQL does not allow hints, STRICT, or a column-match suffix.
+func (p *parser) parseGraphSetOperationMetadata() (*ast.SetOperationMetadata, error) {
+	start := p.peek().Pos
+
+	var outerMode *ast.SetOperationColumnPropagationMode
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "FULL"), isKeyword(tok, "LEFT"):
+		p.advance()
+		end := tok.End
+		if isKeyword(p.peek(), "OUTER") {
+			end = p.advance().End
+		}
+		value := "FULL"
+		if isKeyword(tok, "LEFT") {
+			value = "LEFT"
+		}
+		outerMode = &ast.SetOperationColumnPropagationMode{Span: span(tok.Pos, end), Value: value}
+	case isKeyword(tok, "OUTER"):
+		p.advance()
+		outerMode = &ast.SetOperationColumnPropagationMode{Span: span(tok.Pos, tok.End), Value: "FULL"}
+	case isKeyword(tok, "INNER"):
+		p.advance()
+		outerMode = &ast.SetOperationColumnPropagationMode{Span: span(tok.Pos, tok.End), Value: "INNER"}
+	}
+
+	opTok := p.advance() // UNION, INTERSECT, or EXCEPT
+	md := &ast.SetOperationMetadata{
+		Span:                  span(start, 0),
+		OpType:                &ast.SetOperationType{Span: span(opTok.Pos, opTok.End), Op: strings.ToUpper(opTok.Image)},
+		ColumnPropagationMode: outerMode,
+	}
+
+	tok = p.peek()
+	var value string
+	switch {
+	case isKeyword(tok, "ALL"):
+		value = "ALL"
+	case isKeyword(tok, "DISTINCT"):
+		value = "DISTINCT"
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword ALL or keyword DISTINCT but got %s", describeToken(tok))
+	}
+	p.advance()
+	md.AllOrDistinct = &ast.SetOperationAllOrDistinct{Span: span(tok.Pos, tok.End), Value: value}
+	md.Stop = tok.End
+	return md, nil
+}
+
 // parseGraphLinearQueryOperation parses a sequence of linear operators
 // terminated by a mandatory RETURN, wrapping them in a GqlOperatorList; see
 // graph_linear_query_operation in googlesql.tm.
 func (p *parser) parseGraphLinearQueryOperation(firstOp ast.Node) (*ast.GqlOperatorList, error) {
-	var ops []ast.Node
-	start := -1
+	var rawOps []ast.Node
 	if firstOp != nil {
-		ops = append(ops, firstOp)
-		start = firstOp.Pos()
+		rawOps = append(rawOps, firstOp)
 	}
 	for !isKeyword(p.peek(), "RETURN") {
 		if !p.startsGraphLinearOp() {
+			// At the very start of a linear query operation (nothing parsed
+			// yet), an unexpected token yields the generic "Unexpected" error
+			// because many operators could begin here; once at least one
+			// operator has been parsed, only RETURN can complete the operation.
+			if len(rawOps) == 0 {
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+			}
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword RETURN but got %s", describeToken(p.peek()))
 		}
 		op, err := p.parseGraphLinearOp()
 		if err != nil {
 			return nil, err
 		}
-		if start < 0 {
-			start = op.Pos()
-		}
-		ops = append(ops, op)
+		rawOps = append(rawOps, op)
 	}
+	ops := combineGraphLinearOps(rawOps)
 	ret, err := p.parseGqlReturn()
 	if err != nil {
 		return nil, err
 	}
-	if start < 0 {
-		start = ret.Pos()
+	start := ret.Pos()
+	if len(ops) > 0 {
+		start = ops[0].Pos()
 	}
 	ops = append(ops, ret)
 	return &ast.GqlOperatorList{Span: span(start, ret.End()), Operators: ops}, nil
+}
+
+// combineGraphLinearOps folds consecutive OFFSET/LIMIT (or SKIP/LIMIT) page
+// operators into GqlOrderByAndPage(GqlPage(...)) nodes, mirroring the small
+// state machine in the reduce action of graph_linear_operator_list in
+// googlesql.tm. A LIMIT immediately following an OFFSET is merged into the same
+// GqlPage; otherwise each page clause becomes its own GqlOrderByAndPage.
+func combineGraphLinearOps(rawOps []ast.Node) []ast.Node {
+	var out []ast.Node
+	prevWasOffset := false
+	var page *ast.GqlPage
+	for _, thisOp := range rawOps {
+		if lim, ok := thisOp.(*ast.GqlPageLimit); ok && prevWasOffset {
+			page.Limit = lim
+			page.Stop = lim.End()
+			last := out[len(out)-1].(*ast.GqlOrderByAndPage)
+			last.Stop = lim.End()
+			page = nil
+			prevWasOffset = false
+			continue
+		}
+		_, prevWasOffset = thisOp.(*ast.GqlPageOffset)
+		switch op := thisOp.(type) {
+		case *ast.GqlPageOffset:
+			page = &ast.GqlPage{Span: span(op.Pos(), op.End()), Offset: op}
+			out = append(out, &ast.GqlOrderByAndPage{Span: span(op.Pos(), op.End()), Page: page})
+		case *ast.GqlPageLimit:
+			page = &ast.GqlPage{Span: span(op.Pos(), op.End()), Limit: op}
+			out = append(out, &ast.GqlOrderByAndPage{Span: span(op.Pos(), op.End()), Page: page})
+		default:
+			out = append(out, thisOp)
+		}
+	}
+	return out
 }
 
 // startsGraphLinearOp reports whether the next token begins a linear GQL
@@ -201,6 +330,11 @@ func (p *parser) startsGraphLinearOp() bool {
 	case isKeyword(p.peek(), "FILTER"):
 		return true
 	case isKeyword(p.peek(), "TABLESAMPLE"):
+	case isKeyword(p.peek(), "ORDER"):
+		return true
+	case isKeyword(p.peek(), "OFFSET"), isKeyword(p.peek(), "SKIP"):
+		return true
+	case isKeyword(p.peek(), "LIMIT"):
 		return true
 	}
 	return false
@@ -218,8 +352,120 @@ func (p *parser) parseGraphLinearOp() (ast.Node, error) {
 		return p.parseGqlFilter()
 	case isKeyword(p.peek(), "TABLESAMPLE"):
 		return p.parseGqlSample()
+	case isKeyword(p.peek(), "ORDER"):
+		return p.parseGraphOrderByOperator()
+	case isKeyword(p.peek(), "OFFSET"), isKeyword(p.peek(), "SKIP"):
+		return p.parseGraphOffsetClause()
+	case isKeyword(p.peek(), "LIMIT"):
+		return p.parseGraphLimitClause()
 	}
 	return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+}
+
+// parseGraphOrderByOperator parses "ORDER [hint] BY <ordering_list>" as a
+// standalone GQL linear operator, wrapping the OrderBy in a GqlOrderByAndPage
+// (with no page); see graph_order_by_operator in googlesql.tm.
+func (p *parser) parseGraphOrderByOperator() (*ast.GqlOrderByAndPage, error) {
+	ob, err := p.parseGraphOrderBy()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GqlOrderByAndPage{Span: span(ob.Pos(), ob.End()), OrderBy: ob}, nil
+}
+
+// parseGraphOrderBy parses "ORDER [hint] BY <graph_ordering_expression_list>";
+// see graph_order_by_clause in googlesql.tm. Unlike the SQL ORDER BY, each
+// ordering expression also accepts the ASCENDING / DESCENDING keywords.
+func (p *parser) parseGraphOrderBy() (*ast.OrderBy, error) {
+	orderTok := p.advance() // ORDER
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("BY"); err != nil {
+		return nil, err
+	}
+	ob := &ast.OrderBy{Span: span(orderTok.Pos, orderTok.End), Hint: hint}
+	for {
+		item, err := p.parseGraphOrderingExpression()
+		if err != nil {
+			return nil, err
+		}
+		ob.Items = append(ob.Items, item)
+		ob.Stop = item.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	return ob, nil
+}
+
+// parseGraphOrderingExpression parses "expression [COLLATE c]
+// [ASC|ASCENDING|DESC|DESCENDING] [NULLS FIRST|LAST]"; see
+// graph_ordering_expression / opt_graph_asc_or_desc in googlesql.tm.
+func (p *parser) parseGraphOrderingExpression() (*ast.OrderingExpression, error) {
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	item := &ast.OrderingExpression{Span: span(p.extStart(expr), p.extEnd(expr)), Expr: expr}
+	if isKeyword(p.peek(), "COLLATE") {
+		collate, err := p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+		item.Collate = collate
+		item.Stop = collate.End()
+	}
+	switch {
+	case isKeyword(p.peek(), "ASC"), isKeyword(p.peek(), "ASCENDING"):
+		tok := p.advance()
+		item.HasAsc = true
+		item.Stop = tok.End
+	case isKeyword(p.peek(), "DESC"), isKeyword(p.peek(), "DESCENDING"):
+		tok := p.advance()
+		item.Descending = true
+		item.Stop = tok.End
+	}
+	if isKeyword(p.peek(), "NULLS") {
+		nullsTok := p.advance()
+		var nullsFirst bool
+		switch {
+		case isKeyword(p.peek(), "FIRST"):
+			nullsFirst = true
+		case isKeyword(p.peek(), "LAST"):
+			nullsFirst = false
+		default:
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword FIRST or keyword LAST but got %s", describeToken(p.peek()))
+		}
+		endTok := p.advance()
+		item.NullOrder = &ast.NullOrder{Span: span(nullsTok.Pos, endTok.End), NullsFirst: nullsFirst}
+		item.Stop = endTok.End
+	}
+	return item, nil
+}
+
+// parseGraphOffsetClause parses "(OFFSET|SKIP) <value>" into a raw GqlPageOffset
+// node; see graph_offset_clause in googlesql.tm.
+func (p *parser) parseGraphOffsetClause() (*ast.GqlPageOffset, error) {
+	tok := p.advance() // OFFSET or SKIP
+	val, err := p.parsePossiblyCastIntLiteralOrParameter()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GqlPageOffset{Span: span(tok.Pos, val.End()), Value: val}, nil
+}
+
+// parseGraphLimitClause parses "LIMIT <value>" into a raw GqlPageLimit node;
+// see graph_limit_clause in googlesql.tm.
+func (p *parser) parseGraphLimitClause() (*ast.GqlPageLimit, error) {
+	tok := p.advance() // LIMIT
+	val, err := p.parsePossiblyCastIntLiteralOrParameter()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GqlPageLimit{Span: span(tok.Pos, val.End()), Value: val}, nil
 }
 
 // parseGqlMatch parses "MATCH <graph_pattern>"; see graph_match_operator in
@@ -313,10 +559,11 @@ func (p *parser) parseGqlFilter() (*ast.GqlFilter, error) {
 	return &ast.GqlFilter{Span: span(filterTok.Pos, where.End()), Where: where}, nil
 }
 
-// parseGqlReturn parses "RETURN <return_item_list>"; see
-// graph_return_operator in googlesql.tm. It builds a Select holding the item
-// list. Advanced clauses (DISTINCT, GROUP BY, ORDER BY, OFFSET, LIMIT) are not
-// yet supported.
+// parseGqlReturn parses "RETURN <return_item_list> [ORDER BY ...] [OFFSET ...]
+// [LIMIT ...]"; see graph_return_operator in googlesql.tm. It builds a Select
+// holding the item list; a trailing ORDER BY / OFFSET / LIMIT (offset before
+// limit, at most one each) is folded into a single GqlOrderByAndPage. Advanced
+// clauses (DISTINCT, GROUP BY) are not yet supported.
 func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
 	returnTok := p.advance() // RETURN
 	first, err := p.parseGqlReturnItem()
@@ -334,7 +581,63 @@ func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
 	}
 	list := &ast.SelectList{Span: span(cols[0].Pos(), cols[len(cols)-1].End()), Columns: cols}
 	sel := &ast.Select{Span: span(list.Pos(), list.End()), SelectList: list}
-	return &ast.GqlReturn{Span: span(returnTok.Pos, list.End()), Select: sel}, nil
+
+	// Location where an absent ORDER BY would sit (end of the item list),
+	// used as the start of a page-only GqlOrderByAndPage; see the
+	// MakeLocationRange(@order_by, @$) in graph_return_operator.
+	afterItems := p.prevEnd()
+
+	var ob *ast.OrderBy
+	if isKeyword(p.peek(), "ORDER") {
+		ob, err = p.parseGraphOrderBy()
+		if err != nil {
+			return nil, err
+		}
+	}
+	var offset *ast.GqlPageOffset
+	if isKeyword(p.peek(), "OFFSET") || isKeyword(p.peek(), "SKIP") {
+		offset, err = p.parseGraphOffsetClause()
+		if err != nil {
+			return nil, err
+		}
+	}
+	var limit *ast.GqlPageLimit
+	if isKeyword(p.peek(), "LIMIT") {
+		limit, err = p.parseGraphLimitClause()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	ret := &ast.GqlReturn{Span: span(returnTok.Pos, list.End()), Select: sel}
+	var page *ast.GqlPage
+	if offset != nil || limit != nil {
+		pageStart, pageEnd := afterItems, afterItems
+		switch {
+		case offset != nil && limit != nil:
+			pageStart, pageEnd = offset.Pos(), limit.End()
+		case offset != nil:
+			pageStart, pageEnd = offset.Pos(), offset.End()
+		case limit != nil:
+			pageStart, pageEnd = limit.Pos(), limit.End()
+		}
+		page = &ast.GqlPage{Span: span(pageStart, pageEnd), Offset: offset, Limit: limit}
+	}
+	if ob != nil || page != nil {
+		start := afterItems
+		if ob != nil {
+			start = ob.Pos()
+		}
+		end := afterItems
+		if page != nil {
+			end = page.End()
+		} else if ob != nil {
+			end = ob.End()
+		}
+		ret.OrderByPage = &ast.GqlOrderByAndPage{Span: span(start, end), OrderBy: ob, Page: page}
+		ret.Stop = end
+	}
+	return ret, nil
 }
 
 // parseGqlReturnItem parses a single return item: "*", "expression", or

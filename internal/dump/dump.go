@@ -1379,6 +1379,16 @@ func nodeString(n ast.Node) string {
 		return "GqlReturn"
 	case *ast.GqlSample:
 		return "GqlSample"
+	case *ast.GqlSetOperation:
+		return "GqlSetOperation"
+	case *ast.GqlOrderByAndPage:
+		return "GqlOrderByAndPage"
+	case *ast.GqlPage:
+		return "GqlPage"
+	case *ast.GqlPageOffset:
+		return "GqlPageOffset"
+	case *ast.GqlPageLimit:
+		return "GqlPageLimit"
 	case *ast.GraphPattern:
 		return "GraphPattern"
 	case *ast.GraphPathPattern:
