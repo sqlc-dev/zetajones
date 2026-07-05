@@ -603,6 +603,11 @@ func describeToken(tok token.Token) string {
 		// "@@" separately and reports just that; see MakeSyntaxErrorAtToken
 		// in googlesql/parser/parser_internal.cc.
 		return `"@@"`
+	case token.PARAM:
+		// The lexer folds "@name" into one token, but the reference lexes the
+		// "@" (ATSIGN) separately from the identifier and reports just the
+		// "@"; see MakeSyntaxErrorAtToken in googlesql/parser/parser_internal.cc.
+		return `"@"`
 	}
 	// Wrap the token image in literal double quotes without Go %q escaping, so
 	// that e.g. a lone backslash renders as "\" rather than "\\". This matches
