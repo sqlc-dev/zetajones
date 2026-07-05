@@ -5,9 +5,9 @@ GoogleSQL, the SQL dialect shared by BigQuery, Spanner, and F1, into an
 Abstract Syntax Tree that matches the parse tree produced by the reference
 implementation, [google/googlesql](https://github.com/google/googlesql).
 
-> **Status:** early development. The parser is verified case-by-case against
-> the upstream parser test suite; run `go run ./cmd/next-test` to see current
-> coverage.
+> **Status:** the parser passes the entire upstream parser golden-test suite
+> (all ~4,700 cases from google/googlesql release 2026.01.1), byte-for-byte
+> including error messages and source positions.
 
 ## Installation
 

@@ -14,6 +14,7 @@ package testfile
 
 import (
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -59,12 +60,7 @@ type Case struct {
 
 // HasOption reports whether the case has the given option (exact match).
 func (c *Case) HasOption(name string) bool {
-	for _, opt := range c.Options {
-		if opt == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.Options, name)
 }
 
 // BoolOption resolves a boolean option that may be toggled by "name" and

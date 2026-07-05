@@ -33,7 +33,7 @@ func Tree(n ast.Node, opts Options) string {
 }
 
 func walk(b *strings.Builder, n ast.Node, depth int, opts Options) {
-	for i := 0; i < depth; i++ {
+	for range depth {
 		b.WriteString("  ")
 	}
 	b.WriteString(nodeString(n))
@@ -1475,10 +1475,7 @@ func summaryString(s string, maxCodePoints int) (string, bool) {
 		return string(runes), true
 	}
 
-	minPrefixSuffix := (maxCodePoints - 3) / 2
-	if maxCodePoints/3 < minPrefixSuffix {
-		minPrefixSuffix = maxCodePoints / 3
-	}
+	minPrefixSuffix := min(maxCodePoints/3, (maxCodePoints-3)/2)
 
 	prefix, prefixLen := summaryPrefix(runes, minPrefixSuffix, maxCodePoints)
 	suffix := summarySuffix(runes, minPrefixSuffix, maxCodePoints-prefixLen)

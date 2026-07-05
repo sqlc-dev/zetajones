@@ -35,11 +35,11 @@ type candidate struct {
 // parseKey splits a parse_todo key into its case index and (for alternation
 // expansions) its 1-based expansion index; altIdx is 0 for an ordinary case.
 func parseKey(key string) (caseIdx, altIdx int, ok bool) {
-	if i := strings.Index(key, ".alt_"); i >= 0 {
-		if _, err := fmt.Sscanf(key[:i], "case_%d", &caseIdx); err != nil {
+	if before, after, ok0 := strings.Cut(key, ".alt_"); ok0 {
+		if _, err := fmt.Sscanf(before, "case_%d", &caseIdx); err != nil {
 			return 0, 0, false
 		}
-		if _, err := fmt.Sscanf(key[i+len(".alt_"):], "%d", &altIdx); err != nil {
+		if _, err := fmt.Sscanf(after, "%d", &altIdx); err != nil {
 			return 0, 0, false
 		}
 		return caseIdx, altIdx, true

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -181,17 +182,15 @@ func prettyTruncate(s string, maxBytes int) string {
 	return s[:newWidth] + "..."
 }
 
-// Parse reads SQL from r and parses it as a single statement.
+// Parse reads SQL from r and parses it as a sequence of ";"-separated
+// statements. The context is accepted for interface compatibility and is not
+// currently consulted; parsing is not cancelable.
 func Parse(ctx context.Context, r io.Reader) ([]ast.Statement, error) {
 	sql, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}
-	stmt, err := ParseStatement(string(sql))
-	if err != nil {
-		return nil, err
-	}
-	return []ast.Statement{stmt}, nil
+	return ParseMultiple(string(sql))
 }
 
 // Feature names a GoogleSQL language feature that gates optional syntax; see
@@ -210,7 +209,8 @@ const FeaturePipes Feature = "PIPES"
 // FeatureStatementWithPipeOperators gates attaching pipe-operator suffixes to
 // non-query statements that can produce a table (SHOW, DESCRIBE, EXECUTE
 // IMMEDIATE, RUN, CALL), forming an ASTStatementWithPipeOperators
-// (FEATURE_STATEMENT_WITH_PIPE_OPERATORS).
+// (FEATURE_STATEMENT_WITH_PIPE_OPERATORS). It is not enabled by MAXIMUM (the
+// pipe test files enable it explicitly via language_features).
 const FeatureStatementWithPipeOperators Feature = "STATEMENT_WITH_PIPE_OPERATORS"
 
 // FeatureRunStatement gates the "RUN <string literal>" statement, which runs
@@ -267,11 +267,11 @@ const FeatureAllowSlashPaths Feature = "ALLOW_SLASH_PATHS"
 // supported".
 const FeatureOrderedPrimaryKeys Feature = "ORDERED_PRIMARY_KEYS"
 
-// FeatureTtl gates ROW DELETION POLICY alter actions (FEATURE_TTL); see the
+// FeatureTTL gates ROW DELETION POLICY alter actions (FEATURE_TTL); see the
 // ADD/REPLACE/DROP ROW DELETION POLICY productions in alter_action in
 // googlesql.tm. When off, they report "... ROW DELETION POLICY clause is not
 // supported.".
-const FeatureTtl Feature = "TTL"
+const FeatureTTL Feature = "TTL"
 
 // FeatureRepeat gates the "REPEAT ... UNTIL ... END REPEAT" script statement
 // (FEATURE_REPEAT); see repeat_statement in googlesql.tm. When off, it reports
@@ -297,10 +297,11 @@ const FeatureEnableAlterArrayOptions Feature = "ENABLE_ALTER_ARRAY_OPTIONS"
 // spanner_* productions in googlesql.tm. It is not enabled by MAXIMUM.
 const FeatureSpannerLegacyDDL Feature = "SPANNER_LEGACY_DDL"
 
-// FeatureSqlGraph gates GoogleSQL graph queries: the GRAPH statement, the
+// FeatureSQLGraph gates GoogleSQL graph queries: the GRAPH statement, the
 // GRAPH_TABLE(...) table expression, and graph pattern syntax
-// (FEATURE_SQL_GRAPH).
-const FeatureSqlGraph Feature = "SQL_GRAPH"
+// (FEATURE_SQL_GRAPH). It is not enabled by MAXIMUM (the graph test files
+// enable it explicitly via language_features).
+const FeatureSQLGraph Feature = "SQL_GRAPH"
 
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
@@ -319,7 +320,7 @@ var featureInMaximum = map[Feature]bool{
 	FeatureAllowDashesInTableName:               true,
 	FeatureAllowSlashPaths:                      true,
 	FeatureOrderedPrimaryKeys:                   false, // in_development
-	FeatureTtl:                                  true,
+	FeatureTTL:                                  true,
 	FeatureRepeat:                               true,
 	FeatureForIn:                                true,
 	FeatureEnableAlterArrayOptions:              true,
@@ -338,7 +339,7 @@ type FeatureSet struct {
 // -NAME add or remove a feature relative to that.
 func ParseFeatureSet(spec string) *FeatureSet {
 	fs := &FeatureSet{overrides: map[Feature]bool{}}
-	for _, part := range strings.Split(spec, ",") {
+	for part := range strings.SplitSeq(spec, ",") {
 		part = strings.TrimSpace(part)
 		switch {
 		case part == "":
@@ -402,14 +403,13 @@ func stringSet(items []string) map[string]bool {
 }
 
 // ParseStatement parses a single SQL statement, allowing an optional
-// trailing semicolon. All language features are enabled.
-func ParseStatement(sql string) (ast.Statement, error) {
-	return ParseStatementWithOptions(sql, Options{})
-}
 
-// ParseStatementWithOptions parses a single SQL statement, allowing an
-// optional trailing semicolon.
-func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) {
+// newParser lexes sql and builds a parser over the token stream, wrapping any
+// lexer error as a parser Error. eofImage, when non-empty, renames the
+// terminating EOF token so syntax errors report the mode-specific
+// "end of ..." wording; see GetParserModeName in
+// googlesql/parser/parser_internal.cc.
+func newParser(sql string, opts Options, eofImage string) (*parser, error) {
 	toks, err := lexer.Lex(sql)
 	if err != nil {
 		var lerr *lexer.Error
@@ -418,7 +418,26 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		}
 		return nil, err
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
+	if eofImage != "" {
+		if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
+			toks[n-1].Image = eofImage
+		}
+	}
+	return &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}, nil
+}
+
+// trailing semicolon. All language features are enabled.
+func ParseStatement(sql string) (ast.Statement, error) {
+	return ParseStatementWithOptions(sql, Options{})
+}
+
+// ParseStatementWithOptions parses a single SQL statement, allowing an
+// optional trailing semicolon.
+func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) {
+	p, err := newParser(sql, opts, "")
+	if err != nil {
+		return nil, err
+	}
 	stmt, err := p.parseStatement()
 	if err != nil {
 		return nil, err
@@ -433,17 +452,19 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		if isKeyword(p.peek(), "OVER") {
 			// When the OVER keyword is used in the wrong place, the
 			// reference parser tells the user exactly where it can be used;
-			// see MakeSyntaxError in parser_internal.cc.
-			return nil, p.errorf(p.peek().Pos, "Syntax error: OVER keyword must follow a function call")
-		}
-		if isKeyword(p.peek(), "OVER") {
-			// See the KW_OVER special case in
+			// see the KW_OVER special case in MakeSyntaxError in
 			// googlesql/parser/parser_internal.cc.
 			return nil, p.errorf(p.peek().Pos, "Syntax error: OVER keyword must follow a function call")
 		}
 		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
 	}
 	return stmt, nil
+}
+
+// ParseMultiple parses a sequence of statements separated by ";" with default
+// options.
+func ParseMultiple(sql string) ([]ast.Statement, error) {
+	return ParseMultipleWithOptions(sql, Options{})
 }
 
 // ParseMultipleWithOptions parses a sequence of statements separated by ";",
@@ -453,15 +474,10 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 // TestMulti in googlesql/parser/run_parser_test.cc). Parsing stops at the first
 // error, returning the statements parsed so far together with that error.
 func ParseMultipleWithOptions(sql string, opts Options) ([]ast.Statement, error) {
-	toks, err := lexer.Lex(sql)
+	p, err := newParser(sql, opts, "")
 	if err != nil {
-		var lerr *lexer.Error
-		if errors.As(err, &lerr) {
-			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
-		}
 		return nil, err
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	var stmts []ast.Statement
 	for {
 		if p.peek().Kind == token.EOF {
@@ -488,32 +504,20 @@ func ParseMultipleWithOptions(sql string, opts Options) ([]ast.Statement, error)
 // with an optional trailing ";", wrapped in a Script node. It corresponds to
 // the reference driver's "mode=script" test mode; see the script rule in
 // googlesql.tm.
-func ParseScript(sql string) (ast.Node, error) {
+func ParseScript(sql string) (*ast.Script, error) {
 	return ParseScriptWithOptions(sql, Options{})
 }
 
 // ParseScriptWithOptions parses a whole script; see ParseScript.
-func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
-	toks, err := lexer.Lex(sql)
+func ParseScriptWithOptions(sql string, opts Options) (*ast.Script, error) {
+	p, err := newParser(sql, opts, "end of script")
 	if err != nil {
-		var lerr *lexer.Error
-		if errors.As(err, &lerr) {
-			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
-		}
 		return nil, err
-	}
-	// The reference tokenizer terminates a script with a sentinel whose
-	// syntax-error wording is "end of script"; stash that in the EOF token so
-	// describeToken reports it. See GetParserModeName in
-	// googlesql/parser/parser_internal.cc.
-	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
-		toks[n-1].Image = "end of script"
 	}
 	// Script mode force-emits SCRIPT_LABEL for "<name> : <block-keyword>" at a
 	// statement-start position; see LookaheadTransformer::IsCurrentTokenScriptLabel
 	// in googlesql/parser/lookahead_transformer.cc.
-	markScriptLabels(toks)
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
+	markScriptLabels(p.toks)
 	// An empty script resolves to a Script wrapping an empty statement list,
 	// located at the end-of-input position (which follows any trailing comment).
 	if p.peek().Kind == token.EOF {
@@ -663,21 +667,10 @@ func ParseType(sql string) (ast.Node, error) {
 
 // ParseTypeWithOptions parses a single standalone type; see ParseType.
 func ParseTypeWithOptions(sql string, opts Options) (ast.Node, error) {
-	toks, err := lexer.Lex(sql)
+	p, err := newParser(sql, opts, "end of type")
 	if err != nil {
-		var lerr *lexer.Error
-		if errors.As(err, &lerr) {
-			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
-		}
 		return nil, err
 	}
-	// The reference tokenizer terminates a standalone type with a sentinel
-	// whose syntax-error wording is "end of type"; stash that in the EOF
-	// token so describeToken reports it.
-	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
-		toks[n-1].Image = "end of type"
-	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	typ, err := p.parseType()
 	if err != nil {
 		return nil, err
@@ -701,21 +694,10 @@ func ParseExpression(sql string) (ast.Node, error) {
 // ParseExpressionWithOptions parses a single standalone expression; see
 // ParseExpression.
 func ParseExpressionWithOptions(sql string, opts Options) (ast.Node, error) {
-	toks, err := lexer.Lex(sql)
+	p, err := newParser(sql, opts, "end of expression")
 	if err != nil {
-		var lerr *lexer.Error
-		if errors.As(err, &lerr) {
-			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
-		}
 		return nil, err
 	}
-	// The reference tokenizer terminates a standalone expression with a
-	// sentinel whose syntax-error wording is "end of expression"; stash that
-	// in the EOF token so describeToken reports it.
-	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
-		toks[n-1].Image = "end of expression"
-	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	expr, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -7651,7 +7633,7 @@ func (p *parser) parseAddTtlAction(addTok token.Token) (ast.Node, error) {
 	if _, err := p.expectKeyword("POLICY"); err != nil {
 		return nil, err
 	}
-	if !p.features.Enabled(FeatureTtl) {
+	if !p.features.Enabled(FeatureTTL) {
 		return nil, p.errorf(rowTok.Pos, "ADD ROW DELETION POLICY clause is not supported.")
 	}
 	ifNotExists, err := p.parseOptIfNotExists()
@@ -7686,7 +7668,7 @@ func (p *parser) parseReplaceAlterAction() (ast.Node, error) {
 	if _, err := p.expectKeyword("POLICY"); err != nil {
 		return nil, err
 	}
-	if !p.features.Enabled(FeatureTtl) {
+	if !p.features.Enabled(FeatureTTL) {
 		return nil, p.errorf(rowTok.Pos, "REPLACE ROW DELETION POLICY clause is not supported.")
 	}
 	ifExists := p.tryParseIfExists()
@@ -7744,7 +7726,7 @@ func (p *parser) parseDropAlterAction() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !p.features.Enabled(FeatureTtl) {
+		if !p.features.Enabled(FeatureTTL) {
 			return nil, p.errorf(rowTok.Pos, "DROP ROW DELETION POLICY clause is not supported.")
 		}
 		ifExists := p.tryParseIfExists()
@@ -8226,12 +8208,7 @@ func hasLockMode(n ast.Node) bool {
 	if _, ok := n.(*ast.LockMode); ok {
 		return true
 	}
-	for _, c := range n.Children() {
-		if hasLockMode(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(n.Children(), hasLockMode)
 }
 
 // parseQueryAfterAs parses the query in a DDL/EXPORT "AS" position, which
@@ -11962,7 +11939,7 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			}
 			in.Query, in.List = query, list
 			end = rhsEnd
-		case p.peek().Kind == token.LBRACE && p.features.Enabled(FeatureSqlGraph):
+		case p.peek().Kind == token.LBRACE && p.features.Enabled(FeatureSQLGraph):
 			// "X IN { graph subquery }"; see the in_operator
 			// braced_graph_subquery alternative of
 			// expression_higher_prec_than_and in googlesql.tm.
@@ -12953,7 +12930,7 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// rule in googlesql.tm); otherwise it falls through to the
 			// identifier cases below.
 			return p.parseReplaceFieldsExpression()
-		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACE && p.features.Enabled(FeatureSqlGraph):
+		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACE && p.features.Enabled(FeatureSQLGraph):
 			// "ARRAY { graph subquery }"; see the ARRAY braced_graph_subquery
 			// alternative of expression_subquery_with_keyword in googlesql.tm.
 			p.advance() // ARRAY
@@ -12977,7 +12954,7 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// googlesql.tm.
 			p.advance() // ARRAY
 			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "<" but got %s`, describeToken(p.peek()))
-		case isKeyword(tok, "VALUE") && p.features.Enabled(FeatureSqlGraph) &&
+		case isKeyword(tok, "VALUE") && p.features.Enabled(FeatureSQLGraph) &&
 			(p.peekAt(1).Kind == token.LBRACE || p.peekAt(1).Kind == token.ATSIGN):
 			// "VALUE hint? { graph subquery }"; see the VALUE
 			// braced_graph_subquery alternative of
@@ -12992,7 +12969,7 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			}
 			return p.parseBracedGraphExpressionSubquery(tok.Pos, "VALUE", hint)
 		case isKeyword(tok, "EXISTS") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.ATSIGN ||
-			(p.peekAt(1).Kind == token.LBRACE && p.features.Enabled(FeatureSqlGraph))):
+			(p.peekAt(1).Kind == token.LBRACE && p.features.Enabled(FeatureSQLGraph))):
 			// EXISTS takes an optional hint before the subquery; see
 			// expression_subquery_with_keyword in googlesql.tm. With the graph
 			// feature the subquery may be a braced graph subquery.
@@ -13001,7 +12978,7 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			if err != nil {
 				return nil, err
 			}
-			if p.features.Enabled(FeatureSqlGraph) && p.peek().Kind == token.LBRACE {
+			if p.features.Enabled(FeatureSQLGraph) && p.peek().Kind == token.LBRACE {
 				return p.parseExistsGraphSubquery(tok.Pos, hint)
 			}
 			node, err := p.parseModifiedSubquery(tok.Pos, "EXISTS")

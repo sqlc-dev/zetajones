@@ -1,4 +1,7 @@
 // Package token defines the lexical tokens of GoogleSQL.
+//
+// The token kinds mirror the lexer rules of github.com/google/googlesql
+// (googlesql/parser/googlesql.tm). GoogleSQL is Apache 2.0.
 package token
 
 // Kind identifies the type of a lexical token.

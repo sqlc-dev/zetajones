@@ -594,28 +594,10 @@ func (p *parser) parseGqlWith() (*ast.GqlWith, error) {
 	if err != nil {
 		return nil, err
 	}
-	first, err := p.parseGqlReturnItem()
+	sel, err := p.parseGqlSelectCore(hint, distinct, setQuantStart)
 	if err != nil {
 		return nil, err
 	}
-	cols := []*ast.SelectColumn{first}
-	for p.peek().Kind == token.COMMA {
-		p.advance() // ,
-		col, err := p.parseGqlReturnItem()
-		if err != nil {
-			return nil, err
-		}
-		cols = append(cols, col)
-	}
-	list := &ast.SelectList{Span: span(cols[0].Pos(), cols[len(cols)-1].End()), Columns: cols}
-	var groupBy *ast.GroupBy
-	if isKeyword(p.peek(), "GROUP") {
-		groupBy, err = p.parseGroupBy(groupByRegular)
-		if err != nil {
-			return nil, err
-		}
-	}
-	sel := p.buildGqlSelect(list, hint, distinct, setQuantStart, groupBy)
 	return &ast.GqlWith{Span: span(withTok.Pos, sel.End()), Select: sel}, nil
 }
 
@@ -957,11 +939,6 @@ func (p *parser) parseExistsGraphSubquery(existsPos int, hint *ast.Hint) (ast.No
 	return &ast.ExpressionSubquery{Span: loc, Modifier: "EXISTS", Hint: hint, Query: q}, nil
 }
 
-// parseGqlReturn parses "RETURN <return_item_list> [ORDER BY ...] [OFFSET ...]
-// [LIMIT ...]"; see graph_return_operator in googlesql.tm. It builds a Select
-// holding the item list; a trailing ORDER BY / OFFSET / LIMIT (offset before
-// limit, at most one each) is folded into a single GqlOrderByAndPage. Advanced
-// clauses (DISTINCT, GROUP BY) are not yet supported.
 // parseGqlSetQuantifier consumes an optional leading ALL or DISTINCT set
 // quantifier (opt_all_or_distinct in googlesql.tm). It returns whether DISTINCT
 // was seen and the start position of the consumed keyword (-1 if none).
@@ -973,6 +950,35 @@ func (p *parser) parseGqlSetQuantifier() (distinct bool, start int) {
 		return false, p.advance().Pos
 	}
 	return false, -1
+}
+
+// parseGqlSelectCore parses the comma-separated return-item list and optional
+// GROUP BY shared by the RETURN and WITH graph operators, assembling the
+// Select via buildGqlSelect; see graph_return_operator / graph_with_operator
+// in googlesql.tm.
+func (p *parser) parseGqlSelectCore(hint *ast.Hint, distinct bool, setQuantStart int) (*ast.Select, error) {
+	first, err := p.parseGqlReturnItem()
+	if err != nil {
+		return nil, err
+	}
+	cols := []*ast.SelectColumn{first}
+	for p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		col, err := p.parseGqlReturnItem()
+		if err != nil {
+			return nil, err
+		}
+		cols = append(cols, col)
+	}
+	list := &ast.SelectList{Span: span(cols[0].Pos(), cols[len(cols)-1].End()), Columns: cols}
+	var groupBy *ast.GroupBy
+	if isKeyword(p.peek(), "GROUP") {
+		groupBy, err = p.parseGroupBy(groupByRegular)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return p.buildGqlSelect(list, hint, distinct, setQuantStart, groupBy), nil
 }
 
 // buildGqlSelect assembles the Select node shared by the RETURN and WITH graph
@@ -996,6 +1002,12 @@ func (p *parser) buildGqlSelect(list *ast.SelectList, hint *ast.Hint, distinct b
 	return &ast.Select{Span: span(start, end), Hint: hint, Distinct: distinct, SelectList: list, GroupBy: groupBy}
 }
 
+// parseGqlReturn parses "RETURN [ALL|DISTINCT] [hint] <return_item_list>
+// [GROUP BY ...] [ORDER BY ...] [OFFSET ...] [LIMIT ...]"; see
+// graph_return_operator in googlesql.tm. It builds a Select holding the item
+// list, set quantifier, hint, and GROUP BY; a trailing ORDER BY / OFFSET /
+// LIMIT (offset before limit, at most one each) is folded into a single
+// GqlOrderByAndPage.
 func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
 	returnTok := p.advance() // RETURN
 	hint, err := p.parseOptionalHint()
@@ -1003,28 +1015,10 @@ func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
 		return nil, err
 	}
 	distinct, setQuantStart := p.parseGqlSetQuantifier()
-	first, err := p.parseGqlReturnItem()
+	sel, err := p.parseGqlSelectCore(hint, distinct, setQuantStart)
 	if err != nil {
 		return nil, err
 	}
-	cols := []*ast.SelectColumn{first}
-	for p.peek().Kind == token.COMMA {
-		p.advance() // ,
-		col, err := p.parseGqlReturnItem()
-		if err != nil {
-			return nil, err
-		}
-		cols = append(cols, col)
-	}
-	list := &ast.SelectList{Span: span(cols[0].Pos(), cols[len(cols)-1].End()), Columns: cols}
-	var groupBy *ast.GroupBy
-	if isKeyword(p.peek(), "GROUP") {
-		groupBy, err = p.parseGroupBy(groupByRegular)
-		if err != nil {
-			return nil, err
-		}
-	}
-	sel := p.buildGqlSelect(list, hint, distinct, setQuantStart, groupBy)
 
 	// Location where an absent ORDER BY would sit (end of the item list or the
 	// GROUP BY clause), used as the start of a page-only GqlOrderByAndPage; see
@@ -1787,9 +1781,8 @@ func (p *parser) parseGraphBracketedFiller(leftOnly bool, closers ...token.Kind)
 }
 
 // parseGraphElementPatternFiller parses the optional variable name, label
-// filter, and WHERE clause inside a node or edge pattern; see
-// graph_element_pattern_filler in googlesql.tm. Property specifications, cost,
-// and hints are not yet supported.
+// filter, hint, property specification, cost clause, and WHERE clause inside a
+// node or edge pattern; see graph_element_pattern_filler in googlesql.tm.
 func (p *parser) parseGraphElementPatternFiller() (*ast.GraphElementPatternFiller, error) {
 	startPos := p.peek().Pos
 	var hint *ast.Hint

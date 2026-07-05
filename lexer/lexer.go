@@ -245,10 +245,7 @@ func (l *lexer) next() (token.Token, error) {
 		// real token or trailing comment, but not past trailing whitespace (see
 		// the EOI rule in googlesql/parser/googlesql.tm). A trailing line comment
 		// includes its terminating line break, so its end is on the next line.
-		pos := l.prev.End
-		if l.lastCommentEnd > pos {
-			pos = l.lastCommentEnd
-		}
+		pos := max(l.lastCommentEnd, l.prev.End)
 		return token.Token{Kind: token.EOF, Pos: pos, End: pos}, nil
 	}
 	c := l.sql[l.pos]
@@ -367,15 +364,7 @@ func (l *lexer) next() (token.Token, error) {
 		return l.emit(token.PIPE_INPUT, start), nil
 	}
 
-	single := map[byte]token.Kind{
-		'+': token.PLUS, '-': token.MINUS, '*': token.STAR, '/': token.SLASH,
-		'%': token.PERCENT, '=': token.EQ, '<': token.LT, '>': token.GT,
-		'&': token.AMP, '|': token.PIPE, '^': token.CARET, '~': token.TILDE,
-		'(': token.LPAREN, ')': token.RPAREN, '[': token.LBRACKET, ']': token.RBRACKET,
-		'{': token.LBRACE, '}': token.RBRACE, ',': token.COMMA, '.': token.DOT,
-		';': token.SEMICOLON, ':': token.COLON, '?': token.QUESTION,
-	}
-	if kind, ok := single[c]; ok {
+	if kind := singleCharKind[c]; kind != token.ILLEGAL {
 		l.pos++
 		return l.emit(kind, start), nil
 	}
@@ -395,6 +384,17 @@ func (l *lexer) next() (token.Token, error) {
 		return l.emit(token.EXCL, start), nil
 	}
 	return token.Token{}, l.errorf(start, `Syntax error: Illegal input character "%s"`, cEscapeByte(c))
+}
+
+// singleCharKind maps a single-character token byte to its kind; ILLEGAL (the
+// zero value) marks bytes that do not form a single-character token.
+var singleCharKind = [256]token.Kind{
+	'+': token.PLUS, '-': token.MINUS, '*': token.STAR, '/': token.SLASH,
+	'%': token.PERCENT, '=': token.EQ, '<': token.LT, '>': token.GT,
+	'&': token.AMP, '|': token.PIPE, '^': token.CARET, '~': token.TILDE,
+	'(': token.LPAREN, ')': token.RPAREN, '[': token.LBRACKET, ']': token.RBRACKET,
+	'{': token.LBRACE, '}': token.RBRACE, ',': token.COMMA, '.': token.DOT,
+	';': token.SEMICOLON, ':': token.COLON, '?': token.QUESTION,
 }
 
 func (l *lexer) emit(kind token.Kind, start int) token.Token {
@@ -572,7 +572,7 @@ func (l *lexer) validateEscapes(contentStart, contentEnd int, raw, bytes bool) e
 				return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\u must be followed by 4 hex digits but saw: \\%s", s[hexStart:end])
 			}
 			cp := 0
-			for i := 0; i < 4; i++ {
+			for range 4 {
 				if !isHexDigit(s[p+1]) {
 					return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\u must be followed by 4 hex digits but saw: \\%s", s[hexStart:hexStart+5])
 				}
@@ -591,7 +591,7 @@ func (l *lexer) validateEscapes(contentStart, contentEnd int, raw, bytes bool) e
 				return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\U must be followed by 8 hex digits but saw: \\%s", s[hexStart:end])
 			}
 			cp := 0
-			for i := 0; i < 8; i++ {
+			for range 8 {
 				if !isHexDigit(s[p+1]) {
 					return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\U must be followed by 8 hex digits but saw: \\%s", s[hexStart:hexStart+9])
 				}

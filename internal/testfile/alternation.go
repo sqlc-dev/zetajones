@@ -1,5 +1,7 @@
 package testfile
 
+import "slices"
+
 import "strings"
 
 // Alternation-group ({{a|b|c}}) expansion.
@@ -99,13 +101,7 @@ func expandAlternations(c *Case, inheritedDefaults, optionLines []string, bodyPa
 	// Special case: when every expansion produces identical output, the driver
 	// omits the "ALTERNATION GROUP" headers entirely and prints the shared
 	// output once (like a normal case). Detect that and share it across all.
-	hasHeader := false
-	for _, p := range bodyParts {
-		if isAltHeader(p) {
-			hasHeader = true
-			break
-		}
-	}
+	hasHeader := slices.ContainsFunc(bodyParts, isAltHeader)
 	if !hasHeader {
 		if len(bodyParts) == 0 {
 			c.AltUnexpandable = true
@@ -200,7 +196,7 @@ func substitute(literals []string, groups [][]string, idx []int) string {
 // expansion. Blank lines are ignored.
 func parseChildOptions(optText string) []string {
 	var out []string
-	for _, line := range strings.Split(optText, "\n") {
+	for line := range strings.SplitSeq(optText, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

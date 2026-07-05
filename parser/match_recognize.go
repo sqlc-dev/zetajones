@@ -113,7 +113,7 @@ func attachPostfixOperator(node ast.Node, clause ast.Node) ast.Node {
 func (p *parser) parseSampleClause(graphMode bool) (*ast.SampleClause, error) {
 	tsTok := p.advance() // TABLESAMPLE
 	clause := &ast.SampleClause{Span: span(tsTok.Pos, 0)}
-	method, err := p.parseAliasIdentifier()
+	method, err := p.parseIdentifier()
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +388,7 @@ func (p *parser) parseSelectListWithRequiredAliases() (*ast.SelectList, error) {
 		if err != nil {
 			return nil, err
 		}
-		ident, err := p.parseAliasIdentifier()
+		ident, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
 		}
@@ -410,7 +410,7 @@ func (p *parser) parseSelectListWithRequiredAliases() (*ast.SelectList, error) {
 func (p *parser) parseWithExpressionVariableList() (*ast.SelectList, error) {
 	list := &ast.SelectList{Span: span(p.peek().Pos, 0)}
 	for {
-		ident, err := p.parseAliasIdentifier()
+		ident, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
 		}
@@ -432,17 +432,6 @@ func (p *parser) parseWithExpressionVariableList() (*ast.SelectList, error) {
 		p.advance()
 	}
 	return list, nil
-}
-
-// parseAliasIdentifier consumes an identifier token (an unreserved keyword
-// or a quoted identifier), reporting the reference parser's generic
-// "Unexpected" error otherwise.
-func (p *parser) parseAliasIdentifier() (*ast.Identifier, error) {
-	tok := p.peek()
-	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || p.isReserved(tok)) {
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
-	}
-	return p.parseIdentifierToken(p.advance()), nil
 }
 
 // parseRowPatternExpr parses a row pattern alternation over "|" and "||";
