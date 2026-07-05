@@ -59,6 +59,8 @@ func nodeString(n ast.Node) string {
 		return "QueryStatement"
 	case *ast.HintedStatement:
 		return "HintedStatement"
+	case *ast.ExplainStatement:
+		return "ExplainStatement"
 	case *ast.DeleteStatement:
 		return "DeleteStatement"
 	case *ast.InsertStatement:
@@ -594,6 +596,10 @@ func nodeString(n ast.Node) string {
 		return "NewConstructorArg"
 	case *ast.BracedNewConstructor:
 		return "BracedNewConstructor"
+	case *ast.UpdateConstructor:
+		return "UpdateConstructor"
+	case *ast.WithExpression:
+		return "WithExpression"
 	case *ast.StructBracedConstructor:
 		return "StructBracedConstructor"
 	case *ast.BracedConstructor:

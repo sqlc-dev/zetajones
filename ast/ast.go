@@ -580,6 +580,18 @@ func (n *HintedStatement) Children() []Node {
 	return children(n.Hint, n.Statement)
 }
 
+// ExplainStatement is "EXPLAIN <statement>"; see ASTExplainStatement in
+// googlesql/parser/parse_tree.h and explain_statement in googlesql.tm.
+type ExplainStatement struct {
+	Span
+	Statement Statement `json:"statement"`
+}
+
+func (n *ExplainStatement) statementNode() {}
+func (n *ExplainStatement) Children() []Node {
+	return children(n.Statement)
+}
+
 // DeleteStatement is a DELETE statement; see ASTDeleteStatement in
 // googlesql/parser/parse_tree.h.
 type DeleteStatement struct {
@@ -2419,6 +2431,34 @@ type BracedNewConstructor struct {
 
 func (n *BracedNewConstructor) Children() []Node {
 	return children(n.TypeName, n.Constructor)
+}
+
+// UpdateConstructor is "function_call { ... }", a proto UPDATE constructor
+// consisting of a function call followed by a braced constructor; see
+// ASTUpdateConstructor in parse_tree.h and the function_call_expression
+// braced_constructor rule in googlesql.tm.
+type UpdateConstructor struct {
+	Span
+	Function    Node               `json:"function"`
+	Constructor *BracedConstructor `json:"constructor"`
+}
+
+func (n *UpdateConstructor) Children() []Node {
+	return children(n.Function, n.Constructor)
+}
+
+// WithExpression is "WITH(var AS expr [, ...], result_expr)"; see
+// ASTWithExpression in parse_tree.h and with_expression in googlesql.tm. The
+// variable definitions are represented as a SelectList of SelectColumns
+// (value AS alias) and Expr is the trailing result expression.
+type WithExpression struct {
+	Span
+	Variables *SelectList `json:"variables"`
+	Expr      Node        `json:"expr"`
+}
+
+func (n *WithExpression) Children() []Node {
+	return children(n.Variables, n.Expr)
 }
 
 // BracedConstructor is a braced proto/struct constructor body

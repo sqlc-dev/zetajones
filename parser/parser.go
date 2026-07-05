@@ -1014,6 +1014,16 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseAnalyzeStatement()
 	case isKeyword(tok, "ASSERT"):
 		return p.parseAssertStatement()
+	case isKeyword(tok, "EXPLAIN"):
+		// "EXPLAIN <statement>" wraps another (non-script) SQL statement; see
+		// explain_statement in googlesql.tm. The inner parseStatement rejects
+		// script-only statements (e.g. IF) with an "Unexpected" error.
+		explainTok := p.advance() // EXPLAIN
+		inner, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ExplainStatement{Span: span(explainTok.Pos, inner.End()), Statement: inner}, nil
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 }
@@ -7863,9 +7873,19 @@ func (p *parser) parseRecursionDepthModifier() (*ast.RecursionDepthModifier, err
 // literal / parameter into an IntOrUnbounded node; see
 // possibly_unbounded_int_literal_or_parameter in googlesql.tm.
 func (p *parser) parsePossiblyUnboundedIntOrParameter() (*ast.IntOrUnbounded, error) {
-	if tok := p.peek(); isKeyword(tok, "UNBOUNDED") {
+	tok := p.peek()
+	if isKeyword(tok, "UNBOUNDED") {
 		p.advance()
 		return &ast.IntOrUnbounded{Span: span(tok.Pos, tok.End)}, nil
+	}
+	// In this context the reference state expects UNBOUNDED, an integer
+	// literal, a parameter, or a system variable; any other token yields a
+	// plain "Unexpected <token>" error (there is no single expected keyword to
+	// name). See possibly_unbounded_int_literal_or_parameter in googlesql.tm.
+	switch tok.Kind {
+	case token.INT, token.PARAM, token.QUESTION, token.SYSTEM_VARIABLE:
+	default:
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
 	val, err := p.parseIntLiteralOrParameter()
 	if err != nil {
@@ -9374,8 +9394,11 @@ func (p *parser) parseSelectClause() (*ast.Select, error) {
 		sel.Stop = hint.End()
 	}
 
-	// Optional WITH modifier (anonymization / differential privacy).
-	if isKeyword(p.peek(), "WITH") {
+	// Optional WITH modifier (anonymization / differential privacy). A WITH
+	// immediately introducing a WITH expression ("WITH ( var AS ...") is not a
+	// modifier; the reference lexer distinguishes it via
+	// KW_WITH_STARTING_WITH_EXPRESSION (see lookahead_transformer.cc).
+	if isKeyword(p.peek(), "WITH") && !p.startsWithExpression() {
 		wm, err := p.parseWithModifier()
 		if err != nil {
 			return nil, err
@@ -9575,9 +9598,11 @@ func (p *parser) parseSelectList() (*ast.SelectList, error) {
 	for p.peek().Kind == token.COMMA {
 		comma := p.advance()
 		next := p.peek()
-		if next.Kind != token.STAR && !startsExpression(next) {
+		if next.Kind != token.STAR && !startsExpression(next) && !p.startsWithExpression() {
 			// Trailing comma; it is included in the list's location. See
-			// select_list in googlesql.tm.
+			// select_list in googlesql.tm. A WITH that introduces a WITH
+			// expression ("WITH ( var AS ...") starts another column even
+			// though WITH is a reserved keyword.
 			list.Stop = comma.End
 			break
 		}
@@ -11143,9 +11168,14 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		if p.peek().Kind == token.EOF {
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected end of statement")
 		}
-		if _, err := p.expectKeyword("AND"); err != nil {
-			return nil, err
+		// After the fully-reduced middle operand the grammar state accepts AND
+		// plus every operator that could extend the operand (all already
+		// consumed by parseNot); a token that fits none of them is a generic
+		// "Unexpected <token>" conflict rather than a bare missing-AND error.
+		if !isKeyword(p.peek(), "AND") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 		}
+		p.advance() // AND
 		high, err := p.parseBitwiseOr()
 		if err != nil {
 			return nil, err
@@ -11189,7 +11219,11 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 		}
 		in.Span = span(p.extStart(lhs), end)
-		return p.finishComparison(in)
+		wrapped, err := p.applyPostfix(in)
+		if err != nil {
+			return nil, err
+		}
+		return p.finishComparison(wrapped)
 	}
 
 	// [NOT] LIKE, either the plain binary operator or the quantified
@@ -11289,11 +11323,15 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			if isNot {
 				op = "IS NOT UNKNOWN"
 			}
-			return p.finishComparison(&ast.UnaryExpression{
+			wrapped, err := p.applyPostfix(&ast.UnaryExpression{
 				Span:    span(p.extStart(lhs), tok.End),
 				Op:      op,
 				Operand: lhs,
 			})
+			if err != nil {
+				return nil, err
+			}
+			return p.finishComparison(wrapped)
 		case isKeyword(tok, "NULL"):
 			p.advance()
 			rhs = &ast.NullLiteral{Span: span(tok.Pos, tok.End), Image: tok.Image}
@@ -11303,13 +11341,17 @@ func (p *parser) parseComparison() (ast.Node, error) {
 		default:
 			return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword FALSE or keyword NULL or keyword TRUE or keyword UNKNOWN but got %s", describeToken(tok))
 		}
-		return p.finishComparison(&ast.BinaryExpression{
+		wrapped, err := p.applyPostfix(&ast.BinaryExpression{
 			Span:  span(p.extStart(lhs), p.extEnd(rhs)),
 			Op:    "IS",
 			IsNot: isNot,
 			Left:  lhs,
 			Right: rhs,
 		})
+		if err != nil {
+			return nil, err
+		}
+		return p.finishComparison(wrapped)
 	}
 
 	// Simple comparison operators.
@@ -11748,6 +11790,17 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return p.applyPostfix(expr)
+}
+
+// applyPostfix consumes any trailing postfix operators (".identifier",
+// ".(path)" generalized field access, "[expression]" array element access, and
+// chained function calls) that follow an already-parsed expression. These
+// operators bind at PRIMARY_PRECEDENCE in the reference (see the
+// expression_higher_prec_than_and rules in googlesql.tm), so they may attach to
+// the result of a "closed" higher-level construct such as IS NULL or IN(...)
+// as well as to a primary expression.
+func (p *parser) applyPostfix(expr ast.Node) (ast.Node, error) {
 	for {
 		switch p.peek().Kind {
 		case token.DOT:
@@ -11808,6 +11861,14 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 			// function_call_expression_base in googlesql.tm).
 			switch e := expr.(type) {
 			case *ast.PathExpression:
+				// A function call operator applies only to an *unparenthesized*
+				// path expression; a parenthesized path such as "(foo)(...)" is
+				// rejected here. An unparenthesized path followed by "(" is
+				// already consumed as a call at the primary level. See
+				// function_call_expression_base in googlesql.tm.
+				if _, parenthesized := p.extents[expr]; parenthesized {
+					return nil, p.errorf(p.peek().Pos, "Syntax error: Function call cannot be applied to this expression. Function calls require a path, e.g. a.b.c()")
+				}
 				return expr, nil
 			case *ast.DotIdentifier:
 				// "base.method(...)" is a chained function call, unless the
@@ -12133,6 +12194,12 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			}
 			node.(*ast.ExpressionSubquery).Hint = hint
 			return node, nil
+		case p.startsWithExpression():
+			// "WITH ( var AS expr [, ...], final_expr )" is a WITH expression;
+			// the reference lexer retokenizes the leading WITH as
+			// KW_WITH_STARTING_WITH_EXPRESSION on this same lookahead. See
+			// with_expression in googlesql.tm.
+			return p.parseWithExpression()
 		case isKeyword(tok, "NEW"):
 			return p.parseNewConstructor()
 		case isKeyword(tok, "STRUCT"):
@@ -12364,6 +12431,64 @@ func (p *parser) parseStructConstructorArg() (*ast.StructConstructorArg, error) 
 	return arg, nil
 }
 
+// startsWithExpression reports whether the next tokens begin a WITH expression
+// "WITH ( identifier AS ...". The reference lexer retokenizes such a WITH as
+// KW_WITH_STARTING_WITH_EXPRESSION; see the KW_WITH case in
+// lookahead_transformer.cc and with_expression in googlesql.tm.
+func (p *parser) startsWithExpression() bool {
+	return isKeyword(p.peek(), "WITH") && p.peekAt(1).Kind == token.LPAREN &&
+		(p.peekAt(2).Kind == token.IDENT || p.peekAt(2).Kind == token.QUOTED_IDENT) &&
+		!isReserved(p.peekAt(2)) && isKeyword(p.peekAt(3), "AS")
+}
+
+// parseWithExpression parses "WITH ( var AS expr [, ...], result_expr )" with
+// the WITH keyword as the next token; see with_expression in googlesql.tm. Each
+// variable definition becomes a SelectColumn (value expression with an alias
+// spanning "name AS"), and the trailing expression becomes the result.
+func (p *parser) parseWithExpression() (ast.Node, error) {
+	withTok := p.advance() // WITH
+	p.advance()            // (
+	list := &ast.SelectList{}
+	for {
+		nameTok := p.advance() // identifier (guaranteed by caller / loop check)
+		ident := p.parseIdentifierToken(nameTok)
+		asTok, err := p.expectKeyword("AS")
+		if err != nil {
+			return nil, err
+		}
+		value, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		alias := &ast.Alias{Span: span(ident.Pos(), asTok.End), Identifier: ident}
+		col := &ast.SelectColumn{Span: span(ident.Pos(), p.extEnd(value)), Expr: value, Alias: alias}
+		list.Columns = append(list.Columns, col)
+		if _, err := p.expect(token.COMMA, `","`); err != nil {
+			return nil, err
+		}
+		// Another "name AS ..." starts another variable; otherwise what follows
+		// the comma is the trailing result expression.
+		if !((p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
+			!isReserved(p.peek()) && isKeyword(p.peekAt(1), "AS")) {
+			break
+		}
+	}
+	list.Span = span(list.Columns[0].Pos(), list.Columns[len(list.Columns)-1].End())
+	result, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.WithExpression{
+		Span:      span(withTok.Pos, rparen.End),
+		Variables: list,
+		Expr:      result,
+	}, nil
+}
+
 // parseNewConstructor parses "NEW type_name(arg, ...)" or the braced form
 // "NEW type_name { ... }" with the NEW keyword as the next token; see
 // new_constructor and braced_new_constructor in googlesql.tm. Only named
@@ -12459,7 +12584,9 @@ func (p *parser) parseNewConstructorArg() (*ast.NewConstructorArg, error) {
 func (p *parser) parseBracedConstructor() (*ast.BracedConstructor, error) {
 	lbrace := p.peek()
 	if !p.features.Enabled(FeatureBracedProtoConstructors) {
-		return nil, p.errorf(lbrace.Pos, "Syntax error: Braced constructors are not supported")
+		// The reference emits this via MakeSyntaxError without a "Syntax
+		// error: " prefix; see the braced_constructor guard in googlesql.tm.
+		return nil, p.errorf(lbrace.Pos, "Braced constructors are not supported")
 	}
 	p.advance() // {
 	b := &ast.BracedConstructor{Span: span(lbrace.Pos, 0)}
@@ -12537,7 +12664,11 @@ func (p *parser) parseBracedConstructorField(commaSeparated bool) (*ast.BracedCo
 		if err != nil {
 			return nil, err
 		}
-		value.Span = span(expr.Pos(), expr.End())
+		// The field value's location follows the "expression" symbol, which for
+		// a parenthesized expression covers the parentheses even though the
+		// inner node keeps its unparenthesized location; see
+		// braced_constructor_field in googlesql.tm.
+		value.Span = span(p.extStart(expr), p.extEnd(expr))
 		value.Expression = expr
 		value.ColonPrefixed = true
 	case token.LBRACE:
@@ -12574,6 +12705,12 @@ func (p *parser) parseArrayConstructor(start int) (ast.Node, error) {
 			}
 			arr.Elements = append(arr.Elements, expr)
 			if p.peek().Kind != token.COMMA {
+				// After an element the array expects either "," (another
+				// element) or "]" (close); see array_constructor in
+				// googlesql.tm.
+				if p.peek().Kind != token.RBRACKET {
+					return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "," or "]" but got %s`, describeToken(p.peek()))
+				}
 				break
 			}
 			p.advance()
@@ -12667,10 +12804,19 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 		!isKeyword(p.peek(), "HAVING") && !isKeyword(p.peek(), "ORDER") &&
 		!isKeyword(p.peek(), "LIMIT") && !isKeyword(p.peek(), "WITH") {
 		firstArg := true
+		explicitArgs := 0
 		for {
 			var arg ast.Node
 			switch {
 			case p.peek().Kind == token.STAR:
+				// A "*" is only a valid argument as the very first one (e.g.
+				// COUNT(*) or ANON_COUNT(*, ...)); in any later position it is a
+				// syntax error. Subsequent arguments are function_call_argument,
+				// which has no "*" alternative. See
+				// function_call_expression_with_args_prefix in googlesql.tm.
+				if explicitArgs > 0 {
+					return nil, p.errorf(p.peek().Pos, `Syntax error: Unexpected "*"`)
+				}
 				star := p.advance()
 				arg = &ast.Star{Span: span(star.Pos, star.End), Image: star.Image}
 			case isKeyword(p.peek(), "SEQUENCE") && !isKeyword(p.peekAt(1), "CLAMPED"):
@@ -12780,6 +12926,7 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 			}
 			call.Args = append(call.Args, arg)
 			firstArg = false
+			explicitArgs++
 			if p.peek().Kind != token.COMMA {
 				break
 			}
@@ -12912,6 +13059,19 @@ func (p *parser) finishFunctionCallBase(path *ast.PathExpression, base ast.Node,
 		return nil, err
 	}
 	call.Stop = rparen.End
+	// "function_call_expression braced_constructor" is a proto UPDATE
+	// constructor; see function_call_expression_with_clauses in googlesql.tm.
+	if p.peek().Kind == token.LBRACE && p.features.Enabled(FeatureBracedProtoConstructors) {
+		braced, err := p.parseBracedConstructor()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.UpdateConstructor{
+			Span:        span(call.Pos(), braced.End()),
+			Function:    call,
+			Constructor: braced,
+		}, nil
+	}
 	if isKeyword(p.peek(), "OVER") {
 		p.advance()
 		windowSpec, err := p.parseWindowSpecification()
@@ -13577,6 +13737,11 @@ func (p *parser) parseCastExpression() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if p.peek().Kind != token.RPAREN {
+		// After the type (and before any FORMAT clause) the grammar state
+		// accepts the optional FORMAT keyword or the closing ")"; see
+		// cast_expression and opt_format in googlesql.tm.
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or keyword FORMAT but got %s`, describeToken(p.peek()))
 	}
 	rparen, err := p.expect(token.RPAREN, `")"`)
 	if err != nil {

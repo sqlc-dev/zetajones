@@ -638,11 +638,23 @@ func (l *lexer) quotedIdent() (token.Token, error) {
 			l.pos += 2
 			continue
 		}
+		if c == '\n' || c == '\r' {
+			// A raw newline is excluded from the backquoted identifier content
+			// (bqtext_0 = /`([^\\`\r\n]|escape)*/ in googlesql.tm); an escaped
+			// newline is handled by the "\\" branch above. Reaching one here
+			// means the identifier has no closing backquote on this line.
+			break
+		}
 		if c == '`' {
 			// Quoted identifiers are unescaped with the same rules as string
 			// literals; see ParseIdentifier in googlesql/public/strings.cc.
 			if err := l.validateEscapes(contentStart, l.pos, false, false); err != nil {
 				return token.Token{}, err
+			}
+			// An identifier of just "``" (empty content) is invalid; see the
+			// empty-identifier check in ParseIdentifier (strings.cc).
+			if l.pos == contentStart {
+				return token.Token{}, l.errorf(start, "Syntax error: Invalid empty identifier")
 			}
 			l.pos++
 			return l.emit(token.QUOTED_IDENT, start), nil
