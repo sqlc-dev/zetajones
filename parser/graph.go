@@ -1222,7 +1222,23 @@ func (p *parser) parseGraphPathPatternExpr() (*ast.GraphPathPattern, error) {
 	} else {
 		path = &ast.GraphPathPattern{Span: span(first.Pos(), first.End()), Factors: []ast.Node{first}}
 	}
-	for p.startsGraphPathFactor() {
+	for {
+		// A hint may appear between two path factors; see the
+		// "graph_path_pattern_expr hint? graph_path_factor" production in
+		// googlesql.tm. The hint must be followed by a factor.
+		var hint *ast.Hint
+		if p.peek().Kind == token.ATSIGN {
+			h, err := p.parseOptionalHint()
+			if err != nil {
+				return nil, err
+			}
+			hint = h
+			if !p.startsGraphPathFactor() {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or "-" or "<" or -> but got %s`, describeToken(p.peek()))
+			}
+		} else if !p.startsGraphPathFactor() {
+			break
+		}
 		// When concatenating onto a parenthesized subpath, wrap it so the
 		// wrapper (not the parenthesized node) grows to hold the new factor.
 		if path.Parenthesized {
@@ -1232,11 +1248,54 @@ func (p *parser) parseGraphPathPatternExpr() (*ast.GraphPathPattern, error) {
 		if err != nil {
 			return nil, err
 		}
+		if hint != nil {
+			var routed ast.Node
+			routed, err = p.routeGraphPathHint(path, next, hint)
+			if err != nil {
+				return nil, err
+			}
+			next = routed
+		}
 		path.Factors = append(path.Factors, next)
 		path.Start = path.Factors[0].Pos()
 		path.Stop = next.End()
 	}
 	return path, nil
+}
+
+// routeGraphPathHint attaches a hint that appears between the last factor of
+// path and the next factor, mirroring the reduce action of
+// "graph_path_pattern_expr hint? graph_path_factor" in googlesql.tm. It returns
+// the (possibly wrapped) next factor to append.
+func (p *parser) routeGraphPathHint(path *ast.GraphPathPattern, next ast.Node, hint *ast.Hint) (ast.Node, error) {
+	last := path.Factors[len(path.Factors)-1]
+	lastEdge, lastIsEdge := last.(*ast.GraphEdgePattern)
+	nextEdge, nextIsEdge := next.(*ast.GraphEdgePattern)
+	switch {
+	case lastIsEdge && nextIsEdge:
+		// Hints in between two edges are ambiguous.
+		return nil, p.errorf(hint.Pos(), "Hint cannot be used in between two GraphEdgePatterns")
+	case nextIsEdge:
+		// Attach the hint to the left of the following edge.
+		nextEdge.LhsHint = &ast.GraphLhsHint{Span: hint.Span, Hint: hint}
+		nextEdge.Start = hint.Pos()
+		return next, nil
+	case lastIsEdge:
+		// Attach the hint to the right of the preceding edge, extending its end.
+		lastEdge.RhsHint = &ast.GraphRhsHint{Span: hint.Span, Hint: hint}
+		lastEdge.Stop = hint.End()
+		return next, nil
+	default:
+		// Neither element is an edge. A node pattern cannot hold a hint, so wrap
+		// it in a path pattern; a subpath receives the hint directly.
+		if node, ok := next.(*ast.GraphNodePattern); ok {
+			return &ast.GraphPathPattern{Span: span(hint.Pos(), node.End()), Factors: []ast.Node{hint, node}}, nil
+		}
+		pp := next.(*ast.GraphPathPattern)
+		prependGraphPathFactors(pp, hint)
+		pp.Start = hint.Pos()
+		return pp, nil
+	}
 }
 
 // startsGraphSearchPrefix reports whether the next tokens begin a graph path
@@ -1421,24 +1480,69 @@ func (p *parser) parseGraphPathPrimary() (ast.Node, error) {
 // element filler, which never begins with a path factor, a path mode keyword,
 // or a "identifier =" path-variable assignment.
 func (p *parser) parenStartsNodePattern() bool {
-	t1 := p.peekAt(1)
-	switch t1.Kind {
+	// Both a node-pattern filler and a subpath may begin with a hint. The
+	// node-vs-subpath decision is therefore made on the token that follows the
+	// optional leading hint: a filler hint precedes an element name / label /
+	// ")", while a subpath hint precedes a path factor (or assignment / search
+	// prefix / path mode).
+	idx := p.offsetPastHint(1)
+	t := p.peekAt(idx)
+	switch t.Kind {
 	case token.LPAREN, token.MINUS, token.LT, token.ARROW:
 		return false
 	}
-	if isGraphPathModeKeyword(t1) {
+	if isGraphPathModeKeyword(t) {
 		return false
 	}
-	if ((t1.Kind == token.IDENT && !p.isReserved(t1)) || t1.Kind == token.QUOTED_IDENT) && p.peekAt(2).Kind == token.EQ {
+	if ((t.Kind == token.IDENT && !p.isReserved(t)) || t.Kind == token.QUOTED_IDENT) && p.peekAt(idx+1).Kind == token.EQ {
 		return false
 	}
 	// A parenthesized pattern whose content begins with a path search prefix
 	// (ANY / ALL / SHORTEST k / CHEAPEST k) is a subpath, not a node pattern
 	// (a filler never begins with a search prefix).
-	if tokensStartGraphSearchPrefix(t1, p.peekAt(2)) {
+	if tokensStartGraphSearchPrefix(t, p.peekAt(idx+1)) {
 		return false
 	}
 	return true
+}
+
+// offsetPastHint returns the lookahead offset just past a hint that begins at
+// offset n. If the token at n is not a hint start ("@"), n is returned
+// unchanged. Handles the "@{...}", "@N", and "@N@{...}" forms.
+func (p *parser) offsetPastHint(n int) int {
+	if p.peekAt(n).Kind != token.ATSIGN {
+		return n
+	}
+	n++ // past "@"
+	if p.peekAt(n).Kind == token.INT {
+		n++ // past the shard count
+		if p.peekAt(n).Kind == token.ATSIGN && p.peekAt(n+1).Kind == token.LBRACE {
+			n++ // past the second "@"
+		} else {
+			return n
+		}
+	}
+	if p.peekAt(n).Kind != token.LBRACE {
+		return n
+	}
+	depth := 0
+	for {
+		switch p.peekAt(n).Kind {
+		case token.EOF:
+			return n
+		case token.LBRACE:
+			depth++
+			n++
+		case token.RBRACE:
+			depth--
+			n++
+			if depth == 0 {
+				return n
+			}
+		default:
+			n++
+		}
+	}
 }
 
 // parseGraphNodePattern parses "( <filler> )"; see graph_node_pattern in
@@ -1460,8 +1564,17 @@ func (p *parser) parseGraphNodePattern() (*ast.GraphNodePattern, error) {
 // see graph_parenthesized_path_pattern in googlesql.tm.
 func (p *parser) parseGraphParenthesizedPathPattern() (*ast.GraphPathPattern, error) {
 	lparen := p.advance() // (
+	// A hint at the beginning of a parenthesized path pattern is rejected, but
+	// only after the inner pattern parses successfully: an inner parse error
+	// (e.g. a trailing hint not followed by a factor) takes precedence, matching
+	// the deferred action in graph_parenthesized_path_pattern in googlesql.tm.
+	var beginHint *ast.Hint
 	if p.peek().Kind == token.ATSIGN {
-		return nil, p.errorf(p.peek().Pos, "Hint cannot be used at beginning of path pattern")
+		h, err := p.parseOptionalHint()
+		if err != nil {
+			return nil, err
+		}
+		beginHint = h
 	}
 	inner, err := p.parseGraphPathPattern()
 	if err != nil {
@@ -1478,6 +1591,9 @@ func (p *parser) parseGraphParenthesizedPathPattern() (*ast.GraphPathPattern, er
 		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" but got %s`, describeToken(p.peek()))
 	}
 	rparen := p.advance() // )
+	if beginHint != nil {
+		return nil, p.errorf(beginHint.Pos(), "Hint cannot be used at beginning of path pattern")
+	}
 	if where != nil {
 		ret := inner
 		if inner.Parenthesized {

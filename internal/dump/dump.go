@@ -1422,6 +1422,10 @@ func nodeString(n ast.Node) string {
 		return "GraphNodePattern"
 	case *ast.GraphEdgePattern:
 		return "GraphEdgePattern"
+	case *ast.GraphLhsHint:
+		return "GraphLhsHint"
+	case *ast.GraphRhsHint:
+		return "GraphRhsHint"
 	case *ast.GraphElementPatternFiller:
 		return "GraphElementPatternFiller"
 	case *ast.GraphLabelFilter:

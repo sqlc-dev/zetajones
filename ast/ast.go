@@ -5799,11 +5799,35 @@ func (n *GraphNodePattern) Children() []Node { return children(n.Filler) }
 // shown in the debug string).
 type GraphEdgePattern struct {
 	Span
+	LhsHint     *GraphLhsHint              `json:"lhs_hint,omitempty"`
+	RhsHint     *GraphRhsHint              `json:"rhs_hint,omitempty"`
 	Filler      *GraphElementPatternFiller `json:"filler,omitempty"`
 	Orientation string                     `json:"orientation,omitempty"`
 }
 
-func (n *GraphEdgePattern) Children() []Node { return children(n.Filler) }
+func (n *GraphEdgePattern) Children() []Node {
+	return children(n.LhsHint, n.RhsHint, n.Filler)
+}
+
+// GraphLhsHint is a hint attached to the left-hand side of an edge pattern
+// (i.e. a hint appearing before the edge); see ASTGraphLhsHint in
+// googlesql/parser/parse_tree.h. Its single child is the Hint.
+type GraphLhsHint struct {
+	Span
+	Hint *Hint `json:"hint"`
+}
+
+func (n *GraphLhsHint) Children() []Node { return children(n.Hint) }
+
+// GraphRhsHint is a hint attached to the right-hand side of an edge pattern
+// (i.e. a hint appearing after the edge); see ASTGraphRhsHint in
+// googlesql/parser/parse_tree.h. Its single child is the Hint.
+type GraphRhsHint struct {
+	Span
+	Hint *Hint `json:"hint"`
+}
+
+func (n *GraphRhsHint) Children() []Node { return children(n.Hint) }
 
 // GraphElementPatternFiller holds the optional variable name, label filter,
 // and WHERE clause inside a node or edge pattern; see
