@@ -446,6 +446,44 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 	return stmt, nil
 }
 
+// ParseMultipleWithOptions parses a sequence of statements separated by ";",
+// returning each statement as its own node with byte offsets relative to the
+// whole input. It corresponds to the reference test driver's parse_multiple
+// option, which repeatedly calls ParseNextScriptStatement over the input (see
+// TestMulti in googlesql/parser/run_parser_test.cc). Parsing stops at the first
+// error, returning the statements parsed so far together with that error.
+func ParseMultipleWithOptions(sql string, opts Options) ([]ast.Statement, error) {
+	toks, err := lexer.Lex(sql)
+	if err != nil {
+		var lerr *lexer.Error
+		if errors.As(err, &lerr) {
+			return nil, &Error{Message: lerr.Message, Offset: lerr.Offset, SQL: sql}
+		}
+		return nil, err
+	}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
+	var stmts []ast.Statement
+	for {
+		if p.peek().Kind == token.EOF {
+			break
+		}
+		stmt, err := p.parseStatement()
+		if err != nil {
+			return stmts, err
+		}
+		stmts = append(stmts, stmt)
+		if p.peek().Kind == token.SEMICOLON {
+			p.advance()
+			continue
+		}
+		if p.peek().Kind == token.EOF {
+			break
+		}
+		return stmts, p.errorf(p.peek().Pos, "Syntax error: Expected end of input but got %s", describeToken(p.peek()))
+	}
+	return stmts, nil
+}
+
 // ParseScript parses a whole script: a sequence of statements separated by ";"
 // with an optional trailing ";", wrapped in a Script node. It corresponds to
 // the reference driver's "mode=script" test mode; see the script rule in

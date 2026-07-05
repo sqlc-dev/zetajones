@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -20,10 +21,13 @@ import (
 //	go test ./parser -check-parse -v 2>&1 | grep "PARSE PASSES NOW"
 var checkParse = flag.Bool("check-parse", false, "Run parse_todo cases and update metadata for ones that now pass")
 
-// runCase parses the case's SQL and returns the rendered output in the same
-// shape as the expected section: either the parse tree debug string or an
-// "ERROR: ..." message.
-func runCase(c *testfile.Case) string {
+// newlineRange matches a DebugString location range like "[12-34]". The
+// reference driver ignores these when comparing outputs across newline
+// conventions, because \r\n shifts every byte offset relative to \n.
+var newlineRange = regexp.MustCompile(`\[[0-9]+-[0-9]+\]`)
+
+// caseOptions builds parser.Options and the parse mode from a case's options.
+func caseOptions(c *testfile.Case) (parser.Options, string) {
 	var opts parser.Options
 	// The last language_features option wins: case options follow inherited
 	// [default ...] options. The reference test driver defaults to NONE; see
@@ -62,33 +66,101 @@ func runCase(c *testfile.Case) string {
 			opts.SupportedGenericSubEntityTypes = strings.Split(spec, ",")
 		}
 	}
+	return opts, mode
+}
+
+// errorOutput renders a parse error as the reference driver does.
+func errorOutput(err error) string {
+	var perr *parser.Error
+	if errors.As(err, &perr) {
+		return "ERROR: " + perr.Caret()
+	}
+	return "ERROR: " + err.Error()
+}
+
+// runCase parses the case's SQL and returns the rendered output in the same
+// shape as the expected section: either the parse tree debug string or an
+// "ERROR: ..." message. Cases whose expected output carries a [NEWLINE X]
+// annotation are re-run once per newline convention (see runNewlineCase).
+func runCase(c *testfile.Case) string {
+	if strings.HasPrefix(c.Expected, "[NEWLINE ") {
+		return runNewlineCase(c)
+	}
+	return parseAndRender(c, c.SQL)
+}
+
+// parseAndRender parses sql under the case's options and returns the rendered
+// output. Under parse_multiple it renders each ";"-separated statement in
+// order, "--"-joined, matching TestMulti in run_parser_test.cc.
+func parseAndRender(c *testfile.Case, sql string) string {
+	opts, mode := caseOptions(c)
+	dumpOpts := dump.Options{SQL: sql, ShowLocationText: !c.HasOption("no_show_parse_location_text")}
+
+	if mode == "statement" && c.BoolOption("parse_multiple") {
+		stmts, err := parser.ParseMultipleWithOptions(sql, opts)
+		var outs []string
+		for _, stmt := range stmts {
+			outs = append(outs, dump.Tree(stmt, dumpOpts))
+		}
+		if err != nil {
+			outs = append(outs, errorOutput(err))
+		}
+		return strings.Join(outs, "\n--\n")
+	}
+
 	var (
 		node ast.Node
 		err  error
 	)
 	switch mode {
 	case "type":
-		node, err = parser.ParseTypeWithOptions(c.SQL, opts)
+		node, err = parser.ParseTypeWithOptions(sql, opts)
 	case "script":
-		node, err = parser.ParseScriptWithOptions(c.SQL, opts)
+		node, err = parser.ParseScriptWithOptions(sql, opts)
 	case "expression":
-		node, err = parser.ParseExpressionWithOptions(c.SQL, opts)
+		node, err = parser.ParseExpressionWithOptions(sql, opts)
 	default:
 		var stmt ast.Statement
-		stmt, err = parser.ParseStatementWithOptions(c.SQL, opts)
+		stmt, err = parser.ParseStatementWithOptions(sql, opts)
 		node = stmt
 	}
 	if err != nil {
-		var perr *parser.Error
-		if errors.As(err, &perr) {
-			return "ERROR: " + perr.Caret()
-		}
-		return "ERROR: " + err.Error()
+		return errorOutput(err)
 	}
-	return dump.Tree(node, dump.Options{
-		SQL:              c.SQL,
-		ShowLocationText: !c.HasOption("no_show_parse_location_text"),
-	})
+	return dump.Tree(node, dumpOpts)
+}
+
+// runNewlineCase re-runs the parse under each newline convention (\n, \r,
+// \r\n), mirroring file_based_test_driver's RunTestForNewlineTypes. Every
+// newline in the input is replaced with the convention, the resulting output's
+// convention characters are normalized back to \n, and the three outputs are
+// compared ignoring byte-offset ranges. If they agree the first is returned
+// unannotated; otherwise each is prefixed with its [NEWLINE X] line and the
+// three are "--"-joined.
+func runNewlineCase(c *testfile.Case) string {
+	newlines := []string{"\n", "\r", "\r\n"}
+	annotations := []string{`NEWLINE \n`, `NEWLINE \r`, `NEWLINE \r\n`}
+	outputs := make([]string, len(newlines))
+	for i, nl := range newlines {
+		out := parseAndRender(c, strings.ReplaceAll(c.SQL, "\n", nl))
+		outputs[i] = strings.ReplaceAll(out, nl, "\n")
+	}
+	same := true
+	redacted0 := newlineRange.ReplaceAllString(outputs[0], "")
+	for _, out := range outputs[1:] {
+		if newlineRange.ReplaceAllString(out, "") != redacted0 {
+			same = false
+			break
+		}
+	}
+	if same {
+		return outputs[0]
+	}
+	parts := make([]string, len(outputs))
+	for i, out := range outputs {
+		parts[i] = "[" + annotations[i] + "]\n" + out
+	}
+	return strings.Join(parts, "\n--\n")
 }
 
 func TestParser(t *testing.T) {

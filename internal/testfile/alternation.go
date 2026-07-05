@@ -27,6 +27,11 @@ import "strings"
 
 const altHeaderPrefix = "ALTERNATION GROUP"
 
+// newlinePrefix marks an expected output block produced under a specific
+// newline convention (see file_based_test_driver's [NEWLINE X] annotation,
+// emitted when the newline type changes the parser output).
+const newlinePrefix = "[NEWLINE "
+
 // expandAlternations populates c.AltCases from the case's alternation groups
 // (which may appear in the option lines and/or the SQL) and the raw body parts
 // (the "--"-separated segments after the SQL). optionLines are this case's raw
@@ -276,10 +281,25 @@ func parseAltBlocks(parts [][]string) ([]altExpected, bool) {
 			return nil, false
 		}
 		output := joinPart(parts[i+1])
+		i += 2
+		// A [NEWLINE X] block is one of several outputs the driver emits for the
+		// same expansion, one per newline convention, separated by "--". Coalesce
+		// the consecutive [NEWLINE ...] sub-blocks into a single expected output
+		// (runCase reproduces the same multi-run join). Ordinary expansions have
+		// a single output block here, so this leaves them unchanged.
+		if strings.HasPrefix(output, newlinePrefix) {
+			for i < len(parts) && !isAltHeader(parts[i]) {
+				block := joinPart(parts[i])
+				if !strings.HasPrefix(block, newlinePrefix) {
+					break
+				}
+				output += "\n--\n" + block
+				i++
+			}
+		}
 		for _, lab := range labels {
 			out = append(out, altExpected{label: lab, output: output})
 		}
-		i += 2
 		for i < len(parts) && !isAltHeader(parts[i]) {
 			i++
 		}

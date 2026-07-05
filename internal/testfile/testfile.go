@@ -67,6 +67,25 @@ func (c *Case) HasOption(name string) bool {
 	return false
 }
 
+// BoolOption resolves a boolean option that may be toggled by "name" and
+// "no_<name>" option lines (including via inherited [default ...] options),
+// returning the value of the last occurrence. This matches the driver's
+// last-wins semantics; e.g. [default parse_multiple] followed later by
+// [default no_parse_multiple] yields false. Defaults to false.
+func (c *Case) BoolOption(name string) bool {
+	val := false
+	no := "no_" + name
+	for _, opt := range c.Options {
+		switch opt {
+		case name:
+			val = true
+		case no:
+			val = false
+		}
+	}
+	return val
+}
+
 // IsError reports whether the expected output is a parse error.
 func (c *Case) IsError() bool {
 	return strings.HasPrefix(c.Expected, "ERROR:")
@@ -221,6 +240,19 @@ func parseCase(lines []string, defaults *[]string) *Case {
 		// the normal three-part split (which would mangle the many "--"s).
 		// Groups may appear in the option lines and/or the SQL.
 		expandAlternations(c, inheritedDefaults, optionLines, parts[1:])
+		return c
+	}
+
+	// Under parse_multiple the driver parses each ";"-separated statement and
+	// emits one output per statement, all "--"-separated with no unparse output
+	// (see TestMulti in run_parser_test.cc). Every output part is therefore an
+	// expected parse tree; join them so runCase can reproduce the same sequence.
+	if c.BoolOption("parse_multiple") {
+		var outs []string
+		for _, part := range parts[1:] {
+			outs = append(outs, joinPart(part))
+		}
+		c.Expected = strings.Join(outs, "\n--\n")
 		return c
 	}
 
