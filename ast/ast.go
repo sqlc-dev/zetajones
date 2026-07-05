@@ -5611,6 +5611,16 @@ type GqlReturn struct {
 
 func (n *GqlReturn) Children() []Node { return children(n.Select) }
 
+// GqlSample is a "TABLESAMPLE ..." operator in a graph linear query; see
+// ASTGqlSample in googlesql/parser/parse_tree.h. Its single child is a
+// SampleClause.
+type GqlSample struct {
+	Span
+	Sample *SampleClause `json:"sample"`
+}
+
+func (n *GqlSample) Children() []Node { return children(n.Sample) }
+
 // GraphPattern is a comma-separated list of path patterns with an optional
 // trailing WHERE clause; see ASTGraphPattern in
 // googlesql/parser/parse_tree.h.
@@ -5634,13 +5644,56 @@ func (n *GraphPattern) Children() []Node {
 // GraphPathPattern is a sequence of node/edge (path factor) patterns forming a
 // path; see ASTGraphPathPattern in googlesql/parser/parse_tree.h. When
 // Parenthesized is set the debug name is prefixed with "Parenthesized".
+// PathName is the optional "<identifier> =" path-variable assignment and
+// SearchPrefix is the optional path search prefix (ANY / ALL / SHORTEST ...);
+// both, when present, appear before the path factors.
 type GraphPathPattern struct {
 	Span
-	Factors       []Node `json:"factors"`
-	Parenthesized bool   `json:"parenthesized,omitempty"`
+	PathName      *Identifier            `json:"path_name,omitempty"`
+	SearchPrefix  *GraphPathSearchPrefix `json:"search_prefix,omitempty"`
+	Factors       []Node                 `json:"factors"`
+	Parenthesized bool                   `json:"parenthesized,omitempty"`
 }
 
-func (n *GraphPathPattern) Children() []Node { return append([]Node(nil), n.Factors...) }
+func (n *GraphPathPattern) Children() []Node {
+	out := make([]Node, 0, len(n.Factors)+2)
+	if n.PathName != nil {
+		out = append(out, n.PathName)
+	}
+	if n.SearchPrefix != nil {
+		out = append(out, n.SearchPrefix)
+	}
+	out = append(out, n.Factors...)
+	return out
+}
+
+// GraphPathSearchPrefix is a path search prefix that restricts a graph pattern
+// match by selecting paths from each partition of endpoints; see
+// ASTGraphPathSearchPrefix in googlesql/parser/parse_tree.h. Type is one of
+// "ANY", "SHORTEST", "ALL", "ALL_SHORTEST", "CHEAPEST", or "ALL_CHEAPEST" (not
+// shown in the debug string). Count, when present, holds the number of paths.
+type GraphPathSearchPrefix struct {
+	Span
+	Type  string                      `json:"type"`
+	Count *GraphPathSearchPrefixCount `json:"count,omitempty"`
+}
+
+func (n *GraphPathSearchPrefix) Children() []Node {
+	if n.Count != nil {
+		return []Node{n.Count}
+	}
+	return nil
+}
+
+// GraphPathSearchPrefixCount holds the number of paths to retain from each
+// partition of a path search prefix; see ASTGraphPathSearchPrefixCount in
+// googlesql/parser/parse_tree.h.
+type GraphPathSearchPrefixCount struct {
+	Span
+	PathCount Node `json:"path_count"`
+}
+
+func (n *GraphPathSearchPrefixCount) Children() []Node { return children(n.PathCount) }
 
 // GraphNodePattern is a "(<filler>)" node pattern; see ASTGraphNodePattern in
 // googlesql/parser/parse_tree.h.

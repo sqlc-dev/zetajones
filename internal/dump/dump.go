@@ -1377,6 +1377,8 @@ func nodeString(n ast.Node) string {
 		return "GqlFilter"
 	case *ast.GqlReturn:
 		return "GqlReturn"
+	case *ast.GqlSample:
+		return "GqlSample"
 	case *ast.GraphPattern:
 		return "GraphPattern"
 	case *ast.GraphPathPattern:
@@ -1384,6 +1386,10 @@ func nodeString(n ast.Node) string {
 			return "ParenthesizedGraphPathPattern"
 		}
 		return "GraphPathPattern"
+	case *ast.GraphPathSearchPrefix:
+		return "GraphPathSearchPrefix"
+	case *ast.GraphPathSearchPrefixCount:
+		return "GraphPathSearchPrefixCount"
 	case *ast.GraphNodePattern:
 		return "GraphNodePattern"
 	case *ast.GraphEdgePattern:

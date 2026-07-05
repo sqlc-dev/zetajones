@@ -8993,7 +8993,7 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		}
 		return &ast.PipeMatchRecognize{Span: span(pipeTok.Pos, clause.End()), Clause: clause}, nil
 	case isKeyword(tok, "TABLESAMPLE"):
-		clause, err := p.parseSampleClause()
+		clause, err := p.parseSampleClause(false)
 		if err != nil {
 			return nil, err
 		}

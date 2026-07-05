@@ -69,7 +69,7 @@ func (p *parser) parsePostfixTableOperators(node ast.Node) (ast.Node, error) {
 		case isKeyword(p.peek(), "MATCH_RECOGNIZE"):
 			clause, err = p.parseMatchRecognizeClause()
 		case isKeyword(p.peek(), "TABLESAMPLE"):
-			clause, err = p.parseSampleClause()
+			clause, err = p.parseSampleClause(false)
 		default:
 			return node, nil
 		}
@@ -110,7 +110,7 @@ func attachPostfixOperator(node ast.Node, clause ast.Node) ast.Node {
 
 // parseSampleClause parses "TABLESAMPLE <method> ( <size> ) [<suffix>]"; the
 // TABLESAMPLE keyword is the next token. See sample_clause in googlesql.tm.
-func (p *parser) parseSampleClause() (*ast.SampleClause, error) {
+func (p *parser) parseSampleClause(graphMode bool) (*ast.SampleClause, error) {
 	tsTok := p.advance() // TABLESAMPLE
 	clause := &ast.SampleClause{Span: span(tsTok.Pos, 0)}
 	method, err := p.parseAliasIdentifier()
@@ -131,7 +131,7 @@ func (p *parser) parseSampleClause() (*ast.SampleClause, error) {
 		return nil, err
 	}
 	clause.Stop = rparen.End
-	suffix, err := p.parseOptionalSampleSuffix()
+	suffix, err := p.parseOptionalSampleSuffix(graphMode)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,10 @@ func (p *parser) parseSampleSize() (*ast.SampleSize, error) {
 // parseOptionalSampleSuffix parses the optional TABLESAMPLE suffix: a
 // REPEATABLE clause and/or a WITH WEIGHT clause; see
 // opt_sample_clause_suffix in googlesql.tm.
-func (p *parser) parseOptionalSampleSuffix() (*ast.SampleSuffix, error) {
+// The graphMode flag selects the graph-specific suffix grammar
+// (opt_graph_sample_clause_suffix), which requires "AS" before a WITH WEIGHT
+// alias to avoid ambiguity with the next graph operator.
+func (p *parser) parseOptionalSampleSuffix(graphMode bool) (*ast.SampleSuffix, error) {
 	switch {
 	case isKeyword(p.peek(), "REPEATABLE"):
 		repeatable, err := p.parseRepeatableClause()
@@ -203,8 +206,10 @@ func (p *parser) parseOptionalSampleSuffix() (*ast.SampleSuffix, error) {
 		// shift/reduce conflict in favor of repeatable_clause when the "("
 		// lookahead is present (see the note on opt_sample_clause_suffix in
 		// googlesql.tm). A bare REPEATABLE not followed by "(" is an alias.
+		// In graph mode only an explicit "AS" alias is allowed.
 		startsRepeatable := isKeyword(p.peek(), "REPEATABLE") && p.peekAt(1).Kind == token.LPAREN
-		if isKeyword(p.peek(), "AS") || (!startsRepeatable && p.peek().Kind == token.IDENT && !isReserved(p.peek())) || p.peek().Kind == token.QUOTED_IDENT {
+		allowBareAlias := !graphMode
+		if isKeyword(p.peek(), "AS") || (allowBareAlias && !startsRepeatable && p.peek().Kind == token.IDENT && !isReserved(p.peek())) || (allowBareAlias && p.peek().Kind == token.QUOTED_IDENT) {
 			alias, err := p.parseOptionalAlias()
 			if err != nil {
 				return nil, err

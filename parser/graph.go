@@ -200,6 +200,8 @@ func (p *parser) startsGraphLinearOp() bool {
 		return true
 	case isKeyword(p.peek(), "FILTER"):
 		return true
+	case isKeyword(p.peek(), "TABLESAMPLE"):
+		return true
 	}
 	return false
 }
@@ -214,6 +216,8 @@ func (p *parser) parseGraphLinearOp() (ast.Node, error) {
 		return p.parseGqlLet()
 	case isKeyword(p.peek(), "FILTER"):
 		return p.parseGqlFilter()
+	case isKeyword(p.peek(), "TABLESAMPLE"):
+		return p.parseGqlSample()
 	}
 	return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 }
@@ -359,6 +363,18 @@ func (p *parser) parseGqlReturnItem() (*ast.SelectColumn, error) {
 	return col, nil
 }
 
+// parseGqlSample parses a "TABLESAMPLE ..." linear operator; see
+// graph_sample_operator / graph_sample_clause in googlesql.tm. The graph
+// sample suffix requires "AS" before a WITH WEIGHT alias to avoid ambiguity
+// with the next graph operator.
+func (p *parser) parseGqlSample() (*ast.GqlSample, error) {
+	sample, err := p.parseSampleClause(true)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GqlSample{Span: span(sample.Pos(), sample.End()), Sample: sample}, nil
+}
+
 // parseGraphPattern parses a comma-separated list of path patterns with an
 // optional trailing WHERE clause; see graph_pattern / graph_path_pattern_list
 // in googlesql.tm.
@@ -403,21 +419,33 @@ func (p *parser) parseGraphPattern() (*ast.GraphPattern, error) {
 	return gp, nil
 }
 
-// parseGraphPathPattern parses an optional path-variable assignment and path
-// mode followed by a path pattern expression; see graph_path_pattern in
-// googlesql.tm. (Path search prefixes are handled by a separate feature.)
+// parseGraphPathPattern parses an optional "graph_identifier =" path-variable
+// assignment, an optional path search prefix, an optional path mode, and a
+// sequence of node/edge path factors; see graph_path_pattern in googlesql.tm.
 func (p *parser) parseGraphPathPattern() (*ast.GraphPathPattern, error) {
 	startPos := p.peek().Pos
-	var pathVar *ast.Identifier
-	// (graph_identifier "=")? — any bare identifier at the start of a path
-	// pattern is a path-variable assignment (a path factor never starts with an
-	// identifier). Path mode keywords bind as a mode instead.
+	var pathName *ast.Identifier
+	var searchPrefix *ast.GraphPathSearchPrefix
+	// (graph_identifier "=")? — a leading bare identifier is a path-variable
+	// assignment unless it is a path-mode keyword or begins a search prefix. A
+	// path factor never starts with an identifier, so an identifier that is
+	// neither must be an assignment target (which requires "=").
 	if t := p.peek(); ((t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT) && !isGraphPathModeKeyword(t) {
-		pathVar = p.parseIdentifierToken(p.advance())
-		if p.peek().Kind != token.EQ {
-			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "=" but got %s`, describeToken(p.peek()))
+		if p.peekAt(1).Kind == token.EQ || !p.startsGraphSearchPrefix() {
+			pathName = p.parseIdentifierToken(p.advance())
+			if p.peek().Kind != token.EQ {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "=" but got %s`, describeToken(p.peek()))
+			}
+			p.advance() // =
 		}
-		p.advance() // =
+	}
+	// graph_search_prefix?
+	if p.startsGraphSearchPrefix() {
+		sp, err := p.parseGraphSearchPrefix()
+		if err != nil {
+			return nil, err
+		}
+		searchPrefix = sp
 	}
 	// graph_path_mode?
 	var mode *ast.GraphPathMode
@@ -428,22 +456,20 @@ func (p *parser) parseGraphPathPattern() (*ast.GraphPathPattern, error) {
 	if err != nil {
 		return nil, err
 	}
-	if pathVar == nil && mode == nil {
+	if pathName == nil && searchPrefix == nil && mode == nil {
 		return pattern, nil
 	}
 	// A parenthesized pattern is normally returned unwrapped; wrap it again so
-	// the prefix (assignment / mode) has a dedicated ASTGraphPathPattern.
+	// the prefix (assignment / search prefix / mode) has a dedicated
+	// ASTGraphPathPattern.
 	if pattern.Parenthesized {
 		pattern = &ast.GraphPathPattern{Span: pattern.Span, Factors: []ast.Node{pattern}}
 	}
-	prefix := make([]ast.Node, 0, 2)
-	if pathVar != nil {
-		prefix = append(prefix, pathVar)
-	}
+	pattern.PathName = pathName
+	pattern.SearchPrefix = searchPrefix
 	if mode != nil {
-		prefix = append(prefix, mode)
+		pattern.Factors = append([]ast.Node{mode}, pattern.Factors...)
 	}
-	pattern.Factors = append(prefix, pattern.Factors...)
 	pattern.Start = startPos
 	return pattern, nil
 }
@@ -477,6 +503,91 @@ func (p *parser) parseGraphPathPatternExpr() (*ast.GraphPathPattern, error) {
 		path.Stop = next.End()
 	}
 	return path, nil
+}
+
+// startsGraphSearchPrefix reports whether the next tokens begin a graph path
+// search prefix; see graph_search_prefix in googlesql.tm. ANY and ALL always
+// begin a prefix, while SHORTEST and CHEAPEST require a following
+// int_literal_or_parameter (otherwise the keyword is a path-variable name).
+func (p *parser) startsGraphSearchPrefix() bool {
+	switch {
+	case isKeyword(p.peek(), "ANY"), isKeyword(p.peek(), "ALL"):
+		return true
+	case isKeyword(p.peek(), "SHORTEST"), isKeyword(p.peek(), "CHEAPEST"):
+		return startsIntLiteralOrParameter(p.peekAt(1))
+	}
+	return false
+}
+
+// startsIntLiteralOrParameter reports whether tok begins an
+// int_literal_or_parameter (integer literal, @parameter, ? parameter, or
+// @@system variable); see int_literal_or_parameter in googlesql.tm.
+func startsIntLiteralOrParameter(tok token.Token) bool {
+	switch tok.Kind {
+	case token.INT, token.PARAM, token.QUESTION, token.SYSTEM_VARIABLE:
+		return true
+	}
+	return false
+}
+
+// parseGraphSearchPrefix parses a graph path search prefix; see
+// graph_search_prefix in googlesql.tm. The count node, when present, spans the
+// whole prefix (keyword through the count expression), matching the reference.
+func (p *parser) parseGraphSearchPrefix() (*ast.GraphPathSearchPrefix, error) {
+	start := p.advance() // ANY / ALL / SHORTEST / CHEAPEST
+	switch {
+	case isKeyword(start, "ANY"):
+		switch {
+		case isKeyword(p.peek(), "SHORTEST"):
+			end := p.advance()
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, end.End), Type: "SHORTEST"}, nil
+		case isKeyword(p.peek(), "CHEAPEST"):
+			end := p.advance()
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, end.End), Type: "CHEAPEST"}, nil
+		case startsIntLiteralOrParameter(p.peek()):
+			count, err := p.parseGraphPathSearchPrefixCount(start.Pos)
+			if err != nil {
+				return nil, err
+			}
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, count.End()), Type: "ANY", Count: count}, nil
+		default:
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, start.End), Type: "ANY"}, nil
+		}
+	case isKeyword(start, "ALL"):
+		switch {
+		case isKeyword(p.peek(), "SHORTEST"):
+			end := p.advance()
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, end.End), Type: "ALL_SHORTEST"}, nil
+		case isKeyword(p.peek(), "CHEAPEST"):
+			end := p.advance()
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, end.End), Type: "ALL_CHEAPEST"}, nil
+		default:
+			return &ast.GraphPathSearchPrefix{Span: span(start.Pos, start.End), Type: "ALL"}, nil
+		}
+	case isKeyword(start, "SHORTEST"):
+		count, err := p.parseGraphPathSearchPrefixCount(start.Pos)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.GraphPathSearchPrefix{Span: span(start.Pos, count.End()), Type: "SHORTEST", Count: count}, nil
+	default: // CHEAPEST
+		count, err := p.parseGraphPathSearchPrefixCount(start.Pos)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.GraphPathSearchPrefix{Span: span(start.Pos, count.End()), Type: "CHEAPEST", Count: count}, nil
+	}
+}
+
+// parseGraphPathSearchPrefixCount parses the int_literal_or_parameter path
+// count; the resulting node spans from prefixStart (the search keyword) through
+// the count expression, matching @$ in the reference grammar.
+func (p *parser) parseGraphPathSearchPrefixCount(prefixStart int) (*ast.GraphPathSearchPrefixCount, error) {
+	expr, err := p.parseIntLiteralOrParameter()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.GraphPathSearchPrefixCount{Span: span(prefixStart, expr.End()), PathCount: expr}, nil
 }
 
 // startsGraphPathFactor reports whether the next token begins a graph path
