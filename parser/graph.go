@@ -330,6 +330,7 @@ func (p *parser) startsGraphLinearOp() bool {
 	case isKeyword(p.peek(), "FILTER"):
 		return true
 	case isKeyword(p.peek(), "TABLESAMPLE"):
+		return true
 	case isKeyword(p.peek(), "ORDER"):
 		return true
 	case isKeyword(p.peek(), "OFFSET"), isKeyword(p.peek(), "SKIP"):
