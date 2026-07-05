@@ -857,6 +857,14 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseDeleteStatement()
 	case isKeyword(tok, "DROP"):
 		return p.parseDropStatement()
+	case isKeyword(tok, "GRANT"):
+		return p.parseGrantOrRevokeStatement(false)
+	case isKeyword(tok, "REVOKE"):
+		return p.parseGrantOrRevokeStatement(true)
+	case isKeyword(tok, "SHOW"):
+		return p.parseShowStatement()
+	case isKeyword(tok, "DESCRIBE"), isKeyword(tok, "DESC"):
+		return p.parseDescribeStatement()
 	case isKeyword(tok, "EXECUTE"):
 		return p.parseExecuteImmediateStatement()
 	case isKeyword(tok, "EXPORT") && isKeyword(p.peekAt(1), "DATA"):
@@ -4410,8 +4418,13 @@ func (p *parser) parseFunctionParameter() (*ast.FunctionParameter, error) {
 // parseFunctionParameterType parses a function-parameter type, which may be a
 // templated "ANY ..." type; see function_parameter in googlesql.tm.
 func (p *parser) parseFunctionParameterType() (ast.Node, error) {
-	if isKeyword(p.peek(), "ANY") {
+	switch {
+	case isKeyword(p.peek(), "ANY"):
 		return p.parseTemplatedParameterType()
+	case isKeyword(p.peek(), "TABLE"):
+		// A "TABLE<...>" TVF schema is accepted here; see type_or_tvf_schema in
+		// googlesql.tm.
+		return p.parseTVFSchema()
 	}
 	return p.parseType()
 }
@@ -5287,6 +5300,15 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 	dashedName := false
 
 	switch {
+	case isKeyword(kindTok, "ROW"):
+		// DROP ROW ACCESS POLICY ...; see drop_statement in googlesql.tm. Only
+		// the unquoted keyword ROW triggers this; a quoted `row` object type
+		// falls through to the generic handling below.
+		return p.parseDropRowAccessPolicyStatement(dropTok)
+	case isKeyword(kindTok, "ALL"):
+		// DROP ALL ROW [ACCESS] POLICIES ON ...; see
+		// drop_all_row_access_policies_statement in googlesql.tm.
+		return p.parseDropAllRowAccessPoliciesStatement(dropTok)
 	case isKeyword(kindTok, "EXTERNAL") && isKeyword(second, "TABLE") && isKeyword(third, "FUNCTION"):
 		// No "Syntax error: " prefix; see drop_statement in googlesql.tm.
 		return nil, p.errorf(kindTok.Pos, "EXTERNAL TABLE FUNCTION is not supported")
@@ -5311,6 +5333,7 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		consumeSecond()
 		nodeName = "DropTableFunctionStatement"
 		parsesDropMode = false
+		dashedName = true
 	case isKeyword(kindTok, "FUNCTION"):
 		p.advance()
 		nodeName = "DropFunctionStatement"
@@ -5335,7 +5358,12 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		objectKind = strings.ToUpper(kindTok.Image)
 	case kindTok.Kind == token.IDENT && !keywordNames[strings.ToLower(kindTok.Image)]:
 		// A plain identifier is not a recognized schema object kind; see the
-		// generic error in the drop_statement reduce action.
+		// generic_entity_type error in the drop_statement reduce action.
+		return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+	case kindTok.Kind == token.QUOTED_IDENT:
+		// A backtick-quoted identifier is never a supported entity type; the
+		// backticks are kept as part of the reported type name. See
+		// generic_entity_type_unchecked in googlesql.tm.
 		return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
 	default:
 		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
@@ -5375,10 +5403,29 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 	stmt.Path = path
 	stmt.Stop = path.End()
 
-	// Empty or populated function parameters are not accepted for these kinds;
-	// the reference reports the "(" as an unexpected token.
+	// A function parameter list is only accepted for DROP FUNCTION; other
+	// object kinds diagnose the "(" specifically. See drop_statement and
+	// drop_function_statement in googlesql.tm.
 	if p.peek().Kind == token.LPAREN {
-		return nil, p.errorf(p.peek().Pos, `Syntax error: Unexpected "("`)
+		switch {
+		case nodeName == "DropFunctionStatement":
+			params, err := p.parseFunctionParameters()
+			if err != nil {
+				return nil, err
+			}
+			stmt.Parameters = params
+			stmt.Stop = params.End()
+		case nodeName == "DropTableFunctionStatement":
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Parameters are not supported for DROP TABLE FUNCTION because table functions don't support overloading")
+		case objectKind == "TABLE", nodeName == "DropSnapshotTableStatement":
+			// DROP TABLE (table_or_table_function rule) and DROP SNAPSHOT TABLE
+			// have no function_parameters production; the "(" is unexpected.
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Unexpected "("`)
+		default:
+			// schema_object_kind rule: any function parameters are only accepted
+			// for DROP FUNCTION. See drop_statement in googlesql.tm.
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Parameters are only supported for DROP FUNCTION")
+		}
 	}
 
 	if parsesDropMode {
@@ -5394,6 +5441,307 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		}
 	}
 	return stmt, nil
+}
+
+// parseDropRowAccessPolicyStatement parses
+// "DROP ROW ACCESS POLICY [IF EXISTS] identifier ON path"; see the
+// "DROP" "ROW" "ACCESS" "POLICY" ... alternative of drop_statement in
+// googlesql.tm. The DROP keyword is already consumed; the parser is at ROW.
+func (p *parser) parseDropRowAccessPolicyStatement(dropTok token.Token) (ast.Statement, error) {
+	p.advance() // ROW
+	if _, err := p.expectKeyword("ACCESS"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("POLICY"); err != nil {
+		return nil, err
+	}
+	isIfExists := p.tryParseIfExists()
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	// The policy name is a single identifier wrapped in a one-component path;
+	// see MakeNode<ASTPathExpression>(@6, $6) in the reduce action.
+	namePath := &ast.PathExpression{Span: span(name.Pos(), name.End()), Names: []*ast.Identifier{name}}
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.DropRowAccessPolicyStatement{
+		Span:       span(dropTok.Pos, target.End()),
+		IsIfExists: isIfExists,
+		Name:       namePath,
+		Target:     target,
+	}, nil
+}
+
+// parseDropAllRowAccessPoliciesStatement parses
+// "DROP ALL ROW [ACCESS] POLICIES ON path"; see
+// drop_all_row_access_policies_statement in googlesql.tm. The DROP keyword is
+// already consumed; the parser is at ALL.
+func (p *parser) parseDropAllRowAccessPoliciesStatement(dropTok token.Token) (ast.Statement, error) {
+	p.advance() // ALL
+	if _, err := p.expectKeyword("ROW"); err != nil {
+		return nil, err
+	}
+	hasAccess := false
+	if isKeyword(p.peek(), "ACCESS") {
+		p.advance() // ACCESS
+		hasAccess = true
+		if !isKeyword(p.peek(), "POLICIES") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword POLICIES but got %s", describeToken(p.peek()))
+		}
+		p.advance() // POLICIES
+	} else {
+		if !isKeyword(p.peek(), "POLICIES") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword ACCESS or keyword POLICIES but got %s", describeToken(p.peek()))
+		}
+		p.advance() // POLICIES
+	}
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+	target, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.DropAllRowAccessPoliciesStatement{
+		Span:             span(dropTok.Pos, target.End()),
+		HasAccessKeyword: hasAccess,
+		Target:           target,
+	}, nil
+}
+
+// parseGrantOrRevokeStatement parses a GRANT or REVOKE statement; see
+// grant_statement and revoke_statement in googlesql.tm. The two share the same
+// shape apart from the TO/FROM keyword and node class: privileges, an object
+// (with zero, one, or two leading object-type identifiers such as "table" or
+// "materialized view"), then the grantee list.
+func (p *parser) parseGrantOrRevokeStatement(isRevoke bool) (ast.Statement, error) {
+	startTok := p.advance() // GRANT or REVOKE
+	privs, err := p.parsePrivileges()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("ON"); err != nil {
+		return nil, err
+	}
+
+	// The object name is preceded by up to two object-type identifiers. An
+	// identifier is a leading type word only when it is followed by another
+	// identifier that could begin the path (or another type word); otherwise it
+	// is the start of the object path_expression. See the three alternatives of
+	// grant_statement/revoke_statement in googlesql.tm.
+	var objectTypes []*ast.Identifier
+	for {
+		tok := p.peek()
+		if !beginsObjectIdentifier(tok) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		}
+		if len(objectTypes) < 2 && beginsObjectIdentifier(p.peekAt(1)) {
+			objectTypes = append(objectTypes, p.parseIdentifierToken(p.advance()))
+			continue
+		}
+		break
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	// Expect the TO (GRANT) / FROM (REVOKE) keyword. The path may still continue
+	// with ".", so the error's expected-token set includes "."; the terminator
+	// keyword is only listed when there were no leading object-type identifiers,
+	// matching the reference's LALR state.
+	term := "TO"
+	if isRevoke {
+		term = "FROM"
+	}
+	if !isKeyword(p.peek(), term) {
+		expected := `"."`
+		if len(objectTypes) == 0 {
+			expected = `"." or keyword ` + term
+		}
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected %s but got %s", expected, describeToken(p.peek()))
+	}
+	p.advance() // TO / FROM
+	grantees, err := p.parseGranteeList()
+	if err != nil {
+		return nil, err
+	}
+
+	sp := span(startTok.Pos, grantees.End())
+	if isRevoke {
+		return &ast.RevokeStatement{Span: sp, Privileges: privs, ObjectTypes: objectTypes, Path: path, Grantees: grantees}, nil
+	}
+	return &ast.GrantStatement{Span: sp, Privileges: privs, ObjectTypes: objectTypes, Path: path, Grantees: grantees}, nil
+}
+
+// parseDescribeStatement parses "{DESCRIBE|DESC} [object_type] name
+// [FROM path]"; see describe_statement and describe_info in googlesql.tm. The
+// optional leading object-type identifier is present only when the first
+// identifier is followed by another identifier that begins the object path.
+func (p *parser) parseDescribeStatement() (ast.Statement, error) {
+	kwTok := p.advance() // DESCRIBE or DESC
+
+	var objectType *ast.Identifier
+	if beginsObjectIdentifier(p.peek()) && beginsObjectIdentifier(p.peekAt(1)) {
+		objectType = p.parseIdentifierToken(p.advance())
+	}
+	name, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.DescribeStatement{Span: span(kwTok.Pos, name.End()), ObjectType: objectType, Name: name}
+	if isKeyword(p.peek(), "FROM") {
+		p.advance() // FROM
+		from, err := p.parseMaybeDashedPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.OptionalFrom = from
+		stmt.Stop = from.End()
+	}
+	return stmt, nil
+}
+
+// parseShowStatement parses "SHOW show_target [FROM path] [LIKE 'pattern']";
+// see show_statement in googlesql.tm. The show_target is either the two-word
+// "MATERIALIZED VIEWS" (folded into one identifier) or a single identifier.
+func (p *parser) parseShowStatement() (ast.Statement, error) {
+	showTok := p.advance() // SHOW
+
+	var target *ast.Identifier
+	if isKeyword(p.peek(), "MATERIALIZED") && isKeyword(p.peekAt(1), "VIEWS") {
+		m := p.advance() // MATERIALIZED
+		v := p.advance() // VIEWS
+		target = &ast.Identifier{Span: span(m.Pos, v.End), Name: "MATERIALIZED VIEWS"}
+	} else {
+		id, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		target = id
+	}
+	stmt := &ast.ShowStatement{Span: span(showTok.Pos, target.End()), Target: target}
+
+	if isKeyword(p.peek(), "FROM") {
+		p.advance() // FROM
+		path, err := p.parseMaybeDashedPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.OptionalName = path
+		stmt.Stop = path.End()
+	}
+	if isKeyword(p.peek(), "LIKE") {
+		p.advance() // LIKE
+		if p.peek().Kind != token.STRING {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected string literal but got %s", describeToken(p.peek()))
+		}
+		like, err := p.parseStringLiteral()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Like = like
+		stmt.Stop = like.End()
+	}
+	return stmt, nil
+}
+
+// beginsObjectIdentifier reports whether tok can begin an object identifier or
+// object-type word in a GRANT/REVOKE statement: a quoted identifier or a
+// non-reserved (bare or unreserved-keyword) identifier.
+func beginsObjectIdentifier(tok token.Token) bool {
+	return tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))
+}
+
+// parsePrivileges parses "ALL [PRIVILEGES]" or a comma-separated privilege
+// list; see privileges in googlesql.tm. "ALL" produces an empty ASTPrivileges
+// node (no privilege children).
+func (p *parser) parsePrivileges() (*ast.Privileges, error) {
+	if isKeyword(p.peek(), "ALL") {
+		allTok := p.advance() // ALL
+		stop := allTok.End
+		if isKeyword(p.peek(), "PRIVILEGES") {
+			stop = p.advance().End
+		}
+		return &ast.Privileges{Span: span(allTok.Pos, stop)}, nil
+	}
+	first, err := p.parsePrivilege()
+	if err != nil {
+		return nil, err
+	}
+	privs := &ast.Privileges{Span: span(first.Pos(), first.End()), Privileges: []*ast.Privilege{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance()
+		priv, err := p.parsePrivilege()
+		if err != nil {
+			return nil, err
+		}
+		privs.Privileges = append(privs.Privileges, priv)
+		privs.Stop = priv.End()
+	}
+	return privs, nil
+}
+
+// parsePrivilege parses "privilege_name [(path [, ...])]"; see privilege in
+// googlesql.tm.
+func (p *parser) parsePrivilege() (*ast.Privilege, error) {
+	name, err := p.parsePrivilegeName()
+	if err != nil {
+		return nil, err
+	}
+	priv := &ast.Privilege{Span: span(name.Pos(), name.End()), Name: name}
+	if p.peek().Kind == token.LPAREN {
+		cols, err := p.parsePathExpressionListWithParens()
+		if err != nil {
+			return nil, err
+		}
+		priv.Columns = cols
+		priv.Stop = cols.End()
+	}
+	return priv, nil
+}
+
+// parsePrivilegeName parses a privilege name: any identifier or the reserved
+// keyword SELECT; see privilege_name in googlesql.tm.
+func (p *parser) parsePrivilegeName() (*ast.Identifier, error) {
+	tok := p.peek()
+	if isKeyword(tok, "SELECT") || beginsObjectIdentifier(tok) {
+		return p.parseIdentifierToken(p.advance()), nil
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+}
+
+// parsePathExpressionListWithParens parses "( path [, ...] )"; see
+// path_expression_list_with_parens in googlesql.tm. The opening "(" is next.
+func (p *parser) parsePathExpressionListWithParens() (*ast.PathExpressionList, error) {
+	lparen, err := p.expect(token.LPAREN, `"("`)
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.PathExpressionList{Span: span(lparen.Pos, 0)}
+	for {
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		list.Paths = append(list.Paths, path)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance()
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Stop = rparen.End
+	return list, nil
 }
 
 // parseAlterStatement parses ALTER <schema object kind> [IF EXISTS] <path>

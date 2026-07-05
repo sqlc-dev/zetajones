@@ -332,6 +332,25 @@ func nodeString(n ast.Node) string {
 		return "RevokeFromClause"
 	case *ast.FilterUsingClause:
 		return "FilterUsingClause"
+	case *ast.DropRowAccessPolicyStatement:
+		if t.IsIfExists {
+			return "DropRowAccessPolicyStatement(is_if_exists)"
+		}
+		return "DropRowAccessPolicyStatement"
+	case *ast.DropAllRowAccessPoliciesStatement:
+		return "DropAllRowAccessPoliciesStatement"
+	case *ast.DescribeStatement:
+		return "DescribeStatement"
+	case *ast.ShowStatement:
+		return "ShowStatement"
+	case *ast.GrantStatement:
+		return "GrantStatement"
+	case *ast.RevokeStatement:
+		return "RevokeStatement"
+	case *ast.Privileges:
+		return "Privileges"
+	case *ast.Privilege:
+		return "Privilege"
 	case *ast.GranteeList:
 		return "GranteeList"
 	case *ast.RenameToClause:

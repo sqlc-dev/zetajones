@@ -2604,11 +2604,14 @@ type DropStatement struct {
 	IsIfExists bool            `json:"is_if_exists,omitempty"`
 	DropMode   string          `json:"drop_mode,omitempty"`
 	Path       *PathExpression `json:"path"`
+	// Parameters holds the optional function parameter list for
+	// DropFunctionStatement (e.g. DROP FUNCTION foo(int32)); nil otherwise.
+	Parameters *FunctionParameters `json:"parameters,omitempty"`
 }
 
 func (n *DropStatement) statementNode() {}
 func (n *DropStatement) Children() []Node {
-	return children(n.Path)
+	return children(n.Path, n.Parameters)
 }
 
 // AlterActionList is the comma-separated list of actions in an ALTER
@@ -2660,6 +2663,135 @@ type AlterAllRowAccessPoliciesStatement struct {
 func (n *AlterAllRowAccessPoliciesStatement) statementNode() {}
 func (n *AlterAllRowAccessPoliciesStatement) Children() []Node {
 	return children(n.Path, n.Revoke)
+}
+
+// DropRowAccessPolicyStatement is a
+// "DROP ROW ACCESS POLICY [IF EXISTS] name ON target" statement; see
+// ASTDropRowAccessPolicyStatement in googlesql/parser/parse_tree.h.
+type DropRowAccessPolicyStatement struct {
+	Span
+	IsIfExists bool            `json:"is_if_exists,omitempty"`
+	Name       *PathExpression `json:"name"`
+	Target     *PathExpression `json:"target"`
+}
+
+func (n *DropRowAccessPolicyStatement) statementNode() {}
+func (n *DropRowAccessPolicyStatement) Children() []Node {
+	return children(n.Name, n.Target)
+}
+
+// DropAllRowAccessPoliciesStatement is a
+// "DROP ALL ROW [ACCESS] POLICIES ON target" statement; see
+// ASTDropAllRowAccessPoliciesStatement in googlesql/parser/parse_tree.h.
+type DropAllRowAccessPoliciesStatement struct {
+	Span
+	HasAccessKeyword bool            `json:"has_access_keyword,omitempty"`
+	Target           *PathExpression `json:"target"`
+}
+
+func (n *DropAllRowAccessPoliciesStatement) statementNode() {}
+func (n *DropAllRowAccessPoliciesStatement) Children() []Node {
+	return children(n.Target)
+}
+
+// DescribeStatement is a "DESCRIBE [object_type] name [FROM path]" statement;
+// see ASTDescribeStatement in googlesql/parser/parse_tree.h. ObjectType is the
+// optional leading kind identifier (e.g. INDEX, FUNCTION, TYPE, COLUMN).
+type DescribeStatement struct {
+	Span
+	ObjectType   *Identifier     `json:"object_type,omitempty"`
+	Name         *PathExpression `json:"name"`
+	OptionalFrom *PathExpression `json:"optional_from,omitempty"`
+}
+
+func (n *DescribeStatement) statementNode() {}
+func (n *DescribeStatement) Children() []Node {
+	return children(n.ObjectType, n.Name, n.OptionalFrom)
+}
+
+// ShowStatement is a "SHOW target [FROM path] [LIKE 'pattern']" statement; see
+// ASTShowStatement in googlesql/parser/parse_tree.h.
+type ShowStatement struct {
+	Span
+	Target       *Identifier     `json:"target"`
+	OptionalName *PathExpression `json:"optional_name,omitempty"`
+	Like         Node            `json:"like,omitempty"`
+}
+
+func (n *ShowStatement) statementNode() {}
+func (n *ShowStatement) Children() []Node {
+	return children(n.Target, n.OptionalName, n.Like)
+}
+
+// GrantStatement is a "GRANT privileges ON [type] name TO grantees" statement;
+// see ASTGrantStatement in googlesql/parser/parse_tree.h. ObjectTypes holds the
+// zero, one, or two leading object-type identifiers (e.g. "table", or
+// "materialized view").
+type GrantStatement struct {
+	Span
+	Privileges  *Privileges     `json:"privileges"`
+	ObjectTypes []*Identifier   `json:"object_types,omitempty"`
+	Path        *PathExpression `json:"path"`
+	Grantees    *GranteeList    `json:"grantees"`
+}
+
+func (n *GrantStatement) statementNode() {}
+func (n *GrantStatement) Children() []Node {
+	out := []Node{n.Privileges}
+	for _, id := range n.ObjectTypes {
+		out = append(out, id)
+	}
+	out = append(out, n.Path, n.Grantees)
+	return out
+}
+
+// RevokeStatement is a "REVOKE privileges ON [type] name FROM grantees"
+// statement; see ASTRevokeStatement in googlesql/parser/parse_tree.h.
+type RevokeStatement struct {
+	Span
+	Privileges  *Privileges     `json:"privileges"`
+	ObjectTypes []*Identifier   `json:"object_types,omitempty"`
+	Path        *PathExpression `json:"path"`
+	Grantees    *GranteeList    `json:"grantees"`
+}
+
+func (n *RevokeStatement) statementNode() {}
+func (n *RevokeStatement) Children() []Node {
+	out := []Node{n.Privileges}
+	for _, id := range n.ObjectTypes {
+		out = append(out, id)
+	}
+	out = append(out, n.Path, n.Grantees)
+	return out
+}
+
+// Privileges is a list of privileges in a GRANT/REVOKE statement; see
+// ASTPrivileges in googlesql/parser/parse_tree.h. An empty Privileges (no
+// children) represents "ALL [PRIVILEGES]".
+type Privileges struct {
+	Span
+	Privileges []*Privilege `json:"privileges,omitempty"`
+}
+
+func (n *Privileges) Children() []Node {
+	out := make([]Node, 0, len(n.Privileges))
+	for _, p := range n.Privileges {
+		out = append(out, p)
+	}
+	return out
+}
+
+// Privilege is a single privilege (a name and an optional parenthesized column
+// list) in a GRANT/REVOKE statement; see ASTPrivilege in
+// googlesql/parser/parse_tree.h.
+type Privilege struct {
+	Span
+	Name    *Identifier         `json:"name"`
+	Columns *PathExpressionList `json:"columns,omitempty"`
+}
+
+func (n *Privilege) Children() []Node {
+	return children(n.Name, n.Columns)
 }
 
 // GrantToClause is a "GRANT TO (grantee_list)" row access policy alter action;
