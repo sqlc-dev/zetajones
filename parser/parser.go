@@ -292,6 +292,11 @@ const FeatureEnableAlterArrayOptions Feature = "ENABLE_ALTER_ARRAY_OPTIONS"
 // spanner_* productions in googlesql.tm. It is not enabled by MAXIMUM.
 const FeatureSpannerLegacyDDL Feature = "SPANNER_LEGACY_DDL"
 
+// FeatureSqlGraph gates GoogleSQL graph queries: the GRAPH statement, the
+// GRAPH_TABLE(...) table expression, and graph pattern syntax
+// (FEATURE_SQL_GRAPH).
+const FeatureSqlGraph Feature = "SQL_GRAPH"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -375,6 +380,11 @@ type Options struct {
 	// or "strict". See macro_expansion_mode in run_parser_test.cc and
 	// ParserOptions in googlesql/parser/parser.h.
 	MacroExpansionMode string
+	// ReserveGraphTable makes GRAPH_TABLE a reserved keyword, enabling the
+	// GRAPH_TABLE(...) graph table expression in a FROM clause; see
+	// reserve_graph_table in run_parser_test.cc and KW_GRAPH_TABLE_RESERVED in
+	// googlesql.tm.
+	ReserveGraphTable bool
 }
 
 // stringSet builds a case-insensitive (upper-cased) lookup set from a list.
@@ -403,7 +413,7 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		}
 		return nil, err
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	stmt, err := p.parseStatement()
 	if err != nil {
 		return nil, err
@@ -460,7 +470,7 @@ func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
 	// statement-start position; see LookaheadTransformer::IsCurrentTokenScriptLabel
 	// in googlesql/parser/lookahead_transformer.cc.
 	markScriptLabels(toks)
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	// An empty script resolves to a Script wrapping an empty statement list.
 	if p.peek().Kind == token.EOF {
 		empty := &ast.StatementList{Span: span(0, 0)}
@@ -622,7 +632,7 @@ func ParseTypeWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of type"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	typ, err := p.parseType()
 	if err != nil {
 		return nil, err
@@ -660,7 +670,7 @@ func ParseExpressionWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of expression"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
 	expr, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -684,6 +694,9 @@ type parser struct {
 	// macroMode is the effective macro expansion mode ("none", "lenient", or
 	// "strict"); an empty value means "none". It gates DEFINE MACRO statements.
 	macroMode string
+	// reserveGraphTable makes GRAPH_TABLE a reserved keyword and enables the
+	// GRAPH_TABLE(...) table expression; see Options.ReserveGraphTable.
+	reserveGraphTable bool
 	// extents records the full token extent of expressions that were
 	// parenthesized. In ZetaSQL's parse tree a parenthesized expression
 	// keeps the location of the inner expression, but any enclosing
@@ -1071,6 +1084,10 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return &ast.SubpipelineStatement{Span: span(sub.Pos(), sub.End()), Subpipeline: sub}, nil
 	}
 	switch {
+	case isKeyword(tok, "GRAPH") && p.features.Enabled(FeatureSqlGraph):
+		// A statement beginning with GRAPH is a GQL graph query statement;
+		// see gql_statement / gql_query in googlesql.tm.
+		return p.parseGraphStatement()
 	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"),
 		isKeyword(tok, "TABLE"), tok.Kind == token.LPAREN:
 		query, err := p.parseQuery()
@@ -10479,6 +10496,11 @@ func (p *parser) parseTablePrimaryBase() (ast.Node, error) {
 		return nil, p.errorf(tok.Pos, "Query parameters cannot be used in place of table names")
 	case token.SYSTEM_VARIABLE:
 		return nil, p.errorf(tok.Pos, "System variables cannot be used in place of table names")
+	}
+	// GRAPH_TABLE(...) is a graph table expression when GRAPH_TABLE is a
+	// reserved keyword; see graph_table_query in googlesql.tm.
+	if p.reserveGraphTable && isKeyword(p.peek(), "GRAPH_TABLE") && p.peekAt(1).Kind == token.LPAREN {
+		return p.parseGraphTableQuery()
 	}
 	if isKeyword(p.peek(), "LATERAL") {
 		return p.parseLateralTablePrimary()

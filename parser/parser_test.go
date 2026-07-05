@@ -43,6 +43,16 @@ func runCase(c *testfile.Case) string {
 		if spec, ok := strings.CutPrefix(opt, "macro_expansion_mode="); ok {
 			opts.MacroExpansionMode = spec
 		}
+		// GRAPH_TABLE is a conditionally reserved keyword; the graph_* test
+		// files enable it via [default reserve_graph_table] and individual
+		// cases may override with [no_reserve_graph_table]. See
+		// reserve_graph_table in run_parser_test.cc.
+		if opt == "reserve_graph_table" {
+			opts.ReserveGraphTable = true
+		}
+		if opt == "no_reserve_graph_table" {
+			opts.ReserveGraphTable = false
+		}
 		// The reference driver splits these configs on "," (an empty config
 		// yields a single empty element); see run_parser_test.cc.
 		if spec, ok := strings.CutPrefix(opt, "supported_generic_entity_types="); ok {

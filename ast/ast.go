@@ -5494,3 +5494,221 @@ type BoundedQuantifier struct {
 func (n *BoundedQuantifier) Children() []Node {
 	return children(n.LowerBound, n.UpperBound)
 }
+
+// -----------------------------------------------------------------------------
+// GoogleSQL graph (GQL / GRAPH_TABLE) query nodes.
+//
+// These mirror the ASTGql*/ASTGraph* node families in
+// googlesql/parser/parse_tree.h and their SingleNodeDebugString output in
+// parse_tree.cc. They form the foundation of the graph query feature: the
+// GRAPH statement (gql_query), the GRAPH_TABLE(...) table expression, and the
+// core graph pattern nodes (path/node/edge patterns, labels, and the linear
+// GQL operators MATCH/LET/FILTER/RETURN). See the graph_* productions in
+// googlesql.tm.
+// -----------------------------------------------------------------------------
+
+// GqlQuery wraps a graph query used as a query expression; see ASTGqlQuery in
+// googlesql/parser/parse_tree.h. Its single child is a GraphTableQuery.
+type GqlQuery struct {
+	Span
+	Query Node `json:"query"`
+}
+
+func (n *GqlQuery) Children() []Node { return children(n.Query) }
+
+// GraphTableQuery is either "GRAPH name <operations>" (as a statement) or
+// "GRAPH_TABLE( name <match> [COLUMNS(...)] )" / "GRAPH_TABLE( name
+// <operations> )" (as a table expression); see ASTGraphTableQuery in
+// googlesql/parser/parse_tree.h. Op is a *GqlMatch (single-match COLUMNS form)
+// or a *GqlOperatorList (linear/composite form); Shape is the COLUMNS select
+// list when present.
+type GraphTableQuery struct {
+	Span
+	Graph *PathExpression `json:"graph"`
+	Op    Node            `json:"op"`
+	Shape *SelectList     `json:"shape,omitempty"`
+	Alias *Alias          `json:"alias,omitempty"`
+}
+
+func (n *GraphTableQuery) Children() []Node {
+	return children(n.Graph, n.Op, n.Shape, n.Alias)
+}
+
+// GqlOperatorList is a list of GQL linear operators; see ASTGqlOperatorList in
+// googlesql/parser/parse_tree.h. The top-level list holds one nested
+// GqlOperatorList per NEXT-separated composite block.
+type GqlOperatorList struct {
+	Span
+	Operators []Node `json:"operators"`
+}
+
+func (n *GqlOperatorList) Children() []Node { return append([]Node(nil), n.Operators...) }
+
+// GqlMatch is a "MATCH <graph_pattern>" operator (or "OPTIONAL MATCH ...");
+// see ASTGqlMatch in googlesql/parser/parse_tree.h.
+type GqlMatch struct {
+	Span
+	Pattern  *GraphPattern `json:"pattern"`
+	Optional bool          `json:"optional,omitempty"`
+}
+
+func (n *GqlMatch) Children() []Node { return children(n.Pattern) }
+
+// GqlLet is a "LET <definitions>" operator; see ASTGqlLet in
+// googlesql/parser/parse_tree.h.
+type GqlLet struct {
+	Span
+	Definitions *GqlLetVariableDefinitionList `json:"definitions"`
+}
+
+func (n *GqlLet) Children() []Node { return children(n.Definitions) }
+
+// GqlLetVariableDefinitionList is the comma-separated list of variable
+// definitions in a LET operator; see ASTGqlLetVariableDefinitionList in
+// googlesql/parser/parse_tree.h.
+type GqlLetVariableDefinitionList struct {
+	Span
+	Definitions []*GqlLetVariableDefinition `json:"definitions"`
+}
+
+func (n *GqlLetVariableDefinitionList) Children() []Node {
+	out := make([]Node, 0, len(n.Definitions))
+	for _, d := range n.Definitions {
+		out = append(out, d)
+	}
+	return out
+}
+
+// GqlLetVariableDefinition is a single "name = expression" binding; see
+// ASTGqlLetVariableDefinition in googlesql/parser/parse_tree.h.
+type GqlLetVariableDefinition struct {
+	Span
+	Name *Identifier `json:"name"`
+	Expr Node        `json:"expr"`
+}
+
+func (n *GqlLetVariableDefinition) Children() []Node { return children(n.Name, n.Expr) }
+
+// GqlFilter is a "FILTER [WHERE] <expr>" operator; see ASTGqlFilter in
+// googlesql/parser/parse_tree.h. Its single child is a WhereClause.
+type GqlFilter struct {
+	Span
+	Where *WhereClause `json:"where"`
+}
+
+func (n *GqlFilter) Children() []Node { return children(n.Where) }
+
+// GqlReturn is a "RETURN <items>" operator; see ASTGqlReturn in
+// googlesql/parser/parse_tree.h. Its child is a Select holding the return
+// item list.
+type GqlReturn struct {
+	Span
+	Select *Select `json:"select"`
+}
+
+func (n *GqlReturn) Children() []Node { return children(n.Select) }
+
+// GraphPattern is a comma-separated list of path patterns with an optional
+// trailing WHERE clause; see ASTGraphPattern in
+// googlesql/parser/parse_tree.h.
+type GraphPattern struct {
+	Span
+	Paths []*GraphPathPattern `json:"paths"`
+	Where *WhereClause        `json:"where,omitempty"`
+}
+
+func (n *GraphPattern) Children() []Node {
+	out := make([]Node, 0, len(n.Paths)+1)
+	for _, p := range n.Paths {
+		out = append(out, p)
+	}
+	if n.Where != nil {
+		out = append(out, n.Where)
+	}
+	return out
+}
+
+// GraphPathPattern is a sequence of node/edge (path factor) patterns forming a
+// path; see ASTGraphPathPattern in googlesql/parser/parse_tree.h. When
+// Parenthesized is set the debug name is prefixed with "Parenthesized".
+type GraphPathPattern struct {
+	Span
+	Factors       []Node `json:"factors"`
+	Parenthesized bool   `json:"parenthesized,omitempty"`
+}
+
+func (n *GraphPathPattern) Children() []Node { return append([]Node(nil), n.Factors...) }
+
+// GraphNodePattern is a "(<filler>)" node pattern; see ASTGraphNodePattern in
+// googlesql/parser/parse_tree.h.
+type GraphNodePattern struct {
+	Span
+	Filler *GraphElementPatternFiller `json:"filler"`
+}
+
+func (n *GraphNodePattern) Children() []Node { return children(n.Filler) }
+
+// GraphEdgePattern is an edge pattern such as "-[e]->", "<-[e]-", "-", "->",
+// or "<-"; see ASTGraphEdgePattern in googlesql/parser/parse_tree.h. Filler is
+// nil for abbreviated edges. Orientation is "ANY", "LEFT", or "RIGHT" (not
+// shown in the debug string).
+type GraphEdgePattern struct {
+	Span
+	Filler      *GraphElementPatternFiller `json:"filler,omitempty"`
+	Orientation string                     `json:"orientation,omitempty"`
+}
+
+func (n *GraphEdgePattern) Children() []Node { return children(n.Filler) }
+
+// GraphElementPatternFiller holds the optional variable name, label filter,
+// and WHERE clause inside a node or edge pattern; see
+// ASTGraphElementPatternFiller in googlesql/parser/parse_tree.h.
+type GraphElementPatternFiller struct {
+	Span
+	Name  *Identifier       `json:"name,omitempty"`
+	Label *GraphLabelFilter `json:"label,omitempty"`
+	Where *WhereClause      `json:"where,omitempty"`
+}
+
+func (n *GraphElementPatternFiller) Children() []Node {
+	return children(n.Name, n.Label, n.Where)
+}
+
+// GraphLabelFilter is an "IS <label_expr>" or ":<label_expr>" clause; see
+// ASTGraphLabelFilter in googlesql/parser/parse_tree.h.
+type GraphLabelFilter struct {
+	Span
+	Expr Node `json:"expr"`
+}
+
+func (n *GraphLabelFilter) Children() []Node { return children(n.Expr) }
+
+// GraphElementLabel is a single label name in a label expression; see
+// ASTGraphElementLabel in googlesql/parser/parse_tree.h.
+type GraphElementLabel struct {
+	Span
+	Name *Identifier `json:"name"`
+}
+
+func (n *GraphElementLabel) Children() []Node { return children(n.Name) }
+
+// GraphWildcardLabel is the "%" wildcard label; see ASTGraphWildcardLabel in
+// googlesql/parser/parse_tree.h.
+type GraphWildcardLabel struct {
+	Span
+}
+
+func (n *GraphWildcardLabel) Children() []Node { return nil }
+
+// GraphLabelOperation is a "!"/"&"/"|" label expression; Op is "NOT", "AND",
+// or "OR". See ASTGraphLabelOperation in googlesql/parser/parse_tree.h.
+// Parenthesized records that the expression was written in parentheses, which
+// prevents flattening of adjacent same-operator operands.
+type GraphLabelOperation struct {
+	Span
+	Op            string `json:"op"`
+	Operands      []Node `json:"operands"`
+	Parenthesized bool   `json:"parenthesized,omitempty"`
+}
+
+func (n *GraphLabelOperation) Children() []Node { return append([]Node(nil), n.Operands...) }

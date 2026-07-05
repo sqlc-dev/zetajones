@@ -1356,6 +1356,48 @@ func nodeString(n ast.Node) string {
 		return "TVFSchema"
 	case *ast.TVFSchemaColumn:
 		return "TVFSchemaColumn"
+	case *ast.GqlQuery:
+		return "GqlQuery"
+	case *ast.GraphTableQuery:
+		return "GraphTableQuery"
+	case *ast.GqlOperatorList:
+		return "GqlOperatorList"
+	case *ast.GqlMatch:
+		if t.Optional {
+			return "GqlMatch (optional)"
+		}
+		return "GqlMatch"
+	case *ast.GqlLet:
+		return "GqlLet"
+	case *ast.GqlLetVariableDefinitionList:
+		return "GqlLetVariableDefinitionList"
+	case *ast.GqlLetVariableDefinition:
+		return "GqlLetVariableDefinition"
+	case *ast.GqlFilter:
+		return "GqlFilter"
+	case *ast.GqlReturn:
+		return "GqlReturn"
+	case *ast.GraphPattern:
+		return "GraphPattern"
+	case *ast.GraphPathPattern:
+		if t.Parenthesized {
+			return "ParenthesizedGraphPathPattern"
+		}
+		return "GraphPathPattern"
+	case *ast.GraphNodePattern:
+		return "GraphNodePattern"
+	case *ast.GraphEdgePattern:
+		return "GraphEdgePattern"
+	case *ast.GraphElementPatternFiller:
+		return "GraphElementPatternFiller"
+	case *ast.GraphLabelFilter:
+		return "GraphLabelFilter"
+	case *ast.GraphElementLabel:
+		return "GraphElementLabel"
+	case *ast.GraphWildcardLabel:
+		return "GraphWildcardLabel"
+	case *ast.GraphLabelOperation:
+		return "GraphLabelOperation(" + t.Op + ")"
 	default:
 		return fmt.Sprintf("UNKNOWN_NODE(%T)", n)
 	}
