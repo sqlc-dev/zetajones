@@ -5986,11 +5986,26 @@ func (p *parser) parseQueryPrimary() (ast.Node, error) {
 // Table-valued function calls after TABLE are not implemented yet.
 func (p *parser) parseTableClause() (*ast.TableClause, error) {
 	tableTok := p.advance() // TABLE
+	body, err := p.parseTableClauseNoKeyword()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.TableClause{Span: span(tableTok.Pos, body.End()), Table: body}, nil
+}
+
+// parseTableClauseNoKeyword parses the operand after the TABLE keyword of a
+// table clause: either a path expression (TABLE path) or a table-valued
+// function call (TABLE path(args...)); see table_clause_no_keyword in
+// googlesql.tm.
+func (p *parser) parseTableClauseNoKeyword() (ast.Node, error) {
 	path, err := p.parsePathExpression()
 	if err != nil {
 		return nil, err
 	}
-	return &ast.TableClause{Span: span(tableTok.Pos, path.End()), Path: path}, nil
+	if p.peek().Kind == token.LPAREN {
+		return p.parseTVFRest(path)
+	}
+	return path, nil
 }
 
 // parsePipeOperator parses one "|> <operator>" pipe operator.
@@ -6989,13 +7004,17 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 		return (t.Kind == token.IDENT || t.Kind == token.QUOTED_IDENT) && !isReserved(t)
 	}
 	switch {
+	case tok.Kind == token.LPAREN && isPathStart(p.peekAt(1)) && p.peekAt(2).Kind == token.LAMBDA:
+		// "(" named_argument ")": a named argument must not be parenthesized;
+		// see tvf_argument in googlesql.tm. The error points at the open paren.
+		return nil, p.errorf(tok.Pos, "Syntax error: Named arguments for table-valued function calls written as \"name => value\" must not be enclosed in parentheses. To fix this, replace (name => value) with name => value")
 	case isKeyword(tok, "TABLE") && isPathStart(p.peekAt(1)):
 		p.advance() // TABLE
-		path, err := p.parsePathExpression()
+		body, err := p.parseTableClauseNoKeyword()
 		if err != nil {
 			return nil, err
 		}
-		clause := &ast.TableClause{Span: span(tok.Pos, path.End()), Path: path}
+		clause := &ast.TableClause{Span: span(tok.Pos, body.End()), Table: body}
 		return &ast.TVFArgument{Span: clause.Span, Expr: clause}, nil
 	case isKeyword(tok, "MODEL") && isPathStart(p.peekAt(1)):
 		p.advance() // MODEL
@@ -7021,10 +7040,28 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 		clause := &ast.ConnectionClause{Span: span(tok.Pos, path.End()), Path: path}
 		return &ast.TVFArgument{Span: clause.Span, Expr: clause}, nil
 	case isPathStart(tok) && p.peekAt(1).Kind == token.LAMBDA:
-		// named_argument: identifier "=>" expression; see tvf_argument in
-		// googlesql.tm.
+		// named_argument: identifier "=>" expression, or named_non_expr_argument:
+		// identifier "=>" table_clause; see tvf_argument in googlesql.tm.
 		name := p.parseIdentifierToken(p.advance())
 		p.advance() // consume =>
+		if tableTok := p.peek(); isKeyword(tableTok, "TABLE") && isPathStart(p.peekAt(1)) {
+			// named_non_expr_argument: the TABLE clause value is wrapped in a
+			// Query and an ExpressionSubquery, both spanning the table clause.
+			p.advance() // TABLE
+			body, err := p.parseTableClauseNoKeyword()
+			if err != nil {
+				return nil, err
+			}
+			clause := &ast.TableClause{Span: span(tableTok.Pos, body.End()), Table: body}
+			query := &ast.Query{Span: clause.Span, QueryExpr: clause}
+			subquery := &ast.ExpressionSubquery{Span: clause.Span, Query: query}
+			named := &ast.NamedArgument{
+				Span:  span(name.Pos(), clause.End()),
+				Name:  name,
+				Value: subquery,
+			}
+			return &ast.TVFArgument{Span: named.Span, Expr: named}, nil
+		}
 		value, err := p.parseExpression()
 		if err != nil {
 			return nil, err
@@ -7473,6 +7510,14 @@ func (p *parser) parseAnd() (ast.Node, error) {
 
 func (p *parser) parseNot() (ast.Node, error) {
 	if isKeyword(p.peek(), "NOT") {
+		// The reference lexes a NOT followed by BETWEEN, IN, LIKE, or DISTINCT
+		// as KW_NOT_SPECIAL (see lookahead_transformer.cc), which is only valid
+		// as an infix operator. As a prefix (start of an expression) it has no
+		// grammar rule, so the parser rejects the NOT itself.
+		next := p.peekAt(1)
+		if isKeyword(next, "BETWEEN") || isKeyword(next, "IN") || isKeyword(next, "LIKE") || isKeyword(next, "DISTINCT") {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected keyword %s", strings.ToUpper(p.peek().Image))
+		}
 		notTok := p.advance()
 		p.allowDotStar = false
 		operand, err := p.parseNot()
@@ -8144,14 +8189,11 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 				// rule in googlesql.tm.
 				p.advance() // .
 				p.advance() // (
-				inner, err := p.parsePathExpression()
+				inner, err := p.parseGeneralizedFieldInnerPath()
 				if err != nil {
 					return nil, err
 				}
-				rparen, err := p.expect(token.RPAREN, `")"`)
-				if err != nil {
-					return nil, err
-				}
+				rparen := p.advance() // ) (guaranteed by parseGeneralizedFieldInnerPath)
 				expr = &ast.DotGeneralizedField{Span: span(p.extStart(expr), rparen.End), Expr: expr, Path: inner}
 				continue
 			}
@@ -8230,6 +8272,40 @@ func (p *parser) parsePostfix() (ast.Node, error) {
 			}
 		default:
 			return expr, nil
+		}
+	}
+}
+
+// parseGeneralizedFieldInnerPath parses the path_expression inside a ".(...)"
+// generalized field access, stopping in front of (but not consuming) the
+// closing ")". Its error wording follows the reference LALR states rather than
+// parsePathExpression: at the start of the path a non-identifier is reported as
+// "Unexpected <token>", and after a path component the parser expects ")" or
+// "." (see the generalized field access rules in googlesql.tm).
+func (p *parser) parseGeneralizedFieldInnerPath() (*ast.PathExpression, error) {
+	tok := p.peek()
+	if (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT) || isReserved(tok) {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	first := p.parseIdentifierToken(p.advance())
+	path := &ast.PathExpression{Span: span(first.Pos(), first.End()), Names: []*ast.Identifier{first}}
+	for {
+		switch p.peek().Kind {
+		case token.RPAREN:
+			return path, nil
+		case token.DOT:
+			p.advance() // .
+			// After a ".", the reference tokenizer allows any keyword as an
+			// identifier (IDENTIFIER_DOT mode), so keywords are accepted here.
+			nt := p.peek()
+			if nt.Kind != token.IDENT && nt.Kind != token.QUOTED_IDENT {
+				return nil, p.errorf(nt.Pos, "Syntax error: Unexpected %s", describeToken(nt))
+			}
+			ident := p.parseIdentifierToken(p.advance())
+			path.Names = append(path.Names, ident)
+			path.Stop = ident.End()
+		default:
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected ")" or "." but got %s`, describeToken(p.peek()))
 		}
 	}
 }
@@ -8885,11 +8961,12 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 		p.advance()
 		call.Distinct = true
 	}
-	// null_handling_modifier in googlesql.tm: with an empty argument list,
-	// "IGNORE NULLS" / "RESPECT NULLS" is still a modifier, not arguments.
+	// null_handling_modifier in googlesql.tm: after the argument list, a leading
+	// "IGNORE" / "RESPECT" begins the modifier and requires "NULLS". Both are
+	// reserved keywords, so they can never be arguments; with an empty argument
+	// list they still begin a modifier rather than arguments.
 	nullHandlingAhead := func() bool {
-		return (isKeyword(p.peek(), "IGNORE") || isKeyword(p.peek(), "RESPECT")) &&
-			isKeyword(p.peekAt(1), "NULLS")
+		return isKeyword(p.peek(), "IGNORE") || isKeyword(p.peek(), "RESPECT")
 	}
 	// HAVING, ORDER, and LIMIT are reserved keywords that cannot start an
 	// expression; with an empty argument list they begin trailing modifiers.
@@ -8947,6 +9024,21 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 						return nil, err
 					}
 				}
+				// function_call_argument: expression as_alias_with_required_as?;
+				// see googlesql.tm. An "AS alias" wraps the argument in an
+				// ExpressionWithAlias node. The AS keyword is required, so a bare
+				// trailing identifier is left for the caller to reject.
+				if isKeyword(p.peek(), "AS") {
+					alias, aerr := p.parseOptionalAlias()
+					if aerr != nil {
+						return nil, aerr
+					}
+					arg = &ast.ExpressionWithAlias{
+						Span:       span(p.extStart(arg), alias.End()),
+						Expression: arg,
+						Alias:      alias,
+					}
+				}
 			}
 			call.Args = append(call.Args, arg)
 			if p.peek().Kind != token.COMMA {
@@ -8962,7 +9054,9 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 			call.NullHandling = "RESPECT_NULLS"
 		}
 		p.advance() // consume IGNORE or RESPECT
-		p.advance() // consume NULLS
+		if _, err := p.expectKeyword("NULLS"); err != nil {
+			return nil, err
+		}
 	}
 	// having_modifier in googlesql.tm: "HAVING" ("MAX" | "MIN") expression.
 	if isKeyword(p.peek(), "HAVING") {

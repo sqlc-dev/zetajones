@@ -3325,6 +3325,19 @@ func (n *NamedArgument) Children() []Node {
 	return children(n.Name, n.Value)
 }
 
+// ExpressionWithAlias is a function-call argument written as "expression AS
+// alias"; see ASTExpressionWithAlias in googlesql/parser/parse_tree.h and
+// function_call_argument in googlesql.tm.
+type ExpressionWithAlias struct {
+	Span
+	Expression Node   `json:"expression"`
+	Alias      *Alias `json:"alias"`
+}
+
+func (n *ExpressionWithAlias) Children() []Node {
+	return children(n.Expression, n.Alias)
+}
+
 // Lambda is a lambda argument "param -> body" or "(a, b) -> body" passed to a
 // function or table-valued function call; see ASTLambda in
 // googlesql/parser/parse_tree.h. Params is a PathExpression (single argument)
@@ -3573,11 +3586,14 @@ func (n *ColumnList) Children() []Node {
 // in googlesql/parser/parse_tree.h.
 type TableClause struct {
 	Span
-	Path *PathExpression `json:"path"`
+	// Table is the table_clause_no_keyword operand: either a *PathExpression
+	// (TABLE path) or a *TVF (TABLE path(args...)); see table_clause_no_keyword
+	// in googlesql.tm.
+	Table Node `json:"table"`
 }
 
 func (n *TableClause) Children() []Node {
-	return children(n.Path)
+	return children(n.Table)
 }
 
 // ModelClause is a "MODEL path" table-valued function argument; see

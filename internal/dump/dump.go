@@ -460,6 +460,8 @@ func nodeString(n ast.Node) string {
 		return "HavingModifier"
 	case *ast.NamedArgument:
 		return "NamedArgument"
+	case *ast.ExpressionWithAlias:
+		return "ExpressionWithAlias"
 	case *ast.Lambda:
 		return "Lambda"
 	case *ast.StructConstructorWithParens:
