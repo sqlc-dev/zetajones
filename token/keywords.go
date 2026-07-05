@@ -31,13 +31,16 @@ var reservedKeywords = map[string]bool{
 	"where": true, "window": true, "with": true, "within": true,
 }
 
-// conditionallyReservedKeywords are keywords that are reserved only when the
-// corresponding language feature is enabled; see kConditionallyReserved in
-// googlesql/parser/keywords.cc.
+// conditionallyReservedKeywords are the reservable keywords: those that are
+// reserved only when the corresponding language feature is enabled. This
+// mirrors LanguageOptions::GetReservableKeywords in
+// googlesql/public/language_options.cc (which identifier rendering treats as
+// reserved via EnableAllReservableKeywords).
 var conditionallyReservedKeywords = map[string]bool{
 	"graph_table":     true,
 	"match_recognize": true,
 	"qualify":         true,
+	"per":             true,
 }
 
 // nonReservedMustBackquote are non-reserved keywords that must be rendered

@@ -5622,6 +5622,94 @@ type GqlSample struct {
 
 func (n *GqlSample) Children() []Node { return children(n.Sample) }
 
+// GqlWith is a "WITH [ALL|DISTINCT] [hint] <items> [GROUP BY ...]" accumulate
+// operator; see ASTGqlWith in googlesql/parser/parse_tree.h. Its single child
+// is a Select holding the item list (and optional hint / group by).
+type GqlWith struct {
+	Span
+	Select *Select `json:"select"`
+}
+
+func (n *GqlWith) Children() []Node { return children(n.Select) }
+
+// GqlFor is a "FOR <name> IN <expr> [WITH OFFSET [AS alias]]" operator; see
+// ASTGqlFor in googlesql/parser/parse_tree.h.
+type GqlFor struct {
+	Span
+	Name       *Identifier `json:"name"`
+	Expr       Node        `json:"expression"`
+	WithOffset *WithOffset `json:"with_offset,omitempty"`
+}
+
+func (n *GqlFor) Children() []Node { return children(n.Name, n.Expr, n.WithOffset) }
+
+// GqlNamedCall is a "CALL [PER(...)] tvf [YIELD ...]" operator; see
+// ASTGqlNamedCall in googlesql/parser/parse_tree.h. Children are the TVF, an
+// optional YIELD item list, and an optional PER capture list.
+type GqlNamedCall struct {
+	Span
+	Optional      bool            `json:"optional,omitempty"`
+	IsPartitioned bool            `json:"is_partitioned,omitempty"`
+	TVF           *TVF            `json:"tvf"`
+	Yield         *YieldItemList  `json:"yield,omitempty"`
+	Per           *IdentifierList `json:"per,omitempty"`
+}
+
+func (n *GqlNamedCall) Children() []Node { return children(n.TVF, n.Yield, n.Per) }
+
+// GqlInlineSubqueryCall is a "CALL [PER(...)|(captures)] { subquery }"
+// operator; see ASTGqlInlineSubqueryCall in googlesql/parser/parse_tree.h.
+// Children are the braced graph subquery and an optional capture / PER
+// identifier list.
+type GqlInlineSubqueryCall struct {
+	Span
+	Optional      bool            `json:"optional,omitempty"`
+	IsPartitioned bool            `json:"is_partitioned,omitempty"`
+	Subquery      *Query          `json:"subquery"`
+	Captures      *IdentifierList `json:"captures,omitempty"`
+}
+
+func (n *GqlInlineSubqueryCall) Children() []Node { return children(n.Subquery, n.Captures) }
+
+// YieldItemList is the "YIELD <item>, ..." list of a named CALL operator; see
+// ASTYieldItemList in googlesql/parser/parse_tree.h.
+type YieldItemList struct {
+	Span
+	Items []*ExpressionWithOptAlias `json:"items"`
+}
+
+func (n *YieldItemList) Children() []Node {
+	out := make([]Node, 0, len(n.Items))
+	for _, it := range n.Items {
+		out = append(out, it)
+	}
+	return out
+}
+
+// GqlGraphPatternQuery is the query body of an "EXISTS { [GRAPH g]
+// graph_pattern }" subquery; see ASTGqlGraphPatternQuery in
+// googlesql/parser/parse_tree.h. Children are an optional graph reference and
+// the graph pattern.
+type GqlGraphPatternQuery struct {
+	Span
+	Graph   *PathExpression `json:"graph,omitempty"`
+	Pattern *GraphPattern   `json:"graph_pattern"`
+}
+
+func (n *GqlGraphPatternQuery) Children() []Node { return children(n.Graph, n.Pattern) }
+
+// GqlLinearOpsQuery is the query body of an "EXISTS { [GRAPH g]
+// linear_operator_list }" subquery; see ASTGqlLinearOpsQuery in
+// googlesql/parser/parse_tree.h. Children are an optional graph reference and
+// the linear operator list.
+type GqlLinearOpsQuery struct {
+	Span
+	Graph *PathExpression  `json:"graph,omitempty"`
+	Ops   *GqlOperatorList `json:"linear_ops"`
+}
+
+func (n *GqlLinearOpsQuery) Children() []Node { return children(n.Graph, n.Ops) }
+
 // GraphPattern is a comma-separated list of path patterns with an optional
 // trailing WHERE clause; see ASTGraphPattern in
 // googlesql/parser/parse_tree.h.

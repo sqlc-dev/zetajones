@@ -74,7 +74,7 @@ func (p *parser) parseGraphTableQuery() (ast.Node, error) {
 		case p.peek().Kind == token.RPAREN:
 			op = match
 		default:
-			ops, err := p.parseGraphOperationBlock(match)
+			ops, err := p.parseGraphOperationBlock([]ast.Node{match})
 			if err != nil {
 				return nil, err
 			}
@@ -137,8 +137,8 @@ func (p *parser) parseGraphShapeClause() (*ast.SelectList, error) {
 // graph_operation_block in googlesql.tm. firstOp, if non-nil, is a linear
 // operator already consumed for the first block (used when disambiguating the
 // GRAPH_TABLE single-match / operation-block forms).
-func (p *parser) parseGraphOperationBlock(firstOp ast.Node) (*ast.GqlOperatorList, error) {
-	block, err := p.parseGraphCompositeQueryBlock(firstOp)
+func (p *parser) parseGraphOperationBlock(firstOps []ast.Node) (*ast.GqlOperatorList, error) {
+	block, err := p.parseGraphCompositeQueryBlock(firstOps)
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +159,8 @@ func (p *parser) parseGraphOperationBlock(firstOp ast.Node) (*ast.GqlOperatorLis
 // or more linear query operations); see graph_composite_query_block /
 // graph_composite_query_prefix in googlesql.tm. firstOp, if non-nil, is a
 // linear operator already consumed for the leftmost operand.
-func (p *parser) parseGraphCompositeQueryBlock(firstOp ast.Node) (ast.Node, error) {
-	left, err := p.parseGraphLinearQueryOperation(firstOp)
+func (p *parser) parseGraphCompositeQueryBlock(firstOps []ast.Node) (ast.Node, error) {
+	left, err := p.parseGraphLinearQueryOperation(firstOps)
 	if err != nil {
 		return nil, err
 	}
@@ -248,11 +248,8 @@ func (p *parser) parseGraphSetOperationMetadata() (*ast.SetOperationMetadata, er
 // parseGraphLinearQueryOperation parses a sequence of linear operators
 // terminated by a mandatory RETURN, wrapping them in a GqlOperatorList; see
 // graph_linear_query_operation in googlesql.tm.
-func (p *parser) parseGraphLinearQueryOperation(firstOp ast.Node) (*ast.GqlOperatorList, error) {
-	var rawOps []ast.Node
-	if firstOp != nil {
-		rawOps = append(rawOps, firstOp)
-	}
+func (p *parser) parseGraphLinearQueryOperation(firstOps []ast.Node) (*ast.GqlOperatorList, error) {
+	rawOps := append([]ast.Node(nil), firstOps...)
 	for !isKeyword(p.peek(), "RETURN") {
 		if !p.startsGraphLinearOp() {
 			// At the very start of a linear query operation (nothing parsed
@@ -331,6 +328,14 @@ func (p *parser) startsGraphLinearOp() bool {
 		return true
 	case isKeyword(p.peek(), "TABLESAMPLE"):
 		return true
+	case isKeyword(p.peek(), "WITH"):
+		return true
+	case isKeyword(p.peek(), "FOR"):
+		return true
+	case isKeyword(p.peek(), "CALL"):
+		return true
+	case isKeyword(p.peek(), "OPTIONAL") && isKeyword(p.peekAt(1), "CALL"):
+		return true
 	case isKeyword(p.peek(), "ORDER"):
 		return true
 	case isKeyword(p.peek(), "OFFSET"), isKeyword(p.peek(), "SKIP"):
@@ -343,6 +348,8 @@ func (p *parser) startsGraphLinearOp() bool {
 
 func (p *parser) parseGraphLinearOp() (ast.Node, error) {
 	switch {
+	case isKeyword(p.peek(), "OPTIONAL") && isKeyword(p.peekAt(1), "CALL"):
+		return p.parseGqlCall()
 	case isKeyword(p.peek(), "OPTIONAL"):
 		return p.parseGqlOptionalMatch()
 	case isKeyword(p.peek(), "MATCH"):
@@ -351,6 +358,12 @@ func (p *parser) parseGraphLinearOp() (ast.Node, error) {
 		return p.parseGqlLet()
 	case isKeyword(p.peek(), "FILTER"):
 		return p.parseGqlFilter()
+	case isKeyword(p.peek(), "WITH"):
+		return p.parseGqlWith()
+	case isKeyword(p.peek(), "FOR"):
+		return p.parseGqlFor()
+	case isKeyword(p.peek(), "CALL"):
+		return p.parseGqlCall()
 	case isKeyword(p.peek(), "TABLESAMPLE"):
 		return p.parseGqlSample()
 	case isKeyword(p.peek(), "ORDER"):
@@ -560,13 +573,16 @@ func (p *parser) parseGqlFilter() (*ast.GqlFilter, error) {
 	return &ast.GqlFilter{Span: span(filterTok.Pos, where.End()), Where: where}, nil
 }
 
-// parseGqlReturn parses "RETURN <return_item_list> [ORDER BY ...] [OFFSET ...]
-// [LIMIT ...]"; see graph_return_operator in googlesql.tm. It builds a Select
-// holding the item list; a trailing ORDER BY / OFFSET / LIMIT (offset before
-// limit, at most one each) is folded into a single GqlOrderByAndPage. Advanced
-// clauses (DISTINCT, GROUP BY) are not yet supported.
-func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
-	returnTok := p.advance() // RETURN
+// parseGqlWith parses "WITH [ALL|DISTINCT] [hint] <items> [GROUP BY ...]"; see
+// graph_with_operator in googlesql.tm. It reuses the RETURN item list and
+// builds a Select (with the same folding of hint / set quantifier / group by).
+func (p *parser) parseGqlWith() (*ast.GqlWith, error) {
+	withTok := p.advance() // WITH
+	distinct, setQuantStart := p.parseGqlSetQuantifier()
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
 	first, err := p.parseGqlReturnItem()
 	if err != nil {
 		return nil, err
@@ -581,11 +597,414 @@ func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
 		cols = append(cols, col)
 	}
 	list := &ast.SelectList{Span: span(cols[0].Pos(), cols[len(cols)-1].End()), Columns: cols}
-	sel := &ast.Select{Span: span(list.Pos(), list.End()), SelectList: list}
+	var groupBy *ast.GroupBy
+	if isKeyword(p.peek(), "GROUP") {
+		groupBy, err = p.parseGroupBy(groupByRegular)
+		if err != nil {
+			return nil, err
+		}
+	}
+	sel := p.buildGqlSelect(list, hint, distinct, setQuantStart, groupBy)
+	return &ast.GqlWith{Span: span(withTok.Pos, sel.End()), Select: sel}, nil
+}
 
-	// Location where an absent ORDER BY would sit (end of the item list),
-	// used as the start of a page-only GqlOrderByAndPage; see the
-	// MakeLocationRange(@order_by, @$) in graph_return_operator.
+// parseGqlFor parses "FOR <name> IN <expr> [WITH OFFSET [AS alias]]"; see
+// graph_for_operator in googlesql.tm. Once a WITH follows the IN expression the
+// parser commits to a WITH OFFSET clause (matching the reference's greedy shift
+// resolving the WITH OFFSET / WITH-operator ambiguity).
+func (p *parser) parseGqlFor() (*ast.GqlFor, error) {
+	forTok := p.advance() // FOR
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("IN"); err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.GqlFor{Span: span(forTok.Pos, p.extEnd(expr)), Name: name, Expr: expr}
+	if isKeyword(p.peek(), "WITH") {
+		withTok := p.advance() // WITH
+		offsetTok, err := p.expectKeyword("OFFSET")
+		if err != nil {
+			return nil, err
+		}
+		off := &ast.WithOffset{Span: span(withTok.Pos, offsetTok.End)}
+		if isKeyword(p.peek(), "AS") {
+			alias, err := p.parseRequiredAsAlias()
+			if err != nil {
+				return nil, err
+			}
+			off.Alias = alias
+			off.Stop = alias.End()
+		}
+		node.WithOffset = off
+		node.Stop = off.End()
+	}
+	return node, nil
+}
+
+// parseGqlCall parses a GQL CALL operator in any of its forms; see
+// graph_call_operator / graph_call_operator_core in googlesql.tm. It handles
+// the optional leading OPTIONAL, an optional PER capture list, and then either
+// a named TVF (with optional YIELD), an inline braced subquery, or a
+// parenthesized capture list followed by a braced subquery.
+func (p *parser) parseGqlCall() (ast.Node, error) {
+	start := p.peek().Pos
+	optional := false
+	if isKeyword(p.peek(), "OPTIONAL") {
+		optional = true
+		p.advance() // OPTIONAL
+	}
+	p.advance() // CALL
+
+	var per *ast.IdentifierList
+	isPartitioned := false
+	if isKeyword(p.peek(), "PER") {
+		p.advance() // PER
+		list, err := p.parseParenthesizedIdentifierList()
+		if err != nil {
+			return nil, err
+		}
+		per = list
+		isPartitioned = true
+	}
+
+	// Inline subquery: "CALL [PER(...)] { subquery }".
+	if p.peek().Kind == token.LBRACE {
+		subquery, err := p.parseBracedGraphSubquery()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.GqlInlineSubqueryCall{
+			Span: span(start, subquery.End()), Optional: optional,
+			IsPartitioned: isPartitioned, Subquery: subquery, Captures: per,
+		}, nil
+	}
+
+	// Capture list form: "CALL (captures) { subquery }" (no PER allowed).
+	if per == nil && p.peek().Kind == token.LPAREN {
+		captures, err := p.parseParenthesizedIdentifierList()
+		if err != nil {
+			return nil, err
+		}
+		if p.peek().Kind != token.LBRACE {
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "{" but got %s`, describeToken(p.peek()))
+		}
+		subquery, err := p.parseBracedGraphSubquery()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.GqlInlineSubqueryCall{
+			Span: span(start, subquery.End()), Optional: optional,
+			Subquery: subquery, Captures: captures,
+		}, nil
+	}
+
+	// Named call: "CALL [PER(...)] tvf [YIELD ...]".
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+	}
+	tvf, err := p.parseTVFCore(path)
+	if err != nil {
+		return nil, err
+	}
+	end := tvf.End()
+	var yield *ast.YieldItemList
+	if isKeyword(p.peek(), "YIELD") {
+		yield, err = p.parseYieldClause()
+		if err != nil {
+			return nil, err
+		}
+		end = yield.End()
+	}
+	return &ast.GqlNamedCall{
+		Span: span(start, end), Optional: optional, IsPartitioned: isPartitioned,
+		TVF: tvf, Yield: yield, Per: per,
+	}, nil
+}
+
+// parseParenthesizedIdentifierList parses "( [identifier_list] )"; see
+// parenthesized_identifier_list in googlesql.tm. The resulting IdentifierList
+// spans the parentheses.
+func (p *parser) parseParenthesizedIdentifierList() (*ast.IdentifierList, error) {
+	lparen := p.advance() // (
+	if p.peek().Kind == token.RPAREN {
+		rparen := p.advance() // )
+		return &ast.IdentifierList{Span: span(lparen.Pos, rparen.End)}, nil
+	}
+	list, err := p.parseIdentifierList()
+	if err != nil {
+		return nil, err
+	}
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	list.Span = span(lparen.Pos, rparen.End)
+	return list, nil
+}
+
+// parseYieldClause parses "YIELD <item>, ..."; see opt_yield_clause /
+// yield_item_list in googlesql.tm. The list spans from the YIELD keyword.
+func (p *parser) parseYieldClause() (*ast.YieldItemList, error) {
+	yieldTok := p.advance() // YIELD
+	first, err := p.parseYieldItem()
+	if err != nil {
+		return nil, err
+	}
+	items := []*ast.ExpressionWithOptAlias{first}
+	for p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		item, err := p.parseYieldItem()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return &ast.YieldItemList{Span: span(yieldTok.Pos, items[len(items)-1].End()), Items: items}, nil
+}
+
+// parseYieldItem parses "identifier [AS alias]"; see yield_item in
+// googlesql.tm.
+func (p *parser) parseYieldItem() (*ast.ExpressionWithOptAlias, error) {
+	id, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	item := &ast.ExpressionWithOptAlias{Span: span(id.Pos(), id.End()), Expr: id}
+	if isKeyword(p.peek(), "AS") {
+		alias, err := p.parseRequiredAsAlias()
+		if err != nil {
+			return nil, err
+		}
+		item.Alias = alias
+		item.Stop = alias.End()
+	}
+	return item, nil
+}
+
+// parseBracedGraphSubquery parses "{ [GRAPH g] graph_operation_block }"; see
+// braced_graph_subquery in googlesql.tm. It builds the Query > GqlQuery >
+// GraphTableQuery wrapper (all three spanning the braces).
+func (p *parser) parseBracedGraphSubquery() (*ast.Query, error) {
+	lbrace := p.advance() // {
+	var graph *ast.PathExpression
+	if isKeyword(p.peek(), "GRAPH") {
+		p.advance() // GRAPH
+		g, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		graph = g
+	}
+	ops, err := p.parseGraphOperationBlock(nil)
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.RBRACE {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "}" or keyword NEXT but got %s`, describeToken(p.peek()))
+	}
+	rbrace := p.advance() // }
+	loc := span(lbrace.Pos, rbrace.End)
+	gt := &ast.GraphTableQuery{Span: loc, Graph: graph, Op: ops}
+	gq := &ast.GqlQuery{Span: loc, Query: gt}
+	return &ast.Query{Span: loc, QueryExpr: gq}, nil
+}
+
+// parseBracedGraphExpressionSubquery parses the braced graph subquery following
+// an ARRAY or VALUE modifier keyword (already consumed, starting at startPos),
+// with an optional hint already parsed; see the "ARRAY"/"VALUE"
+// braced_graph_subquery alternatives of expression_subquery_with_keyword in
+// googlesql.tm.
+func (p *parser) parseBracedGraphExpressionSubquery(startPos int, modifier string, hint *ast.Hint) (ast.Node, error) {
+	q, err := p.parseBracedGraphSubquery()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ExpressionSubquery{Span: span(startPos, q.End()), Modifier: modifier, Hint: hint, Query: q}, nil
+}
+
+// startsGraphPattern reports whether the next tokens begin a graph pattern (as
+// opposed to a graph linear operator or RETURN). A path pattern begins with a
+// path factor, a path mode keyword, a path search prefix, or an "ident ="
+// path-variable assignment; see graph_pattern / graph_path_pattern in
+// googlesql.tm.
+func (p *parser) startsGraphPattern() bool {
+	if p.startsGraphPathFactor() {
+		return true
+	}
+	if isGraphPathModeKeyword(p.peek()) {
+		return true
+	}
+	if p.startsGraphSearchPrefix() {
+		return true
+	}
+	t := p.peek()
+	if ((t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT) && p.peekAt(1).Kind == token.EQ {
+		return true
+	}
+	return false
+}
+
+// parseExistsGraphSubquery parses the graph subquery following an EXISTS
+// keyword (already consumed, starting at existsPos), with the hint already
+// parsed and the next token being "{". It handles all three graph forms: a
+// bare graph pattern (GqlGraphPatternQuery), a linear operator list with no
+// RETURN (GqlLinearOpsQuery), and a full operation block ending in RETURN
+// (braced graph subquery). See exists_graph_subquery in googlesql.tm.
+func (p *parser) parseExistsGraphSubquery(existsPos int, hint *ast.Hint) (ast.Node, error) {
+	lbrace := p.advance() // {
+	var graph *ast.PathExpression
+	if isKeyword(p.peek(), "GRAPH") {
+		p.advance() // GRAPH
+		g, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		graph = g
+	}
+
+	// Bare graph pattern: EXISTS { [GRAPH g] graph_pattern }.
+	if p.startsGraphPattern() {
+		pattern, err := p.parseGraphPattern()
+		if err != nil {
+			return nil, err
+		}
+		rbrace, err := p.expect(token.RBRACE, `"}"`)
+		if err != nil {
+			return nil, err
+		}
+		loc := span(existsPos, rbrace.End)
+		gp := &ast.GqlGraphPatternQuery{Span: loc, Graph: graph, Pattern: pattern}
+		q := &ast.Query{Span: loc, QueryExpr: gp}
+		return &ast.ExpressionSubquery{Span: loc, Modifier: "EXISTS", Hint: hint, Query: q}, nil
+	}
+
+	// Otherwise a sequence of linear operators, terminated either by RETURN
+	// (an operation block) or by "}" (a linear-ops-only subquery).
+	var rawOps []ast.Node
+	for p.startsGraphLinearOp() {
+		op, err := p.parseGraphLinearOp()
+		if err != nil {
+			return nil, err
+		}
+		rawOps = append(rawOps, op)
+	}
+
+	if isKeyword(p.peek(), "RETURN") {
+		ops, err := p.parseGraphOperationBlock(rawOps)
+		if err != nil {
+			return nil, err
+		}
+		rbrace, err := p.expect(token.RBRACE, `"}"`)
+		if err != nil {
+			return nil, err
+		}
+		bracedLoc := span(lbrace.Pos, rbrace.End)
+		gt := &ast.GraphTableQuery{Span: bracedLoc, Graph: graph, Op: ops}
+		gq := &ast.GqlQuery{Span: bracedLoc, Query: gt}
+		q := &ast.Query{Span: bracedLoc, QueryExpr: gq}
+		loc := span(existsPos, rbrace.End)
+		return &ast.ExpressionSubquery{Span: loc, Modifier: "EXISTS", Hint: hint, Query: q}, nil
+	}
+
+	if len(rawOps) == 0 {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
+	}
+	rbrace, err := p.expect(token.RBRACE, `"}"`)
+	if err != nil {
+		return nil, err
+	}
+	opsList := &ast.GqlOperatorList{
+		Span:      span(rawOps[0].Pos(), rawOps[len(rawOps)-1].End()),
+		Operators: combineGraphLinearOps(rawOps),
+	}
+	loc := span(existsPos, rbrace.End)
+	lq := &ast.GqlLinearOpsQuery{Span: loc, Graph: graph, Ops: opsList}
+	q := &ast.Query{Span: loc, QueryExpr: lq}
+	return &ast.ExpressionSubquery{Span: loc, Modifier: "EXISTS", Hint: hint, Query: q}, nil
+}
+
+// parseGqlReturn parses "RETURN <return_item_list> [ORDER BY ...] [OFFSET ...]
+// [LIMIT ...]"; see graph_return_operator in googlesql.tm. It builds a Select
+// holding the item list; a trailing ORDER BY / OFFSET / LIMIT (offset before
+// limit, at most one each) is folded into a single GqlOrderByAndPage. Advanced
+// clauses (DISTINCT, GROUP BY) are not yet supported.
+// parseGqlSetQuantifier consumes an optional leading ALL or DISTINCT set
+// quantifier (opt_all_or_distinct in googlesql.tm). It returns whether DISTINCT
+// was seen and the start position of the consumed keyword (-1 if none).
+func (p *parser) parseGqlSetQuantifier() (distinct bool, start int) {
+	switch {
+	case isKeyword(p.peek(), "DISTINCT"):
+		return true, p.advance().Pos
+	case isKeyword(p.peek(), "ALL"):
+		return false, p.advance().Pos
+	}
+	return false, -1
+}
+
+// buildGqlSelect assembles the Select node shared by the RETURN and WITH graph
+// operators from an item list, an optional hint, a set quantifier, and an
+// optional GROUP BY. The Select's location starts at the leftmost of the hint /
+// set quantifier / item list and ends at the GROUP BY (if any); see the
+// ExtendNode / WithStartLocation logic in graph_return_operator /
+// graph_with_operator in googlesql.tm.
+func (p *parser) buildGqlSelect(list *ast.SelectList, hint *ast.Hint, distinct bool, setQuantStart int, groupBy *ast.GroupBy) *ast.Select {
+	start := list.Pos()
+	if setQuantStart >= 0 && setQuantStart < start {
+		start = setQuantStart
+	}
+	if hint != nil && hint.Pos() < start {
+		start = hint.Pos()
+	}
+	end := list.End()
+	if groupBy != nil {
+		end = groupBy.End()
+	}
+	return &ast.Select{Span: span(start, end), Hint: hint, Distinct: distinct, SelectList: list, GroupBy: groupBy}
+}
+
+func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
+	returnTok := p.advance() // RETURN
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	distinct, setQuantStart := p.parseGqlSetQuantifier()
+	first, err := p.parseGqlReturnItem()
+	if err != nil {
+		return nil, err
+	}
+	cols := []*ast.SelectColumn{first}
+	for p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		col, err := p.parseGqlReturnItem()
+		if err != nil {
+			return nil, err
+		}
+		cols = append(cols, col)
+	}
+	list := &ast.SelectList{Span: span(cols[0].Pos(), cols[len(cols)-1].End()), Columns: cols}
+	var groupBy *ast.GroupBy
+	if isKeyword(p.peek(), "GROUP") {
+		groupBy, err = p.parseGroupBy(groupByRegular)
+		if err != nil {
+			return nil, err
+		}
+	}
+	sel := p.buildGqlSelect(list, hint, distinct, setQuantStart, groupBy)
+
+	// Location where an absent ORDER BY would sit (end of the item list or the
+	// GROUP BY clause), used as the start of a page-only GqlOrderByAndPage; see
+	// the MakeLocationRange(@order_by, @$) in graph_return_operator.
 	afterItems := p.prevEnd()
 
 	var ob *ast.OrderBy
@@ -610,7 +1029,7 @@ func (p *parser) parseGqlReturn() (*ast.GqlReturn, error) {
 		}
 	}
 
-	ret := &ast.GqlReturn{Span: span(returnTok.Pos, list.End()), Select: sel}
+	ret := &ast.GqlReturn{Span: span(returnTok.Pos, sel.End()), Select: sel}
 	var page *ast.GqlPage
 	if offset != nil || limit != nil {
 		pageStart, pageEnd := afterItems, afterItems

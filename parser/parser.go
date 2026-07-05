@@ -11825,6 +11825,16 @@ func (p *parser) parseComparison() (ast.Node, error) {
 			}
 			in.Query, in.List = query, list
 			end = rhsEnd
+		case p.peek().Kind == token.LBRACE && p.features.Enabled(FeatureSqlGraph):
+			// "X IN { graph subquery }"; see the in_operator
+			// braced_graph_subquery alternative of
+			// expression_higher_prec_than_and in googlesql.tm.
+			query, err := p.parseBracedGraphSubquery()
+			if err != nil {
+				return nil, err
+			}
+			in.Query = query
+			end = query.End()
 		default:
 			return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 		}
@@ -12771,6 +12781,11 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// rule in googlesql.tm); otherwise it falls through to the
 			// identifier cases below.
 			return p.parseReplaceFieldsExpression()
+		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACE && p.features.Enabled(FeatureSqlGraph):
+			// "ARRAY { graph subquery }"; see the ARRAY braced_graph_subquery
+			// alternative of expression_subquery_with_keyword in googlesql.tm.
+			p.advance() // ARRAY
+			return p.parseBracedGraphExpressionSubquery(tok.Pos, "ARRAY", nil)
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LBRACKET:
 			p.advance() // ARRAY; the constructor's span starts at the keyword.
 			return p.parseArrayConstructor(tok.Pos)
@@ -12790,13 +12805,32 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// googlesql.tm.
 			p.advance() // ARRAY
 			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "<" but got %s`, describeToken(p.peek()))
-		case isKeyword(tok, "EXISTS") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.ATSIGN):
-			// EXISTS takes an optional hint before the subquery; see
+		case isKeyword(tok, "VALUE") && p.features.Enabled(FeatureSqlGraph) &&
+			(p.peekAt(1).Kind == token.LBRACE || p.peekAt(1).Kind == token.ATSIGN):
+			// "VALUE hint? { graph subquery }"; see the VALUE
+			// braced_graph_subquery alternative of
 			// expression_subquery_with_keyword in googlesql.tm.
+			p.advance() // VALUE
+			hint, err := p.parseOptionalHint()
+			if err != nil {
+				return nil, err
+			}
+			if p.peek().Kind != token.LBRACE {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "{" but got %s`, describeToken(p.peek()))
+			}
+			return p.parseBracedGraphExpressionSubquery(tok.Pos, "VALUE", hint)
+		case isKeyword(tok, "EXISTS") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.ATSIGN ||
+			(p.peekAt(1).Kind == token.LBRACE && p.features.Enabled(FeatureSqlGraph))):
+			// EXISTS takes an optional hint before the subquery; see
+			// expression_subquery_with_keyword in googlesql.tm. With the graph
+			// feature the subquery may be a braced graph subquery.
 			p.advance() // EXISTS; the subquery's span starts at the keyword.
 			hint, err := p.parseOptionalHint()
 			if err != nil {
 				return nil, err
+			}
+			if p.features.Enabled(FeatureSqlGraph) && p.peek().Kind == token.LBRACE {
+				return p.parseExistsGraphSubquery(tok.Pos, hint)
 			}
 			node, err := p.parseModifiedSubquery(tok.Pos, "EXISTS")
 			if err != nil {

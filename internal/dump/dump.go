@@ -1379,6 +1379,20 @@ func nodeString(n ast.Node) string {
 		return "GqlReturn"
 	case *ast.GqlSample:
 		return "GqlSample"
+	case *ast.GqlWith:
+		return "GqlWith"
+	case *ast.GqlFor:
+		return "GqlFor"
+	case *ast.GqlNamedCall:
+		return "GqlNamedCall"
+	case *ast.GqlInlineSubqueryCall:
+		return "GqlInlineSubqueryCall"
+	case *ast.YieldItemList:
+		return "YieldItemList"
+	case *ast.GqlGraphPatternQuery:
+		return "GqlGraphPatternQuery"
+	case *ast.GqlLinearOpsQuery:
+		return "GqlLinearOpsQuery"
 	case *ast.GqlSetOperation:
 		return "GqlSetOperation"
 	case *ast.GqlOrderByAndPage:
