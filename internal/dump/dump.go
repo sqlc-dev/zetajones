@@ -122,6 +122,14 @@ func nodeString(n ast.Node) string {
 		return "TVF"
 	case *ast.TVFArgument:
 		return "TVFArgument"
+	case *ast.InputTableArgument:
+		return "InputTableArgument"
+	case *ast.Descriptor:
+		return "Descriptor"
+	case *ast.DescriptorColumnList:
+		return "DescriptorColumnList"
+	case *ast.DescriptorColumn:
+		return "DescriptorColumn"
 	case *ast.Select:
 		if t.Distinct {
 			return "Select(distinct=true)"
@@ -688,6 +696,28 @@ func nodeString(n ast.Node) string {
 		return "AliasedQueryExpression"
 	case *ast.PipePivot:
 		return "PipePivot"
+	case *ast.PipeUnpivot:
+		return "PipeUnpivot"
+	case *ast.PipeCall:
+		return "PipeCall"
+	case *ast.PipeWith:
+		return "PipeWith"
+	case *ast.PipeInsert:
+		return "PipeInsert"
+	case *ast.OnConflictClause:
+		return "OnConflictClause(conflict_action=" + t.ConflictAction + ")"
+	case *ast.PipeRecursiveUnion:
+		return "PipeRecursiveUnion"
+	case *ast.AliasedQueryModifiers:
+		return "AliasedQueryModifiers"
+	case *ast.RecursionDepthModifier:
+		return "RecursionDepthModifier"
+	case *ast.IntOrUnbounded:
+		return "IntOrUnbounded"
+	case *ast.PipeIf:
+		return "PipeIf"
+	case *ast.PipeIfCase:
+		return "PipeIfCase"
 	case *ast.PipeExportData:
 		return "PipeExportData"
 	case *ast.PipeCreateTable:

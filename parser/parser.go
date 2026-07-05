@@ -7123,7 +7123,120 @@ func (p *parser) parseWithClauseEntry() (*ast.WithClauseEntry, error) {
 	// aliased_query_with_overridden_next_token_lookback in googlesql.tm.
 	query.Start, query.Stop = lparen.Pos, parenEnd
 	aq := &ast.AliasedQuery{Span: span(ident.Pos(), query.End()), Identifier: ident, Query: query}
+	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "DEPTH") {
+		mod, err := p.parseRecursionDepthModifier()
+		if err != nil {
+			return nil, err
+		}
+		aq.Modifiers = &ast.AliasedQueryModifiers{Span: mod.Span, RecursionDepth: mod}
+		aq.Stop = mod.End()
+	}
 	return &ast.WithClauseEntry{Span: aq.Span, AliasedQuery: aq}, nil
+}
+
+// parseRecursionDepthModifier parses "WITH DEPTH [AS alias] [BETWEEN lo AND hi
+// | MAX hi]"; the WITH keyword is the next token (and is followed by DEPTH).
+// See recursion_depth_modifier in googlesql.tm. When no BETWEEN/MAX bound is
+// given, the bounds default to unbounded, located at the end of the modifier.
+func (p *parser) parseRecursionDepthModifier() (*ast.RecursionDepthModifier, error) {
+	withTok := p.advance() // WITH
+	depthTok, err := p.expectKeyword("DEPTH")
+	if err != nil {
+		return nil, err
+	}
+	mod := &ast.RecursionDepthModifier{}
+	// as_alias_with_required_as: an alias here must be introduced by AS.
+	endOfPrefix := depthTok.End
+	if isKeyword(p.peek(), "AS") {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		mod.Alias = alias
+		endOfPrefix = alias.End()
+	}
+	switch {
+	case isKeyword(p.peek(), "BETWEEN"):
+		p.advance() // BETWEEN
+		lo, err := p.parsePossiblyUnboundedIntOrParameter()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("AND"); err != nil {
+			return nil, err
+		}
+		hi, err := p.parsePossiblyUnboundedIntOrParameter()
+		if err != nil {
+			return nil, err
+		}
+		mod.LowerBound = lo
+		mod.UpperBound = hi
+		mod.Span = span(withTok.Pos, hi.End())
+	case isKeyword(p.peek(), "MAX"):
+		p.advance() // MAX
+		hi, err := p.parsePossiblyUnboundedIntOrParameter()
+		if err != nil {
+			return nil, err
+		}
+		mod.LowerBound = &ast.IntOrUnbounded{Span: span(endOfPrefix, endOfPrefix)}
+		mod.UpperBound = hi
+		mod.Span = span(withTok.Pos, hi.End())
+	default:
+		mod.Span = span(withTok.Pos, endOfPrefix)
+		mod.LowerBound = &ast.IntOrUnbounded{Span: span(endOfPrefix, endOfPrefix)}
+		mod.UpperBound = &ast.IntOrUnbounded{Span: span(endOfPrefix, endOfPrefix)}
+	}
+	return mod, nil
+}
+
+// parsePossiblyUnboundedIntOrParameter parses "UNBOUNDED" or an integer
+// literal / parameter into an IntOrUnbounded node; see
+// possibly_unbounded_int_literal_or_parameter in googlesql.tm.
+func (p *parser) parsePossiblyUnboundedIntOrParameter() (*ast.IntOrUnbounded, error) {
+	if tok := p.peek(); isKeyword(tok, "UNBOUNDED") {
+		p.advance()
+		return &ast.IntOrUnbounded{Span: span(tok.Pos, tok.End)}, nil
+	}
+	val, err := p.parseIntLiteralOrParameter()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.IntOrUnbounded{Span: span(val.Pos(), val.End()), Bound: val}, nil
+}
+
+// parsePipeWith parses "WITH [RECURSIVE] with_entry [, ...] [,]" after a |>
+// token; see pipe_with in googlesql.tm. Unlike the WITH clause before a main
+// query, a trailing comma is allowed and is included in the operator's span.
+func (p *parser) parsePipeWith(pipeTok token.Token) (ast.Node, error) {
+	withTok := p.advance() // WITH
+	wc := &ast.WithClause{Span: span(withTok.Pos, withTok.End)}
+	if isKeyword(p.peek(), "RECURSIVE") {
+		p.advance()
+		wc.Recursive = true
+	}
+	for {
+		entry, err := p.parseWithClauseEntry()
+		if err != nil {
+			return nil, err
+		}
+		wc.Entries = append(wc.Entries, entry)
+		wc.Stop = entry.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		// Continue to another entry only when the comma is followed by an entry
+		// start; otherwise the comma is pipe WITH's optional trailing comma.
+		if next := p.peekAt(1); (next.Kind != token.IDENT && next.Kind != token.QUOTED_IDENT) || isReserved(next) {
+			break
+		}
+		p.advance() // ,
+	}
+	node := &ast.PipeWith{Span: span(pipeTok.Pos, wc.End()), With: wc}
+	if p.peek().Kind == token.COMMA {
+		comma := p.advance()
+		node.Stop = comma.End
+	}
+	return node, nil
 }
 
 // parsePipeOperators parses any trailing "|> operator" sequence onto query.
@@ -7589,14 +7702,34 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 		return &ast.PipeTablesample{Span: span(pipeTok.Pos, clause.End()), Sample: clause}, nil
 	case isKeyword(tok, "PIVOT"):
 		return p.parsePipePivot(pipeTok)
+	case isKeyword(tok, "UNPIVOT"):
+		return p.parsePipeUnpivot(pipeTok)
 	case isKeyword(tok, "EXPORT"):
 		return p.parsePipeExportData(pipeTok)
 	case isKeyword(tok, "CREATE"):
 		return p.parsePipeCreateTable(pipeTok)
+	case isKeyword(tok, "CALL"):
+		return p.parsePipeCall(pipeTok)
+	case isKeyword(tok, "WITH"):
+		return p.parsePipeWith(pipeTok)
+	case isKeyword(tok, "INSERT"):
+		return p.parsePipeInsert(pipeTok)
+	case isKeyword(tok, "IF"):
+		return p.parsePipeIf(pipeTok)
+	case isKeyword(tok, "ELSEIF"):
+		// A pipe ELSEIF is an error; ELSEIF belongs to a pipe IF operator.
+		// See pipe_elseif in googlesql.tm.
+		return nil, p.errorf(tok.Pos, "Syntax error: ELSEIF should be part of a pipe IF, without a leading pipe symbol")
+	case isKeyword(tok, "ELSE"):
+		// A pipe ELSE is an error; ELSE belongs to a pipe IF operator.
+		// See pipe_else in googlesql.tm.
+		return nil, p.errorf(tok.Pos, "Syntax error: ELSE should be part of a pipe IF, without a leading pipe symbol")
 	case isKeyword(tok, "FORK"):
 		return p.parsePipeFork(pipeTok)
 	case isKeyword(tok, "TEE"):
 		return p.parsePipeTee(pipeTok)
+	case isKeyword(tok, "RECURSIVE"):
+		return p.parsePipeRecursiveUnion(pipeTok)
 	case p.atSetOpMetadataStart():
 		return p.parsePipeSetOperation(pipeTok)
 	}
@@ -7606,6 +7739,206 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 	// The last alternative is pipe_join; an unrecognized pipe operator gets
 	// its "Expected keyword JOIN" error from the JOIN inside pipe_join.
 	return p.parsePipeJoin(pipeTok)
+}
+
+// parsePipeInsert parses "INSERT [mode] [INTO] target [hint] [column_list]
+// [ON CONFLICT ...] [ASSERT_ROWS_MODIFIED ...] [THEN RETURN ...]" after a |>
+// token; see pipe_insert and insert_statement_in_pipe in googlesql.tm. Unlike
+// a standalone INSERT, there is no VALUES or query source: the rows come from
+// the pipe input.
+func (p *parser) parsePipeInsert(pipeTok token.Token) (ast.Node, error) {
+	insertTok := p.advance() // INSERT
+	stmt := &ast.InsertStatement{Span: span(insertTok.Pos, insertTok.End)}
+	if isKeyword(p.peek(), "OR") {
+		p.advance()
+	}
+	switch {
+	case isKeyword(p.peek(), "IGNORE"):
+		p.advance()
+		stmt.InsertMode = "IGNORE"
+	case isKeyword(p.peek(), "REPLACE"):
+		p.advance()
+		stmt.InsertMode = "REPLACE"
+	case isKeyword(p.peek(), "UPDATE"):
+		p.advance()
+		stmt.InsertMode = "UPDATE"
+	}
+	if isKeyword(p.peek(), "INTO") {
+		p.advance()
+	}
+	target, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Target = target
+	stmt.Stop = p.extEnd(target)
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if hint != nil {
+		stmt.Hint = hint
+		stmt.Stop = hint.End()
+	}
+	if p.peek().Kind == token.LPAREN {
+		cols, err := p.parseInsertColumnList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Columns = cols
+		stmt.Stop = cols.End()
+	}
+	if isKeyword(p.peek(), "ON") && isKeyword(p.peekAt(1), "CONFLICT") {
+		oc, err := p.parseOnConflictClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.OnConflict = oc
+		stmt.Stop = oc.End()
+	}
+	if isKeyword(p.peek(), "ASSERT_ROWS_MODIFIED") {
+		arm, err := p.parseAssertRowsModified()
+		if err != nil {
+			return nil, err
+		}
+		stmt.AssertRowsModified = arm
+		stmt.Stop = arm.End()
+	}
+	if isKeyword(p.peek(), "THEN") {
+		rc, err := p.parseReturningClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Returning = rc
+		stmt.Stop = rc.End()
+	}
+	return &ast.PipeInsert{Span: span(pipeTok.Pos, stmt.End()), Insert: stmt}, nil
+}
+
+// parseOnConflictClause parses "ON CONFLICT [conflict_target] DO {NOTHING |
+// UPDATE SET update_item, ... [WHERE expr]}"; the ON keyword is the next token
+// (and is followed by CONFLICT). See on_conflict_clause in googlesql.tm.
+func (p *parser) parseOnConflictClause() (*ast.OnConflictClause, error) {
+	onTok := p.advance() // ON
+	if _, err := p.expectKeyword("CONFLICT"); err != nil {
+		return nil, err
+	}
+	oc := &ast.OnConflictClause{Span: span(onTok.Pos, onTok.End)}
+	// Optional conflict_target: "( column_list )" or "ON UNIQUE CONSTRAINT id".
+	switch {
+	case p.peek().Kind == token.LPAREN:
+		cols, err := p.parseInsertColumnList()
+		if err != nil {
+			return nil, err
+		}
+		oc.Target = cols
+	case isKeyword(p.peek(), "ON"):
+		p.advance() // ON
+		if _, err := p.expectKeyword("UNIQUE"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("CONSTRAINT"); err != nil {
+			return nil, err
+		}
+		id, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		oc.Target = id
+	}
+	if _, err := p.expectKeyword("DO"); err != nil {
+		return nil, err
+	}
+	switch {
+	case isKeyword(p.peek(), "NOTHING"):
+		nothingTok := p.advance()
+		oc.ConflictAction = "NOTHING"
+		oc.Stop = nothingTok.End
+	case isKeyword(p.peek(), "UPDATE"):
+		p.advance() // UPDATE
+		if _, err := p.expectKeyword("SET"); err != nil {
+			return nil, err
+		}
+		items, err := p.parseUpdateItemList()
+		if err != nil {
+			return nil, err
+		}
+		oc.ConflictAction = "UPDATE"
+		oc.UpdateItems = items
+		oc.Stop = items.End()
+		if isKeyword(p.peek(), "WHERE") {
+			wc, err := p.parseWhereClause()
+			if err != nil {
+				return nil, err
+			}
+			oc.UpdateWhere = wc
+			oc.Stop = wc.End()
+		}
+	default:
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword NOTHING or keyword UPDATE but got %s", describeToken(p.peek()))
+	}
+	return oc, nil
+}
+
+// parsePipeRecursiveUnion parses "RECURSIVE set_operation_metadata
+// [WITH DEPTH ...] (query|subpipeline) [AS alias]" after a |> token; see
+// pipe_recursive_union in googlesql.tm. Exactly one input operand is allowed,
+// and an alias must be introduced by AS.
+func (p *parser) parsePipeRecursiveUnion(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // RECURSIVE
+	md, err := p.parseSetOperationMetadata()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.PipeRecursiveUnion{Span: span(pipeTok.Pos, md.End()), Metadata: md}
+	if isKeyword(p.peek(), "WITH") && isKeyword(p.peekAt(1), "DEPTH") {
+		mod, err := p.parseRecursionDepthModifier()
+		if err != nil {
+			return nil, err
+		}
+		node.Depth = mod
+		node.Stop = mod.End()
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+	}
+	input, err := p.parseSubqueryOrSubpipeline()
+	if err != nil {
+		return nil, err
+	}
+	node.Input = input
+	node.Stop = input.End()
+	switch {
+	case isKeyword(p.peek(), "AS"):
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		node.Alias = alias
+		node.Stop = alias.End()
+	case (p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) && !isReserved(p.peek()):
+		// as_alias_with_required_as: a bare identifier alias is rejected with a
+		// dedicated error; see pipe_recursive_union in googlesql.tm.
+		return nil, p.errorf(p.peek().Pos, `Syntax error: The keyword "AS" is required before the alias for pipe RECURSIVE UNION`)
+	}
+	return node, nil
+}
+
+// parseSubqueryOrSubpipeline parses "( query )" or a parenthesized
+// subpipeline "( |> ... )" (including an empty "()"); the open parenthesis is
+// the next token. See subquery_or_subpipeline in googlesql.tm. A parenthesized
+// query's location includes the parentheses.
+func (p *parser) parseSubqueryOrSubpipeline() (ast.Node, error) {
+	lparen := p.peek() // (
+	if next := p.peekAt(1); next.Kind == token.PIPE_INPUT || next.Kind == token.RPAREN {
+		return p.parseSubpipeline()
+	}
+	query, parenEnd, err := p.parseParenthesizedQuery()
+	if err != nil {
+		return nil, err
+	}
+	query.Start, query.Stop = lparen.Pos, parenEnd
+	return query, nil
 }
 
 // parsePipeSetOperation parses "<set_operation_metadata> (query|table_clause)
@@ -7860,6 +8193,93 @@ func (p *parser) parsePipePivot(pipeTok token.Token) (ast.Node, error) {
 		return nil, err
 	}
 	return &ast.PipePivot{Span: span(pipeTok.Pos, clause.End()), Pivot: clause.(*ast.PivotClause)}, nil
+}
+
+// parsePipeUnpivot parses "UNPIVOT(...) [[AS] alias]" after a |> token; see
+// pipe_unpivot in googlesql.tm. The alias is carried on the UnpivotClause.
+func (p *parser) parsePipeUnpivot(pipeTok token.Token) (ast.Node, error) {
+	clause, err := p.parseUnpivotClause()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.PipeUnpivot{Span: span(pipeTok.Pos, clause.End()), Unpivot: clause.(*ast.UnpivotClause)}, nil
+}
+
+// parsePipeIf parses "IF [hint] expr THEN subpipeline [ELSEIF expr THEN
+// subpipeline ...] [ELSE subpipeline]" after a |> token; see pipe_if,
+// pipe_if_prefix, and pipe_if_elseif in googlesql.tm.
+func (p *parser) parsePipeIf(pipeTok token.Token) (ast.Node, error) {
+	ifTok := p.advance() // IF
+	node := &ast.PipeIf{Span: span(pipeTok.Pos, ifTok.End)}
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if hint != nil {
+		node.Hint = hint
+	}
+	// First (IF) case. The case node's location starts at the IF keyword, even
+	// when a hint appears between IF and the condition.
+	firstCase, err := p.parsePipeIfCase(ifTok.Pos)
+	if err != nil {
+		return nil, err
+	}
+	node.Cases = append(node.Cases, firstCase)
+	node.Stop = firstCase.End()
+	for {
+		tok := p.peek()
+		if isKeyword(tok, "ELSEIF") {
+			elseifTok := p.advance()
+			c, err := p.parsePipeIfCase(elseifTok.Pos)
+			if err != nil {
+				return nil, err
+			}
+			node.Cases = append(node.Cases, c)
+			node.Stop = c.End()
+			continue
+		}
+		if isKeyword(tok, "ELSE") {
+			elseTok := p.advance()
+			if isKeyword(p.peek(), "IF") {
+				// "ELSE IF" is a common typo for ELSEIF; the parser accepts it
+				// here so it can suggest ELSEIF. See pipe_if_elseif in
+				// googlesql.tm.
+				return nil, p.errorf(elseTok.Pos, "Syntax error: Unexpected ELSE IF; Expected ELSEIF")
+			}
+			if p.peek().Kind != token.LPAREN {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or keyword IF but got %s`, describeToken(p.peek()))
+			}
+			sub, err := p.parseSubpipeline()
+			if err != nil {
+				return nil, err
+			}
+			node.Else = sub
+			node.Stop = sub.End()
+		}
+		break
+	}
+	return node, nil
+}
+
+// parsePipeIfCase parses "expr THEN subpipeline" for one IF/ELSEIF branch,
+// with the leading IF or ELSEIF keyword already consumed; start is the
+// location of that keyword, which the case node spans from.
+func (p *parser) parsePipeIfCase(start int) (*ast.PipeIfCase, error) {
+	cond, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("THEN"); err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+	}
+	sub, err := p.parseSubpipeline()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.PipeIfCase{Span: span(start, sub.End()), Condition: cond, Body: sub}, nil
 }
 
 // parsePipeExportData parses "EXPORT DATA [WITH CONNECTION ...] [OPTIONS(...)]"
@@ -8765,6 +9185,27 @@ func (p *parser) parseForSystemTime() (*ast.ForSystemTime, error) {
 // expression has already been parsed; see tvf in googlesql.tm. The opening
 // parenthesis is the next token.
 func (p *parser) parseTVFRest(path *ast.PathExpression) (*ast.TVF, error) {
+	tvf, err := p.parseTVFCore(path)
+	if err != nil {
+		return nil, err
+	}
+	if !p.atPivotOrUnpivotClauseStart() {
+		alias, err := p.parseOptionalAlias()
+		if err != nil {
+			return nil, err
+		}
+		if alias != nil {
+			tvf.Alias = alias
+			tvf.Stop = alias.End()
+		}
+	}
+	return tvf, nil
+}
+
+// parseTVFCore parses "( tvf_argument, ... ) hint?" after the function's path
+// expression, i.e. the shared part of the tvf grammar rule without the outer
+// alias; see tvf in googlesql.tm. The opening parenthesis is the next token.
+func (p *parser) parseTVFCore(path *ast.PathExpression) (*ast.TVF, error) {
 	p.advance() // (
 	tvf := &ast.TVF{Span: span(path.Pos(), 0), Name: path}
 	if p.peek().Kind != token.RPAREN {
@@ -8785,17 +9226,89 @@ func (p *parser) parseTVFRest(path *ast.PathExpression) (*ast.TVF, error) {
 		return nil, err
 	}
 	tvf.Stop = rparen.End
-	if !p.atPivotOrUnpivotClauseStart() {
-		alias, err := p.parseOptionalAlias()
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if hint != nil {
+		tvf.Hint = hint
+		tvf.Stop = hint.End()
+	}
+	return tvf, nil
+}
+
+// parsePipeCall parses "CALL tvf [[AS] alias]" after a |> token; see pipe_call
+// in googlesql.tm. The alias is carried on the TVF node.
+func (p *parser) parsePipeCall(pipeTok token.Token) (ast.Node, error) {
+	p.advance() // CALL
+	// The TVF name is a path expression (the IF keyword is also allowed as a
+	// name); an "@" hint or anything that cannot start a path is an error here.
+	if tok := p.peek(); (tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT || isReserved(tok)) && !isKeyword(tok, "IF") {
+		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+	}
+	path, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+	}
+	tvf, err := p.parseTVFCore(path)
+	if err != nil {
+		return nil, err
+	}
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		tvf.Alias = alias
+		tvf.Stop = alias.End()
+	}
+	return &ast.PipeCall{Span: span(pipeTok.Pos, tvf.End()), Call: tvf}, nil
+}
+
+// atInputTableArgument reports whether the next two tokens are "INPUT TABLE",
+// the input_table_argument form; see input_table_argument in googlesql.tm.
+func (p *parser) atInputTableArgument() bool {
+	return isKeyword(p.peek(), "INPUT") && isKeyword(p.peekAt(1), "TABLE")
+}
+
+// parseInputTableArgument parses "INPUT TABLE" into an InputTableArgument; the
+// INPUT keyword is the next token. See input_table_argument in googlesql.tm.
+func (p *parser) parseInputTableArgument() *ast.InputTableArgument {
+	inputTok := p.advance() // INPUT
+	tableTok := p.advance() // TABLE
+	return &ast.InputTableArgument{Span: span(inputTok.Pos, tableTok.End)}
+}
+
+// parseDescriptorArgument parses "DESCRIPTOR ( column [, ...] )" into a
+// Descriptor; the DESCRIPTOR keyword is the next token. See
+// descriptor_argument in googlesql.tm.
+func (p *parser) parseDescriptorArgument() (*ast.Descriptor, error) {
+	descTok := p.advance() // DESCRIPTOR
+	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+		return nil, err
+	}
+	list := &ast.DescriptorColumnList{}
+	for {
+		id, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
 		}
-		if alias != nil {
-			tvf.Alias = alias
-			tvf.Stop = alias.End()
+		col := &ast.DescriptorColumn{Span: span(id.Pos(), id.End()), Name: id}
+		list.Columns = append(list.Columns, col)
+		if p.peek().Kind != token.COMMA {
+			break
 		}
+		p.advance() // ,
 	}
-	return tvf, nil
+	list.Span = span(list.Columns[0].Pos(), list.Columns[len(list.Columns)-1].End())
+	rparen, err := p.expect(token.RPAREN, `")"`)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.Descriptor{Span: span(descTok.Pos, rparen.End), Columns: list}, nil
 }
 
 // parseTVFArgument parses a single table-valued function (or CALL statement)
@@ -8809,6 +9322,21 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 		return (t.Kind == token.IDENT || t.Kind == token.QUOTED_IDENT) && !isReserved(t)
 	}
 	switch {
+	case p.atInputTableArgument():
+		arg := p.parseInputTableArgument()
+		return &ast.TVFArgument{Span: arg.Span, Expr: arg}, nil
+	case isKeyword(tok, "DESCRIPTOR") && p.peekAt(1).Kind == token.LPAREN:
+		desc, err := p.parseDescriptorArgument()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.TVFArgument{Span: desc.Span, Expr: desc}, nil
+	case isKeyword(tok, "SELECT"):
+		// A bare subquery argument must be parenthesized; see tvf_argument in
+		// googlesql.tm.
+		return nil, p.errorf(tok.Pos, "Syntax error: Each subquery argument for table-valued function calls must be enclosed in parentheses. To fix this, replace SELECT... with (SELECT...)")
+	case isKeyword(tok, "WITH"):
+		return nil, p.errorf(tok.Pos, "Syntax error: Each subquery argument for table-valued function calls must be enclosed in parentheses. To fix this, replace WITH... with (WITH...)")
 	case tok.Kind == token.LPAREN && isPathStart(p.peekAt(1)) && p.peekAt(2).Kind == token.LAMBDA:
 		// "(" named_argument ")": a named argument must not be parenthesized;
 		// see tvf_argument in googlesql.tm. The error points at the open paren.
@@ -8865,6 +9393,13 @@ func (p *parser) parseTVFArgument() (*ast.TVFArgument, error) {
 				Name:  name,
 				Value: subquery,
 			}
+			return &ast.TVFArgument{Span: named.Span, Expr: named}, nil
+		}
+		if p.atInputTableArgument() {
+			// named_argument: identifier "=>" input_table_argument; see
+			// googlesql.tm.
+			arg := p.parseInputTableArgument()
+			named := &ast.NamedArgument{Span: span(name.Pos(), arg.End()), Name: name, Value: arg}
 			return &ast.TVFArgument{Span: named.Span, Expr: named}, nil
 		}
 		value, err := p.parseExpression()
@@ -11017,10 +11552,20 @@ func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) 
 			case p.peekAt(1).Kind == token.LAMBDA &&
 				(p.peek().Kind == token.IDENT || p.peek().Kind == token.QUOTED_IDENT) &&
 				!isReserved(p.peek()):
-				// named_argument: identifier "=>" expression; see
-				// function_call_argument in googlesql.tm.
+				// named_argument: identifier "=>" (expression |
+				// input_table_argument); see function_call_argument in
+				// googlesql.tm.
 				name := p.parseIdentifierToken(p.advance())
 				p.advance() // consume =>
+				if p.atInputTableArgument() {
+					input := p.parseInputTableArgument()
+					arg = &ast.NamedArgument{
+						Span:  span(name.Pos(), input.End()),
+						Name:  name,
+						Value: input,
+					}
+					break
+				}
 				value, verr := p.parseExpression()
 				if verr != nil {
 					return nil, verr

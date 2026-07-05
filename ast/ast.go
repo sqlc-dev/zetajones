@@ -604,6 +604,7 @@ type InsertStatement struct {
 	Span
 	InsertMode         string               `json:"insert_mode,omitempty"`
 	Target             Node                 `json:"target"`
+	Hint               *Hint                `json:"hint,omitempty"`
 	Columns            *ColumnList          `json:"columns,omitempty"`
 	Rows               *InsertValuesRowList `json:"rows,omitempty"`
 	Query              *Query               `json:"query,omitempty"`
@@ -614,7 +615,13 @@ type InsertStatement struct {
 
 func (n *InsertStatement) statementNode() {}
 func (n *InsertStatement) Children() []Node {
-	out := children(n.Target, n.Columns)
+	out := children(n.Target)
+	if n.Hint != nil {
+		out = append(out, n.Hint)
+	}
+	if n.Columns != nil {
+		out = append(out, n.Columns)
+	}
 	if n.Rows != nil {
 		out = append(out, n.Rows)
 	}
@@ -975,12 +982,55 @@ func (n *AliasedGroupRows) Children() []Node {
 // parentheses.
 type AliasedQuery struct {
 	Span
-	Identifier *Identifier `json:"identifier"`
-	Query      *Query      `json:"query"`
+	Identifier *Identifier            `json:"identifier"`
+	Query      *Query                 `json:"query"`
+	Modifiers  *AliasedQueryModifiers `json:"modifiers,omitempty"`
 }
 
 func (n *AliasedQuery) Children() []Node {
-	return children(n.Identifier, n.Query)
+	return children(n.Identifier, n.Query, n.Modifiers)
+}
+
+// AliasedQueryModifiers holds the modifiers of an aliased query, currently
+// only a recursion depth modifier; see ASTAliasedQueryModifiers in
+// googlesql/parser/parse_tree.h.
+type AliasedQueryModifiers struct {
+	Span
+	RecursionDepth *RecursionDepthModifier `json:"recursion_depth,omitempty"`
+}
+
+func (n *AliasedQueryModifiers) Children() []Node {
+	return children(n.RecursionDepth)
+}
+
+// RecursionDepthModifier is a "WITH DEPTH [AS alias] [BETWEEN lo AND hi | MAX
+// hi]" modifier on a recursive CTE; see ASTRecursionDepthModifier in
+// googlesql/parser/parse_tree.h.
+type RecursionDepthModifier struct {
+	Span
+	Alias      *Alias          `json:"alias,omitempty"`
+	LowerBound *IntOrUnbounded `json:"lower_bound"`
+	UpperBound *IntOrUnbounded `json:"upper_bound"`
+}
+
+func (n *RecursionDepthModifier) Children() []Node {
+	var out []Node
+	if n.Alias != nil {
+		out = append(out, n.Alias)
+	}
+	return append(out, n.LowerBound, n.UpperBound)
+}
+
+// IntOrUnbounded is a recursion depth bound: either an int literal / parameter
+// or unbounded (no child); see ASTIntOrUnbounded in
+// googlesql/parser/parse_tree.h.
+type IntOrUnbounded struct {
+	Span
+	Bound Node `json:"bound,omitempty"`
+}
+
+func (n *IntOrUnbounded) Children() []Node {
+	return children(n.Bound)
 }
 
 // LockMode is a FOR UPDATE locking clause on a query; see ASTLockMode in
@@ -1192,6 +1242,7 @@ type TVF struct {
 	Span
 	Name  *PathExpression `json:"name"`
 	Args  []*TVFArgument  `json:"args,omitempty"`
+	Hint  *Hint           `json:"hint,omitempty"`
 	Alias *Alias          `json:"alias,omitempty"`
 	// IsLateral is true when the call is preceded by the LATERAL keyword;
 	// the span then includes the keyword.
@@ -1206,6 +1257,7 @@ func (n *TVF) Children() []Node {
 	for _, a := range n.Args {
 		out = append(out, a)
 	}
+	out = append(out, children(n.Hint)...)
 	out = append(out, children(n.Alias)...)
 	return append(out, n.PostfixOperators...)
 }
@@ -1220,6 +1272,48 @@ type TVFArgument struct {
 func (n *TVFArgument) Children() []Node {
 	return children(n.Expr)
 }
+
+// InputTableArgument is the "INPUT TABLE" argument form for a table-valued
+// function call in a pipe CALL; see ASTInputTableArgument in
+// googlesql/parser/parse_tree.h. It has no children.
+type InputTableArgument struct {
+	Span
+}
+
+func (n *InputTableArgument) Children() []Node { return nil }
+
+// Descriptor is a "DESCRIPTOR(col, ...)" table-valued function argument; see
+// ASTDescriptor in googlesql/parser/parse_tree.h.
+type Descriptor struct {
+	Span
+	Columns *DescriptorColumnList `json:"columns"`
+}
+
+func (n *Descriptor) Children() []Node { return children(n.Columns) }
+
+// DescriptorColumnList is the list of columns in a DESCRIPTOR(...) argument;
+// see ASTDescriptorColumnList in googlesql/parser/parse_tree.h.
+type DescriptorColumnList struct {
+	Span
+	Columns []*DescriptorColumn `json:"columns"`
+}
+
+func (n *DescriptorColumnList) Children() []Node {
+	out := make([]Node, 0, len(n.Columns))
+	for _, c := range n.Columns {
+		out = append(out, c)
+	}
+	return out
+}
+
+// DescriptorColumn is a single column name in a DESCRIPTOR(...) argument; see
+// ASTDescriptorColumn in googlesql/parser/parse_tree.h.
+type DescriptorColumn struct {
+	Span
+	Name *Identifier `json:"name"`
+}
+
+func (n *DescriptorColumn) Children() []Node { return children(n.Name) }
 
 // UnnestExpression is UNNEST(expr [AS alias], ...); see ASTUnnestExpression
 // in googlesql/parser/parse_tree.h. The span includes the UNNEST keyword and
@@ -4623,6 +4717,75 @@ func (n *PipePivot) Children() []Node {
 	return children(n.Pivot)
 }
 
+// PipeUnpivot is a |> UNPIVOT pipe operator; see ASTPipeUnpivot in
+// googlesql/parser/parse_tree.h. The UnpivotClause carries the optional alias.
+type PipeUnpivot struct {
+	Span
+	Unpivot *UnpivotClause `json:"unpivot"`
+}
+
+func (n *PipeUnpivot) Children() []Node {
+	return children(n.Unpivot)
+}
+
+// PipeCall is a |> CALL pipe operator invoking a table-valued function; see
+// ASTPipeCall in googlesql/parser/parse_tree.h. Any alias is carried on the
+// TVF node.
+type PipeCall struct {
+	Span
+	Call *TVF `json:"call"`
+}
+
+func (n *PipeCall) Children() []Node {
+	return children(n.Call)
+}
+
+// PipeWith is a |> WITH pipe operator carrying a WITH clause; see ASTPipeWith
+// in googlesql/parser/parse_tree.h.
+type PipeWith struct {
+	Span
+	With *WithClause `json:"with"`
+}
+
+func (n *PipeWith) Children() []Node {
+	return children(n.With)
+}
+
+// PipeInsert is a |> INSERT pipe operator carrying an INSERT statement without
+// a source (the rows come from the pipe input); see ASTPipeInsert in
+// googlesql/parser/parse_tree.h.
+type PipeInsert struct {
+	Span
+	Insert *InsertStatement `json:"insert"`
+}
+
+func (n *PipeInsert) Children() []Node {
+	return children(n.Insert)
+}
+
+// PipeRecursiveUnion is a |> RECURSIVE UNION pipe operator; see
+// ASTPipeRecursiveUnion in googlesql/parser/parse_tree.h. Input is either a
+// parenthesized Query or a Subpipeline.
+type PipeRecursiveUnion struct {
+	Span
+	Metadata *SetOperationMetadata   `json:"metadata"`
+	Depth    *RecursionDepthModifier `json:"depth,omitempty"`
+	Input    Node                    `json:"input"`
+	Alias    *Alias                  `json:"alias,omitempty"`
+}
+
+func (n *PipeRecursiveUnion) Children() []Node {
+	out := children(n.Metadata)
+	if n.Depth != nil {
+		out = append(out, n.Depth)
+	}
+	out = append(out, n.Input)
+	if n.Alias != nil {
+		out = append(out, n.Alias)
+	}
+	return out
+}
+
 // PipeExportData is a |> EXPORT DATA pipe operator; see ASTPipeExportData in
 // googlesql/parser/parse_tree.h. The ExportDataStatement never has a query
 // when used as a pipe operator.
@@ -4683,6 +4846,43 @@ func (n *PipeTee) Children() []Node {
 		out = append(out, sub)
 	}
 	return out
+}
+
+// PipeIf is a |> IF pipe operator with an optional hint, one or more
+// IF/ELSEIF cases, and an optional final ELSE subpipeline; see ASTPipeIf in
+// googlesql/parser/parse_tree.h.
+type PipeIf struct {
+	Span
+	Hint  *Hint         `json:"hint,omitempty"`
+	Cases []*PipeIfCase `json:"cases"`
+	Else  *Subpipeline  `json:"else,omitempty"`
+}
+
+func (n *PipeIf) Children() []Node {
+	var out []Node
+	if n.Hint != nil {
+		out = append(out, n.Hint)
+	}
+	for _, c := range n.Cases {
+		out = append(out, c)
+	}
+	if n.Else != nil {
+		out = append(out, n.Else)
+	}
+	return out
+}
+
+// PipeIfCase is a single IF/ELSEIF branch of a |> IF pipe operator: a
+// condition expression and the subpipeline run when it is true; see
+// ASTPipeIfCase in googlesql/parser/parse_tree.h.
+type PipeIfCase struct {
+	Span
+	Condition Node         `json:"condition"`
+	Body      *Subpipeline `json:"body"`
+}
+
+func (n *PipeIfCase) Children() []Node {
+	return children(n.Condition, n.Body)
 }
 
 // RowPatternOperation is an alternation or concatenation of row pattern
