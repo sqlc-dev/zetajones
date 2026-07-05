@@ -859,8 +859,21 @@ func (p *parser) startsGraphPattern() bool {
 		return true
 	}
 	t := p.peek()
-	if ((t.Kind == token.IDENT && !p.isReserved(t)) || t.Kind == token.QUOTED_IDENT) && p.peekAt(1).Kind == token.EQ {
-		return true
+	if (t.Kind == token.IDENT && !p.isReserved(t)) || t.Kind == token.QUOTED_IDENT {
+		// A bare graph_identifier at the start of a graph pattern commits to a
+		// path-variable assignment (graph_identifier "="): the shift/reduce
+		// conflict resolves in favor of path-variable assignment (see the note
+		// on graph_path_pattern in googlesql.tm), so an identifier that isn't a
+		// following-"=" assignment still enters the graph pattern and then
+		// reports the missing "=". This does not apply when the identifier is
+		// actually a linear operator keyword or RETURN, which begin a linear
+		// operator instead of a graph pattern.
+		if p.peekAt(1).Kind == token.EQ {
+			return true
+		}
+		if !p.startsGraphLinearOp() && !isKeyword(t, "RETURN") {
+			return true
+		}
 	}
 	return false
 }

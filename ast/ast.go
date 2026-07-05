@@ -263,6 +263,18 @@ type RunBatchStatement struct {
 func (n *RunBatchStatement) statementNode()   {}
 func (n *RunBatchStatement) Children() []Node { return nil }
 
+// RunStatement is a "RUN <string literal>" statement that executes another
+// script; see ASTRunStatement in googlesql/parser/parse_tree.h and
+// run_statement in googlesql.tm. The target script is given by a string
+// literal (target_string_literal). It may head a StatementWithPipeOperators.
+type RunStatement struct {
+	Span
+	TargetStringLiteral *StringLiteral `json:"target_string_literal"`
+}
+
+func (n *RunStatement) statementNode()   {}
+func (n *RunStatement) Children() []Node { return children(n.TargetStringLiteral) }
+
 // AbortBatchStatement is an "ABORT BATCH" statement; see ASTAbortBatchStatement
 // in googlesql/parser/parse_tree.h.
 type AbortBatchStatement struct {

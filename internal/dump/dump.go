@@ -1293,6 +1293,8 @@ func nodeString(n ast.Node) string {
 		return "StartBatchStatement"
 	case *ast.RunBatchStatement:
 		return "RunBatchStatement"
+	case *ast.RunStatement:
+		return "RunStatement"
 	case *ast.AbortBatchStatement:
 		return "AbortBatchStatement"
 	case *ast.BeginEndBlock:

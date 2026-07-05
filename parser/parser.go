@@ -213,6 +213,11 @@ const FeaturePipes Feature = "PIPES"
 // (FEATURE_STATEMENT_WITH_PIPE_OPERATORS).
 const FeatureStatementWithPipeOperators Feature = "STATEMENT_WITH_PIPE_OPERATORS"
 
+// FeatureRunStatement gates the "RUN <string literal>" statement, which runs
+// another script (FEATURE_RUN_STATEMENT); see run_statement in googlesql.tm.
+// It is in development and not enabled by MAXIMUM.
+const FeatureRunStatement Feature = "RUN_STATEMENT"
+
 // FeatureAllowConsecutiveOn gates consecutive ON/USING clauses in join
 // expressions (FEATURE_ALLOW_CONSECUTIVE_ON).
 const FeatureAllowConsecutiveOn Feature = "ALLOW_CONSECUTIVE_ON"
@@ -1197,7 +1202,7 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	case isKeyword(tok, "ROLLBACK"):
 		return p.parseRollbackStatement()
 	case isKeyword(tok, "RUN"):
-		return p.parseRunBatchStatement()
+		return p.parseRunStatement()
 	case isKeyword(tok, "ABORT"):
 		return p.parseAbortBatchStatement()
 	case isKeyword(tok, "ANALYZE"):
@@ -5849,6 +5854,28 @@ func (p *parser) parseStartBatchStatement() (ast.Statement, error) {
 		stmt.Stop = id.End()
 	}
 	return stmt, nil
+}
+
+// parseRunStatement parses statements beginning with RUN: "RUN BATCH" (an
+// ASTRunBatchStatement) or "RUN <string literal>" (an ASTRunStatement, which
+// may head a StatementWithPipeOperators). RUN is the next token. See
+// run_statement / run_batch_statement and the RUN disambiguation in
+// googlesql.tm; a string literal after RUN selects the run statement, while
+// "RUN BATCH" selects the run-batch statement.
+func (p *parser) parseRunStatement() (ast.Statement, error) {
+	if p.peekAt(1).Kind == token.STRING {
+		runTok := p.advance() // RUN
+		if !p.features.Enabled(FeatureRunStatement) {
+			return nil, p.errorf(runTok.Pos, "Syntax error: RUN statement is not supported.")
+		}
+		path, err := p.parseStringLiteralValue()
+		if err != nil {
+			return nil, err
+		}
+		stmt := &ast.RunStatement{Span: span(runTok.Pos, path.End()), TargetStringLiteral: path}
+		return p.maybeStatementWithPipeOperators(stmt)
+	}
+	return p.parseRunBatchStatement()
 }
 
 // parseRunBatchStatement parses "RUN BATCH"; see run_batch_statement in
