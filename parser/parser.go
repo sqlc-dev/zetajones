@@ -716,6 +716,19 @@ func isReserved(tok token.Token) bool {
 	return tok.Kind == token.IDENT && reservedKeywords[strings.ToUpper(tok.Image)]
 }
 
+// reservedFunctionNameKeywords are the function_name_from_keyword entries that
+// are also reserved keywords: in expression position they name a function call
+// (requiring "(") rather than being an ordinary path. See
+// function_name_from_keyword in googlesql.tm. IF, GROUPING, and RANGE are also
+// in that grammar rule but are non-reserved, so they already parse as paths.
+var reservedFunctionNameKeywords = map[string]bool{
+	"COLLATE": true, "LEFT": true, "RIGHT": true,
+}
+
+func isReservedFunctionNameKeyword(tok token.Token) bool {
+	return tok.Kind == token.IDENT && reservedFunctionNameKeywords[strings.ToUpper(tok.Image)]
+}
+
 // expectKeyword consumes the given keyword or returns an error.
 func (p *parser) expectKeyword(kw string) (token.Token, error) {
 	if !isKeyword(p.peek(), kw) {
@@ -8166,6 +8179,19 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 			// "INTERVAL <expr> <datepart> [TO <datepart>]"; see
 			// interval_expression in googlesql.tm.
 			return p.parseIntervalExpr()
+		case isReservedFunctionNameKeyword(tok):
+			// COLLATE, LEFT, and RIGHT are reserved keywords, but in expression
+			// position they can name a function call: "COLLATE(...)". They must
+			// be followed by "(". See function_name_from_keyword in
+			// googlesql.tm. (IF, GROUPING, and RANGE are non-reserved and
+			// already reach parsePathOrCall below.)
+			kw := p.advance()
+			ident := &ast.Identifier{Span: span(kw.Pos, kw.End), Name: kw.Image}
+			path := &ast.PathExpression{Span: span(kw.Pos, kw.End), Names: []*ast.Identifier{ident}}
+			if p.peek().Kind != token.LPAREN {
+				return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" but got %s`, describeToken(p.peek()))
+			}
+			return p.finishFunctionCall(path)
 		case isReserved(tok):
 			if err := p.exceptClashError(); err != nil {
 				return nil, err
@@ -8601,6 +8627,16 @@ func (p *parser) parsePathOrCall() (ast.Node, error) {
 		}
 		return path, nil
 	}
+	return p.finishFunctionCall(path)
+}
+
+// finishFunctionCall parses the argument list and trailing modifiers of a
+// function call whose function path has already been parsed and whose opening
+// "(" is the next token; see function_call_expression in googlesql.tm. It is
+// shared by ordinary path calls and by the function_name_from_keyword calls
+// (IF, GROUPING, LEFT, RIGHT, COLLATE, RANGE) whose names are keywords.
+func (p *parser) finishFunctionCall(path *ast.PathExpression) (ast.Node, error) {
+	var err error
 	p.advance() // consume (
 	call := &ast.FunctionCall{Span: span(path.Pos(), 0), Function: path}
 	if isKeyword(p.peek(), "DISTINCT") {
