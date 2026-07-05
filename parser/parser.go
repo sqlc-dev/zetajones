@@ -796,7 +796,8 @@ var reservedKeywords = map[string]bool{
 	"DESC":    true, "DISTINCT": true,
 	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "EXISTS": true, "FALSE": true, "FOR": true,
 	"FROM": true,
-	"FULL": true, "GROUP": true, "GROUPS": true, "HASH": true, "HAVING": true,
+	"FULL": true, "GROUP": true, "GROUPING": true, "GROUPS": true, "HASH": true, "HAVING": true,
+	"IF":     true,
 	"IGNORE": true, "IN": true,
 	"INNER":     true,
 	"INTERSECT": true, "IS": true, "JOIN": true, "LATERAL": true, "LEFT": true,
@@ -842,10 +843,10 @@ func optionsNameOK(tok token.Token) bool {
 // reservedFunctionNameKeywords are the function_name_from_keyword entries that
 // are also reserved keywords: in expression position they name a function call
 // (requiring "(") rather than being an ordinary path. See
-// function_name_from_keyword in googlesql.tm. IF, GROUPING, and RANGE are also
-// in that grammar rule but are non-reserved, so they already parse as paths.
+// function_name_from_keyword in googlesql.tm. (RANGE is also in that rule but
+// has its own dedicated handling for range literals.)
 var reservedFunctionNameKeywords = map[string]bool{
-	"COLLATE": true, "LEFT": true, "RIGHT": true,
+	"COLLATE": true, "GROUPING": true, "IF": true, "LEFT": true, "RIGHT": true,
 }
 
 func isReservedFunctionNameKeyword(tok token.Token) bool {
@@ -1567,14 +1568,20 @@ func (p *parser) parseInsertStatement() (ast.Statement, error) {
 	if sawOr {
 		p.advance()
 	}
+	// The mode keywords IGNORE/REPLACE/UPDATE are non-reserved, so a mode
+	// keyword directly followed by "." (e.g. "INSERT replace.foo") is the start
+	// of the target path, not an insert mode. After an explicit "OR" a mode
+	// keyword is always required, so the "." lookahead only applies otherwise.
+	// See insert_mode in googlesql.tm.
+	treatAsMode := sawOr || p.peekAt(1).Kind != token.DOT
 	switch {
-	case isKeyword(p.peek(), "IGNORE"):
+	case treatAsMode && isKeyword(p.peek(), "IGNORE"):
 		p.advance()
 		stmt.InsertMode = "IGNORE"
-	case isKeyword(p.peek(), "REPLACE"):
+	case treatAsMode && isKeyword(p.peek(), "REPLACE"):
 		p.advance()
 		stmt.InsertMode = "REPLACE"
-	case isKeyword(p.peek(), "UPDATE"):
+	case treatAsMode && isKeyword(p.peek(), "UPDATE"):
 		p.advance()
 		stmt.InsertMode = "UPDATE"
 	default:
@@ -9317,8 +9324,15 @@ func startsExpression(tok token.Token) bool {
 		if !isReserved(tok) {
 			return true
 		}
+		if reservedFunctionNameKeywords[strings.ToUpper(tok.Image)] {
+			// Reserved keywords that name a function call (IF, GROUPING, LEFT,
+			// RIGHT, COLLATE) begin an expression; see function_name_from_keyword
+			// in googlesql.tm.
+			return true
+		}
 		switch strings.ToUpper(tok.Image) {
-		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "CAST", "STRUCT", "EXISTS":
+		case "NULL", "TRUE", "FALSE", "NOT", "ARRAY", "CASE", "CAST", "STRUCT", "EXISTS",
+			"NEW", "INTERVAL", "RANGE":
 			return true
 		}
 	}
@@ -9351,7 +9365,7 @@ func (p *parser) parseSelectClause() (*ast.Select, error) {
 	// Optional hint immediately after SELECT; see "SELECT" hint? in
 	// select_clause in googlesql.tm. (This is distinct from a hint preceding
 	// the whole statement, which produces an ASTHintedStatement.)
-	if p.peek().Kind == token.ATSIGN {
+	if p.atsignOpensHint() {
 		hint, err := p.parseOptionalHint()
 		if err != nil {
 			return nil, err
@@ -9751,20 +9765,31 @@ func (p *parser) parseOptionalStarModifiers() (*ast.StarModifiers, error) {
 // googlesql/parser/lookahead_transformer.cc and the select_column_expr rule
 // in googlesql/parser/googlesql.tm.
 func (p *parser) checkAttachedAlias() error {
+	if !p.currentIsAttachedAlias() {
+		return nil
+	}
+	return p.errorf(p.peek().Pos, "Syntax error: Missing whitespace between literal and alias")
+}
+
+// currentIsAttachedAlias reports whether the current token is an unquoted
+// identifier immediately following (with no whitespace) an integer or floating
+// point literal, as in `123abc`. The reference lexer re-labels such an
+// identifier as the ATTACHED_ALIAS token; it is only valid in the trailing
+// alias position of a select column. See
+// IsLiteralBeforeAdjacentUnquotedIdentifier in
+// googlesql/parser/lookahead_transformer.cc.
+func (p *parser) currentIsAttachedAlias() bool {
 	tok := p.peek()
 	if tok.Kind != token.IDENT || p.pos == 0 {
-		return nil
+		return false
 	}
 	prev := p.toks[p.pos-1]
 	if (prev.Kind != token.INT && prev.Kind != token.FLOAT) || prev.End != tok.Pos {
-		return nil
+		return false
 	}
 	// Inputs like "123.abc" tokenize as the float "123." followed by the
 	// identifier "abc" and remain valid, mirroring the reference lexer.
-	if strings.HasSuffix(prev.Image, ".") {
-		return nil
-	}
-	return p.errorf(tok.Pos, "Syntax error: Missing whitespace between literal and alias")
+	return !strings.HasSuffix(prev.Image, ".")
 }
 
 // parseOptionalAlias parses [AS] identifier if present.
@@ -9941,6 +9966,14 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 			return nil, err
 		}
 		table = &ast.TablePathExpression{Span: span(unnest.Pos(), unnest.End()), UnnestExpr: unnest}
+	} else if isKeyword(p.peek(), "IF") && p.peekAt(1).Kind == token.LPAREN {
+		// "IF(...)" is the only reserved keyword accepted as a TVF name in the
+		// FROM clause; see the "(path_expression | IF)" tvf rule in
+		// googlesql.tm.
+		ifTok := p.advance()
+		ident := p.parseIdentifierToken(ifTok)
+		path := &ast.PathExpression{Span: span(ifTok.Pos, ifTok.End), Names: []*ast.Identifier{ident}}
+		return p.parseTVFRest(path)
 	} else {
 		// A table primary reports plain "Unexpected" errors rather than the
 		// path expression's "Expected identifier" ones.
@@ -9969,7 +10002,7 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 	}
 	// An optional hint (@{...}) between the table path and the alias; see
 	// "table_path_expression_base hint? as_alias?" in googlesql.tm.
-	if p.peek().Kind == token.ATSIGN {
+	if p.atsignOpensHint() {
 		hint, err := p.parseOptionalHint()
 		if err != nil {
 			return nil, err
@@ -10828,6 +10861,19 @@ func (p *parser) parseCollate() (*ast.Collate, error) {
 		return nil, err
 	}
 	return &ast.Collate{Span: span(collateTok.Pos, name.End()), Name: name}, nil
+}
+
+// atsignOpensHint reports whether the "@" at the current position begins a
+// hint. The lookahead transformer only turns "@" into a hint opener
+// (KW_OPEN_HINT / KW_OPEN_INTEGER_HINT) when it is immediately followed by "{"
+// or an integer literal; otherwise "@" stays an ATSIGN that begins a named
+// parameter (e.g. "@ name"). See the ATSIGN case in lookahead_transformer.cc.
+func (p *parser) atsignOpensHint() bool {
+	if p.peek().Kind != token.ATSIGN {
+		return false
+	}
+	k := p.peekAt(1).Kind
+	return k == token.LBRACE || k == token.INT
 }
 
 // parseOptionalHint parses a "@<int>" and/or "@{name=value, ...}" hint if one
@@ -11930,6 +11976,13 @@ func (p *parser) parseCaseExpression() (ast.Node, error) {
 
 func (p *parser) parsePrimary() (ast.Node, error) {
 	tok := p.peek()
+	// An unquoted identifier fused to a preceding literal (the reference's
+	// ATTACHED_ALIAS token, e.g. the "d" in "@1d") cannot begin an expression;
+	// the reference reports it as unexpected. See the select_column_expr rule
+	// in googlesql.tm.
+	if p.currentIsAttachedAlias() {
+		return nil, p.errorf(tok.Pos, `Syntax error: Unexpected "%s"`, tok.Image)
+	}
 	switch tok.Kind {
 	case token.INT:
 		p.advance()
@@ -12058,6 +12111,14 @@ func (p *parser) parsePrimary() (ast.Node, error) {
 		case isKeyword(tok, "ARRAY") && p.peekAt(1).Kind == token.LPAREN:
 			p.advance() // ARRAY; the subquery's span starts at the keyword.
 			return p.parseModifiedSubquery(tok.Pos, "ARRAY")
+		case isKeyword(tok, "ARRAY"):
+			// A bare reserved "ARRAY" in expression position must begin an array
+			// constructor. Having ruled out "[", "(", and "<" above, the LALR
+			// parser is left expecting the typed-constructor "<". See
+			// array_constructor and array_constructor_prefix_no_expressions in
+			// googlesql.tm.
+			p.advance() // ARRAY
+			return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "<" but got %s`, describeToken(p.peek()))
 		case isKeyword(tok, "EXISTS") && (p.peekAt(1).Kind == token.LPAREN || p.peekAt(1).Kind == token.ATSIGN):
 			// EXISTS takes an optional hint before the subquery; see
 			// expression_subquery_with_keyword in googlesql.tm.
