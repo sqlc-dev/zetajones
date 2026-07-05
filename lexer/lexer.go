@@ -296,6 +296,14 @@ func (l *lexer) next() (token.Token, error) {
 		l.pos++
 		return l.emit(token.BACKSLASH, start), nil
 	}
+	if c == '!' {
+		// A lone "!" (not part of "!=") lexes as the EXCL token; see the
+		// EXCL rule (/!/) in googlesql/parser/googlesql.tm. The grammar has
+		// no production for it, so the parser reports it as an unexpected
+		// token rather than an illegal input character.
+		l.pos++
+		return l.emit(token.EXCL, start), nil
+	}
 	return token.Token{}, l.errorf(start, `Syntax error: Illegal input character "%s"`, cEscapeByte(c))
 }
 

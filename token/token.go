@@ -53,6 +53,7 @@ const (
 	LAMBDA     // =>
 	PIPE_INPUT // |>
 	BACKSLASH  // \ (only for lenient macro expansion)
+	EXCL       // ! (standalone; the parser rejects it as unexpected)
 )
 
 // Token is a single lexical token with its position in the input.
