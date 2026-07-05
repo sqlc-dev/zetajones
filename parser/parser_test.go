@@ -37,6 +37,14 @@ func runCase(c *testfile.Case) string {
 		if m, ok := strings.CutPrefix(opt, "mode="); ok {
 			mode = m
 		}
+		// The reference driver splits these configs on "," (an empty config
+		// yields a single empty element); see run_parser_test.cc.
+		if spec, ok := strings.CutPrefix(opt, "supported_generic_entity_types="); ok {
+			opts.SupportedGenericEntityTypes = strings.Split(spec, ",")
+		}
+		if spec, ok := strings.CutPrefix(opt, "supported_generic_sub_entity_types="); ok {
+			opts.SupportedGenericSubEntityTypes = strings.Split(spec, ",")
+		}
 	}
 	var (
 		node ast.Node

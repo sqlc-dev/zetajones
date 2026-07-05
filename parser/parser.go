@@ -339,6 +339,24 @@ func (f *FeatureSet) Enabled(feat Feature) bool {
 type Options struct {
 	// Features is the set of enabled language features; nil enables all.
 	Features *FeatureSet
+	// SupportedGenericEntityTypes lists the object types accepted by generic
+	// entity DDL (CREATE/ALTER/DROP <type>); see supported_generic_entity_types
+	// in run_parser_test.cc. Matching is case-insensitive.
+	SupportedGenericEntityTypes []string
+	// SupportedGenericSubEntityTypes lists the nested object types accepted by
+	// generic sub-entity alter actions (ADD/ALTER/DROP <sub_type>); see
+	// supported_generic_sub_entity_types in run_parser_test.cc. Matching is
+	// case-insensitive.
+	SupportedGenericSubEntityTypes []string
+}
+
+// stringSet builds a case-insensitive (upper-cased) lookup set from a list.
+func stringSet(items []string) map[string]bool {
+	m := make(map[string]bool, len(items))
+	for _, it := range items {
+		m[strings.ToUpper(it)] = true
+	}
+	return m
 }
 
 // ParseStatement parses a single SQL statement, allowing an optional
@@ -358,7 +376,7 @@ func ParseStatementWithOptions(sql string, opts Options) (ast.Statement, error) 
 		}
 		return nil, err
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
 	stmt, err := p.parseStatement()
 	if err != nil {
 		return nil, err
@@ -411,7 +429,7 @@ func ParseScriptWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of script"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
 	// An empty script resolves to a Script wrapping an empty statement list.
 	if p.peek().Kind == token.EOF {
 		empty := &ast.StatementList{Span: span(0, 0)}
@@ -467,7 +485,7 @@ func ParseTypeWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of type"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
 	typ, err := p.parseType()
 	if err != nil {
 		return nil, err
@@ -505,7 +523,7 @@ func ParseExpressionWithOptions(sql string, opts Options) (ast.Node, error) {
 	if n := len(toks); n > 0 && toks[n-1].Kind == token.EOF {
 		toks[n-1].Image = "end of expression"
 	}
-	p := &parser{sql: sql, toks: toks, features: opts.Features}
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes)}
 	expr, err := p.parseExpression()
 	if err != nil {
 		return nil, err
@@ -521,6 +539,11 @@ type parser struct {
 	toks     []token.Token
 	pos      int
 	features *FeatureSet
+	// entityTypes and subEntityTypes are the case-insensitive sets of object
+	// types accepted by generic entity DDL and generic sub-entity alter
+	// actions; see Options.SupportedGenericEntityTypes.
+	entityTypes    map[string]bool
+	subEntityTypes map[string]bool
 	// extents records the full token extent of expressions that were
 	// parenthesized. In ZetaSQL's parse tree a parenthesized expression
 	// keeps the location of the inner expression, but any enclosing
@@ -2576,17 +2599,18 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if p.peek().Kind == token.QUOTED_IDENT {
 		return nil, p.errorf(p.peek().Pos, "%s is not a supported object type", p.peek().Image)
 	}
-	// No recognized object-type keyword follows. A bare identifier (one that is
-	// not any keyword) with no scope modifier is treated as a generic entity
-	// type, which is unsupported; see generic_entity_type in googlesql.tm.
-	// Anything else (a keyword, punctuation, or an identifier after a scope
-	// modifier) is simply unexpected here.
+	// CREATE [OR REPLACE] generic_entity_type [IF NOT EXISTS] path ...; see
+	// create_entity_statement in googlesql.tm. A generic entity type is a bare
+	// identifier or the PROJECT keyword, and takes no scope modifier. When the
+	// type is in the supported set the statement parses; otherwise it reports
+	// "<type> is not a supported object type".
+	if scope == "" && isGenericEntityTypeToken(p.peek()) {
+		return p.parseCreateEntityStatement(createTok, isOrReplace)
+	}
+	// No recognized object-type keyword follows. Anything that is not TABLE is
+	// simply unexpected here.
 	if !isKeyword(p.peek(), "TABLE") {
-		tok := p.peek()
-		if scope == "" && tok.Kind == token.IDENT && !keywordNames[strings.ToLower(tok.Image)] {
-			return nil, p.errorf(tok.Pos, "%s is not a supported object type", tok.Image)
-		}
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 	}
 	p.advance() // TABLE
 	if isKeyword(p.peek(), "FUNCTION") {
@@ -5617,6 +5641,23 @@ func (p *parser) beginsType(tok token.Token) bool {
 	return false
 }
 
+// parseDropEntityStatement parses "DROP generic_entity_type opt_if_exists
+// path_expression"; see drop_statement in googlesql.tm. The entity type is the
+// next token (already verified supported by the caller).
+func (p *parser) parseDropEntityStatement(dropTok token.Token) (ast.Statement, error) {
+	typeTok := p.advance() // entity type
+	entType := p.parseIdentifierToken(typeTok)
+	stmt := &ast.DropEntityStatement{Span: span(dropTok.Pos, typeTok.End), EntityType: entType}
+	stmt.IsIfExists = p.tryParseIfExists()
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	return stmt, nil
+}
+
 // parseDropStatement parses a DROP <object kind> [IF EXISTS] <path> statement;
 // see drop_statement in googlesql.tm. Most object kinds share the generic
 // ASTDropStatement node (which records the schema object kind name); FUNCTION,
@@ -5698,10 +5739,14 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		isKeyword(kindTok, "PROCEDURE"), isKeyword(kindTok, "VIEW"):
 		p.advance()
 		objectKind = strings.ToUpper(kindTok.Image)
-	case kindTok.Kind == token.IDENT && !keywordNames[strings.ToLower(kindTok.Image)]:
-		// A plain identifier is not a recognized schema object kind; see the
-		// generic_entity_type error in the drop_statement reduce action.
-		return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+	case isGenericEntityTypeToken(kindTok):
+		// DROP generic_entity_type [IF EXISTS] path; see drop_statement in
+		// googlesql.tm. An unsupported type reports "<type> is not a supported
+		// object type" from the generic_entity_type reduce action.
+		if !p.entityTypes[strings.ToUpper(kindTok.Image)] {
+			return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+		}
+		return p.parseDropEntityStatement(dropTok)
 	case kindTok.Kind == token.QUOTED_IDENT:
 		// A backtick-quoted identifier is never a supported entity type; the
 		// backticks are kept as part of the reported type name. See
@@ -6158,11 +6203,15 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 		consumeSecond()
 		unsupported = "PROPERTY GRAPH"
 	default:
-		// A non-keyword identifier is treated as a generic entity type, which
-		// the parser does not support; see alter_statement in googlesql.tm.
-		// No "Syntax error: " prefix.
-		if kindTok.Kind == token.IDENT && !keywordNames[strings.ToLower(kindTok.Image)] {
-			return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+		// ALTER generic_entity_type ...; see alter_statement in googlesql.tm. A
+		// generic entity type is a bare identifier or the PROJECT keyword. When
+		// it is in the supported set the statement parses; otherwise it reports
+		// "<type> is not a supported object type" (no "Syntax error: " prefix).
+		if isGenericEntityTypeToken(kindTok) {
+			if !p.entityTypes[strings.ToUpper(kindTok.Image)] {
+				return nil, p.errorf(kindTok.Pos, "%s is not a supported object type", kindTok.Image)
+			}
+			return p.parseAlterEntityStatement(alterTok)
 		}
 		return nil, p.errorf(kindTok.Pos, "Syntax error: Unexpected %s", describeToken(kindTok))
 	}
@@ -6200,6 +6249,160 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 		return nil, p.errorf(kindTok.Pos, "ALTER %s is not supported", unsupported)
 	}
 	return stmt, nil
+}
+
+// parseAlterEntityStatement parses "ALTER generic_entity_type opt_if_exists
+// [path_expression] alter_action_list"; see the ALTER generic_entity_type
+// productions in googlesql.tm. The entity type is the next token (already
+// verified supported by the caller). The path expression is optional: when the
+// token after opt_if_exists begins an alter action rather than a path, the
+// no-path form applies (e.g. "ALTER PROJECT SET OPTIONS (...)").
+func (p *parser) parseAlterEntityStatement(alterTok token.Token) (ast.Statement, error) {
+	typeTok := p.advance() // entity type
+	entType := p.parseIdentifierToken(typeTok)
+	stmt := &ast.AlterStatement{Span: span(alterTok.Pos, typeTok.End), NodeName: "AlterEntityStatement", EntityType: entType}
+	stmt.IsIfExists = p.tryParseIfExists()
+	if p.hasEntityAlterPath() {
+		path, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Path = path
+		stmt.Stop = path.End()
+	}
+	actions, err := p.parseAlterActionList()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Actions = actions
+	stmt.Stop = actions.End()
+	return stmt, nil
+}
+
+// hasEntityAlterPath reports whether an optional path_expression precedes the
+// alter action list of an ALTER generic_entity_type statement. A path is
+// present when the current token can begin a path_expression (a valid
+// identifier) and does not itself begin an alter action; see the two ALTER
+// generic_entity_type productions in googlesql.tm. For example "ALTER PROJECT
+// ADD DROP CONSTRAINT foo" reads ADD as the path (since "ADD DROP" cannot begin
+// an action) while "ALTER PROJECT DROP CONSTRAINT foo" reads DROP as the start
+// of a DROP CONSTRAINT action.
+func (p *parser) hasEntityAlterPath() bool {
+	tok := p.peek()
+	if tok.Kind != token.QUOTED_IDENT && (tok.Kind != token.IDENT || isReserved(tok)) {
+		return false
+	}
+	return !p.tokenStartsAlterAction()
+}
+
+// tokenStartsAlterAction reports whether the tokens at the current position
+// begin an alter_action; see alter_action in googlesql.tm. It uses one token
+// of lookahead to distinguish, e.g., "ADD DROP ..." (ADD is not an action)
+// from "ADD COLUMN ..." (an ADD COLUMN action).
+func (p *parser) tokenStartsAlterAction() bool {
+	tok := p.peek()
+	next := p.peekAt(1)
+	switch {
+	case isKeyword(tok, "SET"), isKeyword(tok, "RENAME"):
+		return true
+	case isKeyword(tok, "REPLACE"):
+		return isKeyword(next, "ROW")
+	case isKeyword(tok, "ADD"):
+		return isKeyword(next, "COLUMN") || isKeyword(next, "CONSTRAINT") ||
+			isKeyword(next, "ROW") || isKeyword(next, "PRIMARY") ||
+			isKeyword(next, "FOREIGN") || isKeyword(next, "CHECK") ||
+			isSubEntityTypeToken(next)
+	case isKeyword(tok, "DROP"):
+		return isKeyword(next, "COLUMN") || isKeyword(next, "CONSTRAINT") ||
+			isKeyword(next, "PRIMARY") || isKeyword(next, "ROW") ||
+			isSubEntityTypeToken(next)
+	case isKeyword(tok, "ALTER"):
+		return isKeyword(next, "COLUMN") || isKeyword(next, "CONSTRAINT") ||
+			isSubEntityTypeToken(next)
+	}
+	return false
+}
+
+// isSubEntityTypeToken reports whether tok can begin a generic sub-entity
+// type: a bare (non-keyword) identifier or the REPLICA keyword; see
+// sub_entity_type_identifier in googlesql.tm.
+func isSubEntityTypeToken(tok token.Token) bool {
+	if tok.Kind != token.IDENT {
+		return false
+	}
+	if strings.EqualFold(tok.Image, "REPLICA") {
+		return true
+	}
+	return !keywordNames[strings.ToLower(tok.Image)]
+}
+
+// parseAddSubEntityAction parses "generic_sub_entity_type opt_if_not_exists
+// identifier opt_options_list" after ADD; see the ADD generic_sub_entity_type
+// production in googlesql.tm. The sub-entity type is the next token.
+func (p *parser) parseAddSubEntityAction(addTok token.Token) (ast.Node, error) {
+	typeTok := p.advance() // sub-entity type
+	if !p.subEntityTypes[strings.ToUpper(typeTok.Image)] {
+		// No "Syntax error: " prefix; see generic_sub_entity_type in googlesql.tm.
+		return nil, p.errorf(typeTok.Pos, "%s is not a supported nested object type", typeTok.Image)
+	}
+	entType := p.parseIdentifierToken(typeTok)
+	ifNotExists, err := p.parseOptIfNotExists()
+	if err != nil {
+		return nil, err
+	}
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	node := &ast.AddSubEntityAction{Span: span(addTok.Pos, name.End()), IsIfNotExists: ifNotExists, Type: entType, Name: name}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		node.Options = opts
+		node.Stop = opts.End()
+	}
+	return node, nil
+}
+
+// parseDropSubEntityAction parses "generic_sub_entity_type opt_if_exists
+// identifier" after DROP; see the DROP generic_sub_entity_type production in
+// googlesql.tm. The sub-entity type is the next token.
+func (p *parser) parseDropSubEntityAction(dropTok token.Token) (ast.Node, error) {
+	typeTok := p.advance() // sub-entity type
+	if !p.subEntityTypes[strings.ToUpper(typeTok.Image)] {
+		return nil, p.errorf(typeTok.Pos, "%s is not a supported nested object type", typeTok.Image)
+	}
+	entType := p.parseIdentifierToken(typeTok)
+	ifExists := p.tryParseIfExists()
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.DropSubEntityAction{Span: span(dropTok.Pos, name.End()), IsIfExists: ifExists, Type: entType, Name: name}, nil
+}
+
+// parseAlterSubEntityAction parses "generic_sub_entity_type opt_if_exists
+// identifier alter_action" after ALTER; see the ALTER generic_sub_entity_type
+// production in googlesql.tm. The sub-entity type is the next token.
+func (p *parser) parseAlterSubEntityAction(alterTok token.Token) (ast.Node, error) {
+	typeTok := p.advance() // sub-entity type
+	if !p.subEntityTypes[strings.ToUpper(typeTok.Image)] {
+		return nil, p.errorf(typeTok.Pos, "%s is not a supported nested object type", typeTok.Image)
+	}
+	entType := p.parseIdentifierToken(typeTok)
+	ifExists := p.tryParseIfExists()
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	action, err := p.parseAlterAction()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.AlterSubEntityAction{Span: span(alterTok.Pos, action.End()), IsIfExists: ifExists, Type: entType, Name: name, Action: action}, nil
 }
 
 // parseAlterRowAccessPolicyStatement parses
@@ -6583,6 +6786,10 @@ func (p *parser) parseAlterAction() (ast.Node, error) {
 		if isKeyword(p.peekAt(1), "COLUMN") {
 			return p.parseAlterColumnAction()
 		}
+		if isSubEntityTypeToken(p.peekAt(1)) {
+			alterTok := p.advance() // ALTER
+			return p.parseAlterSubEntityAction(alterTok)
+		}
 		return p.parseAlterConstraintAlterAction()
 	case isKeyword(tok, "REPLACE"):
 		return p.parseReplaceAlterAction()
@@ -6622,19 +6829,33 @@ func (p *parser) parseRenameAlterAction() (ast.Node, error) {
 	return &ast.RenameToClause{Span: span(renameTok.Pos, path.End()), NewName: path}, nil
 }
 
-// parseSetAlterAction parses "SET OPTIONS (...)".
+// parseSetAlterAction parses "SET OPTIONS (...)" or "SET AS
+// generic_entity_body"; see the "SET" alter_action productions in
+// googlesql.tm.
 func (p *parser) parseSetAlterAction() (ast.Node, error) {
 	setTok := p.advance() // SET
 	next := p.peek()
-	if !isKeyword(next, "OPTIONS") {
-		return nil, p.errorf(next.Pos, "Syntax error: Expected keyword AS or keyword DEFAULT or keyword ON or keyword OPTIONS but got %s", describeToken(next))
+	switch {
+	case isKeyword(next, "OPTIONS"):
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SetOptionsAction{Span: span(setTok.Pos, opts.End()), Options: opts}, nil
+	case isKeyword(next, "AS"):
+		p.advance() // AS
+		jsonBody, textBody, err := p.parseGenericEntityBody()
+		if err != nil {
+			return nil, err
+		}
+		end := textBody
+		if jsonBody != nil {
+			end = jsonBody
+		}
+		return &ast.SetAsAction{Span: span(setTok.Pos, end.End()), JSONBody: jsonBody, TextBody: textBody}, nil
 	}
-	p.advance() // OPTIONS
-	opts, err := p.parseOptionsList()
-	if err != nil {
-		return nil, err
-	}
-	return &ast.SetOptionsAction{Span: span(setTok.Pos, opts.End()), Options: opts}, nil
+	return nil, p.errorf(next.Pos, "Syntax error: Expected keyword AS or keyword DEFAULT or keyword ON or keyword OPTIONS but got %s", describeToken(next))
 }
 
 // parseAddAlterAction parses the "ADD ..." alter actions: ADD COLUMN, ADD
@@ -6656,6 +6877,8 @@ func (p *parser) parseAddAlterAction() (ast.Node, error) {
 			return nil, err
 		}
 		return &ast.AddConstraintAction{Span: span(addTok.Pos, constraint.End()), Constraint: constraint}, nil
+	case isSubEntityTypeToken(next):
+		return p.parseAddSubEntityAction(addTok)
 	}
 	return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
 }
@@ -6864,6 +7087,8 @@ func (p *parser) parseDropAlterAction() (ast.Node, error) {
 			end = p.prevEnd()
 		}
 		return &ast.DropTtlAction{Span: span(dropTok.Pos, end), IsIfExists: ifExists}, nil
+	case isSubEntityTypeToken(next):
+		return p.parseDropSubEntityAction(dropTok)
 	}
 	return nil, p.errorf(next.Pos, "Syntax error: Unexpected %s", describeToken(next))
 }
@@ -8688,6 +8913,89 @@ func (p *parser) parseExportModelStatement() (ast.Statement, error) {
 		stmt.Stop = opts.End()
 	}
 	return stmt, nil
+}
+
+// isGenericEntityTypeToken reports whether tok can begin a generic entity
+// type: a bare (non-keyword) identifier or the PROJECT keyword; see
+// generic_entity_type_unchecked in googlesql.tm.
+func isGenericEntityTypeToken(tok token.Token) bool {
+	if tok.Kind != token.IDENT {
+		return false
+	}
+	if strings.EqualFold(tok.Image, "PROJECT") {
+		return true
+	}
+	return !keywordNames[strings.ToLower(tok.Image)]
+}
+
+// parseCreateEntityStatement parses "CREATE [OR REPLACE] generic_entity_type
+// [IF NOT EXISTS] path_expression [OPTIONS(...)] [AS generic_entity_body]";
+// see create_entity_statement in googlesql.tm. The entity type is the next
+// token.
+func (p *parser) parseCreateEntityStatement(createTok token.Token, isOrReplace bool) (ast.Statement, error) {
+	typeTok := p.advance() // entity type
+	if !p.entityTypes[strings.ToUpper(typeTok.Image)] {
+		// No "Syntax error: " prefix; see generic_entity_type in googlesql.tm.
+		return nil, p.errorf(typeTok.Pos, "%s is not a supported object type", typeTok.Image)
+	}
+	entType := p.parseIdentifierToken(typeTok)
+	stmt := &ast.CreateEntityStatement{Span: span(createTok.Pos, typeTok.End), IsOrReplace: isOrReplace, Type: entType}
+	ifne, err := p.parseOptIfNotExists()
+	if err != nil {
+		return nil, err
+	}
+	stmt.IsIfNotExists = ifne
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	stmt.Stop = name.End()
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	if isKeyword(p.peek(), "AS") {
+		p.advance() // AS
+		jsonBody, textBody, err := p.parseGenericEntityBody()
+		if err != nil {
+			return nil, err
+		}
+		stmt.JSONBody, stmt.TextBody = jsonBody, textBody
+		if jsonBody != nil {
+			stmt.Stop = jsonBody.End()
+		} else {
+			stmt.Stop = textBody.End()
+		}
+	}
+	return stmt, nil
+}
+
+// parseGenericEntityBody parses a generic_entity_body: a JSON literal or a
+// string literal; see generic_entity_body in googlesql.tm. Exactly one of the
+// returned nodes is non-nil.
+func (p *parser) parseGenericEntityBody() (jsonBody, textBody ast.Node, err error) {
+	tok := p.peek()
+	if isKeyword(tok, "JSON") && p.peekAt(1).Kind == token.STRING {
+		lit, err := p.parseTypedLiteral()
+		if err != nil {
+			return nil, nil, err
+		}
+		return lit, nil, nil
+	}
+	if tok.Kind == token.STRING {
+		lit, err := p.parseStringLiteralValue()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, lit, nil
+	}
+	return nil, nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 }
 
 // parsePipeCreateTable parses "CREATE TABLE ..." (a create_table_statement

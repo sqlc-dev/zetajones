@@ -950,6 +950,40 @@ func nodeString(n ast.Node) string {
 			return "CreateExternalTableStatement"
 		}
 		return fmt.Sprintf("CreateExternalTableStatement(%s)", strings.Join(mods, ", "))
+	case *ast.CreateEntityStatement:
+		var mods []string
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreateEntityStatement"
+		}
+		return fmt.Sprintf("CreateEntityStatement(%s)", strings.Join(mods, ", "))
+	case *ast.DropEntityStatement:
+		if t.IsIfExists {
+			return "DropEntityStatement(is_if_exists)"
+		}
+		return "DropEntityStatement"
+	case *ast.SetAsAction:
+		return "SetAsAction"
+	case *ast.AddSubEntityAction:
+		if t.IsIfNotExists {
+			return "AddSubEntityAction(is_if_not_exists)"
+		}
+		return "AddSubEntityAction"
+	case *ast.AlterSubEntityAction:
+		if t.IsIfExists {
+			return "AlterSubEntityAction(is_if_exists)"
+		}
+		return "AlterSubEntityAction"
+	case *ast.DropSubEntityAction:
+		if t.IsIfExists {
+			return "DropSubEntityAction(is_if_exists)"
+		}
+		return "DropSubEntityAction"
 	case *ast.CreateViewStatement:
 		// The modifier order matches ASTCreateViewStatementBase::CollectModifiers
 		// in parse_tree.cc: scope, is_or_replace, is_if_not_exists (from the

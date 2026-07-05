@@ -2702,13 +2702,14 @@ type AlterStatement struct {
 	Span
 	NodeName   string           `json:"node_name"`
 	IsIfExists bool             `json:"is_if_exists,omitempty"`
-	Path       *PathExpression  `json:"path"`
+	EntityType *Identifier      `json:"entity_type,omitempty"`
+	Path       *PathExpression  `json:"path,omitempty"`
 	Actions    *AlterActionList `json:"actions"`
 }
 
 func (n *AlterStatement) statementNode() {}
 func (n *AlterStatement) Children() []Node {
-	return children(n.Path, n.Actions)
+	return children(n.EntityType, n.Path, n.Actions)
 }
 
 // DropStatement is a DROP <object kind> statement. NodeName holds the
@@ -2969,6 +2970,96 @@ type SetOptionsAction struct {
 
 func (n *SetOptionsAction) Children() []Node {
 	return children(n.Options)
+}
+
+// SetAsAction is a "SET AS generic_entity_body" alter action, where the body
+// is a JSON literal or a text (string) literal; see ASTSetAsAction in
+// googlesql/parser/parse_tree.h.
+type SetAsAction struct {
+	Span
+	JSONBody Node `json:"json_body,omitempty"`
+	TextBody Node `json:"text_body,omitempty"`
+}
+
+func (n *SetAsAction) Children() []Node {
+	return children(n.JSONBody, n.TextBody)
+}
+
+// AddSubEntityAction is an "ADD generic_sub_entity_type [IF NOT EXISTS]
+// identifier [OPTIONS(...)]" alter action; see ASTAddSubEntityAction in
+// googlesql/parser/parse_tree.h.
+type AddSubEntityAction struct {
+	Span
+	IsIfNotExists bool         `json:"is_if_not_exists,omitempty"`
+	Type          *Identifier  `json:"type"`
+	Name          *Identifier  `json:"name"`
+	Options       *OptionsList `json:"options,omitempty"`
+}
+
+func (n *AddSubEntityAction) Children() []Node {
+	return children(n.Type, n.Name, n.Options)
+}
+
+// AlterSubEntityAction is an "ALTER generic_sub_entity_type [IF EXISTS]
+// identifier alter_action" alter action; see ASTAlterSubEntityAction in
+// googlesql/parser/parse_tree.h.
+type AlterSubEntityAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Type       *Identifier `json:"type"`
+	Name       *Identifier `json:"name"`
+	Action     Node        `json:"action"`
+}
+
+func (n *AlterSubEntityAction) Children() []Node {
+	return children(n.Type, n.Name, n.Action)
+}
+
+// DropSubEntityAction is a "DROP generic_sub_entity_type [IF EXISTS]
+// identifier" alter action; see ASTDropSubEntityAction in
+// googlesql/parser/parse_tree.h.
+type DropSubEntityAction struct {
+	Span
+	IsIfExists bool        `json:"is_if_exists,omitempty"`
+	Type       *Identifier `json:"type"`
+	Name       *Identifier `json:"name"`
+}
+
+func (n *DropSubEntityAction) Children() []Node {
+	return children(n.Type, n.Name)
+}
+
+// CreateEntityStatement is a "CREATE [OR REPLACE] generic_entity_type
+// [IF NOT EXISTS] path [OPTIONS(...)] [AS generic_entity_body]" statement; see
+// ASTCreateEntityStatement in googlesql/parser/parse_tree.h.
+type CreateEntityStatement struct {
+	Span
+	IsOrReplace   bool            `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool            `json:"is_if_not_exists,omitempty"`
+	Type          *Identifier     `json:"type"`
+	Name          *PathExpression `json:"name"`
+	Options       *OptionsList    `json:"options,omitempty"`
+	JSONBody      Node            `json:"json_body,omitempty"`
+	TextBody      Node            `json:"text_body,omitempty"`
+}
+
+func (n *CreateEntityStatement) statementNode() {}
+func (n *CreateEntityStatement) Children() []Node {
+	return children(n.Type, n.Name, n.Options, n.JSONBody, n.TextBody)
+}
+
+// DropEntityStatement is a "DROP generic_entity_type [IF EXISTS] path"
+// statement; see ASTDropEntityStatement in googlesql/parser/parse_tree.h.
+type DropEntityStatement struct {
+	Span
+	IsIfExists bool            `json:"is_if_exists,omitempty"`
+	EntityType *Identifier     `json:"entity_type"`
+	Name       *PathExpression `json:"name"`
+}
+
+func (n *DropEntityStatement) statementNode() {}
+func (n *DropEntityStatement) Children() []Node {
+	return children(n.EntityType, n.Name)
 }
 
 // AddColumnAction is an "ADD COLUMN [IF NOT EXISTS] column_definition
