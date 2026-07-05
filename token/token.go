@@ -52,6 +52,7 @@ const (
 	ARROW      // ->
 	LAMBDA     // =>
 	PIPE_INPUT // |>
+	BACKSLASH  // \ (only for lenient macro expansion)
 )
 
 // Token is a single lexical token with its position in the input.

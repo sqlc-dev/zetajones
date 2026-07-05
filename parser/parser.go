@@ -604,7 +604,10 @@ func describeToken(tok token.Token) string {
 		// in googlesql/parser/parser_internal.cc.
 		return `"@@"`
 	}
-	return fmt.Sprintf("%q", tok.Image)
+	// Wrap the token image in literal double quotes without Go %q escaping, so
+	// that e.g. a lone backslash renders as "\" rather than "\\". This matches
+	// MakeSyntaxErrorAtToken in googlesql/parser/parser_internal.cc.
+	return `"` + tok.Image + `"`
 }
 
 // escapeTokenNewlines escapes physical newlines to avoid multi-line error

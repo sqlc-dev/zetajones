@@ -289,6 +289,13 @@ func (l *lexer) next() (token.Token, error) {
 		l.pos++
 		return l.emit(kind, start), nil
 	}
+	if c == '\\' {
+		// A lone backslash lexes as a BACKSLASH token (used for lenient macro
+		// expansion); see googlesql.tm. The parser then reports it as an
+		// unexpected token rather than an illegal input character.
+		l.pos++
+		return l.emit(token.BACKSLASH, start), nil
+	}
 	return token.Token{}, l.errorf(start, `Syntax error: Illegal input character "%s"`, cEscapeByte(c))
 }
 
@@ -357,6 +364,9 @@ func (l *lexer) str(start int, raw, bytes bool) (token.Token, error) {
 					if err := l.checkStringUTF8(contentStart, contentEnd, bytes); err != nil {
 						return token.Token{}, err
 					}
+					if err := l.validateEscapes(contentStart, contentEnd, raw, bytes); err != nil {
+						return token.Token{}, err
+					}
 					l.pos += 3
 					return l.emitStr(start, bytes), nil
 				}
@@ -365,6 +375,9 @@ func (l *lexer) str(start int, raw, bytes bool) (token.Token, error) {
 			}
 			contentEnd := l.pos
 			if err := l.checkStringUTF8(contentStart, contentEnd, bytes); err != nil {
+				return token.Token{}, err
+			}
+			if err := l.validateEscapes(contentStart, contentEnd, raw, bytes); err != nil {
 				return token.Token{}, err
 			}
 			l.pos++
@@ -392,6 +405,130 @@ func (l *lexer) checkStringUTF8(contentStart, contentEnd int, bytes bool) error 
 	}
 	return l.errorf(contentStart+span,
 		"Syntax error: Structurally invalid UTF8 string: %s", escapeBytes(content))
+}
+
+// validateEscapes validates the backslash escape sequences in the content of a
+// string or bytes literal (the text between the quotes). Raw literals accept
+// all escapes and are skipped. Ported from CUnescapeInternal in
+// googlesql/public/strings.cc (Apache 2.0); errors are attributed to the start
+// of the offending escape.
+func (l *lexer) validateEscapes(contentStart, contentEnd int, raw, bytes bool) error {
+	if raw {
+		return nil
+	}
+	s := l.sql[contentStart:contentEnd]
+	end := len(s)
+	p := 0
+	for p < end {
+		if s[p] != '\\' {
+			p++
+			continue
+		}
+		escStart := p
+		if p+1 >= end {
+			// A backslash as the final character of the content.
+			msg := "String literal cannot end with \\"
+			if bytes {
+				msg = "Bytes literal cannot end with \\"
+			}
+			return l.errorf(contentStart+end, "Syntax error: %s", msg)
+		}
+		errOff := contentStart + escStart
+		p++ // read past the backslash
+		c := s[p]
+		switch {
+		case c == 'a' || c == 'b' || c == 'f' || c == 'n' || c == 'r' ||
+			c == 't' || c == 'v' || c == '\\' || c == '?' || c == '\'' ||
+			c == '"' || c == '`':
+			// Valid single-character escape.
+		case c >= '0' && c <= '3':
+			octalStart := p
+			if p+2 >= end {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: Octal escape must be followed by 3 octal digits but saw: \\%s", s[octalStart:end])
+			}
+			octalEnd := p + 2
+			for ; p <= octalEnd; p++ {
+				if !isOctalDigit(s[p]) {
+					return l.errorf(errOff, "Syntax error: Illegal escape sequence: Octal escape must be followed by 3 octal digits but saw: \\%s", s[octalStart:octalStart+3])
+				}
+			}
+			p = octalEnd
+		case c == 'x' || c == 'X':
+			hexStart := p
+			if p+2 >= end {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: Hex escape must be followed by 2 hex digits but saw: \\%s", s[hexStart:end])
+			}
+			hexEnd := p + 2
+			for p++; p <= hexEnd; p++ {
+				if !isHexDigit(s[p]) {
+					return l.errorf(errOff, "Syntax error: Illegal escape sequence: Hex escape must be followed by 2 hex digits but saw: \\%s", s[hexStart:hexStart+3])
+				}
+			}
+			p = hexEnd
+		case c == 'u':
+			if bytes {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: Unicode escape sequence \\u cannot be used in bytes literals")
+			}
+			hexStart := p
+			if p+4 >= end {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\u must be followed by 4 hex digits but saw: \\%s", s[hexStart:end])
+			}
+			cp := 0
+			for i := 0; i < 4; i++ {
+				if !isHexDigit(s[p+1]) {
+					return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\u must be followed by 4 hex digits but saw: \\%s", s[hexStart:hexStart+5])
+				}
+				p++
+				cp = cp*16 + hexDigitValue(s[p])
+			}
+			if isSurrogate(cp) {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: Unicode value \\%s is invalid", s[hexStart:hexStart+5])
+			}
+		case c == 'U':
+			if bytes {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: Unicode escape sequence \\U cannot be used in bytes literals")
+			}
+			hexStart := p
+			if p+8 >= end {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\U must be followed by 8 hex digits but saw: \\%s", s[hexStart:end])
+			}
+			cp := 0
+			for i := 0; i < 8; i++ {
+				if !isHexDigit(s[p+1]) {
+					return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\U must be followed by 8 hex digits but saw: \\%s", s[hexStart:hexStart+9])
+				}
+				p++
+				cp = cp*16 + hexDigitValue(s[p])
+				if cp > 0x10FFFF {
+					return l.errorf(errOff, "Syntax error: Illegal escape sequence: Value of \\%s exceeds Unicode limit (0x0010FFFF)", s[hexStart:hexStart+9])
+				}
+			}
+			if isSurrogate(cp) {
+				return l.errorf(errOff, "Syntax error: Illegal escape sequence: Unicode value \\%s is invalid", s[hexStart:hexStart+9])
+			}
+		case c == '\r' || c == '\n':
+			return l.errorf(errOff, "Syntax error: Illegal escaped newline")
+		default:
+			return l.errorf(errOff, "Syntax error: Illegal escape sequence: \\%c", c)
+		}
+		p++ // read past the escaped character
+	}
+	return nil
+}
+
+func isOctalDigit(c byte) bool { return c >= '0' && c <= '7' }
+
+func isSurrogate(cp int) bool { return cp >= 0xD800 && cp <= 0xDFFF }
+
+func hexDigitValue(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	default:
+		return int(c-'A') + 10
+	}
 }
 
 // spanWellFormedUTF8 returns the length in bytes of the longest prefix of s that
@@ -457,6 +594,7 @@ func (l *lexer) emitStr(start int, bytes bool) token.Token {
 func (l *lexer) quotedIdent() (token.Token, error) {
 	start := l.pos
 	l.pos++ // consume opening backquote
+	contentStart := l.pos
 	for l.pos < len(l.sql) {
 		c := l.sql[l.pos]
 		if c == '\\' {
@@ -464,6 +602,11 @@ func (l *lexer) quotedIdent() (token.Token, error) {
 			continue
 		}
 		if c == '`' {
+			// Quoted identifiers are unescaped with the same rules as string
+			// literals; see ParseIdentifier in googlesql/public/strings.cc.
+			if err := l.validateEscapes(contentStart, l.pos, false, false); err != nil {
+				return token.Token{}, err
+			}
 			l.pos++
 			return l.emit(token.QUOTED_IDENT, start), nil
 		}
