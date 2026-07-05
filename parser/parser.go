@@ -712,7 +712,8 @@ var reservedKeywords = map[string]bool{
 	"ASSERT_ROWS_MODIFIED": true,
 	"BETWEEN":              true,
 	"BY":                   true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
-	"DESC": true, "DISTINCT": true,
+	"DEFAULT": true,
+	"DESC":    true, "DISTINCT": true,
 	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "EXISTS": true, "FALSE": true, "FOR": true,
 	"FROM": true,
 	"FULL": true, "GROUP": true, "GROUPS": true, "HASH": true, "HAVING": true,
@@ -875,6 +876,21 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseUpdateStatement()
 	case isKeyword(tok, "SET"):
 		return p.parseSetStatement()
+	case isKeyword(tok, "BEGIN"):
+		return p.parseBeginStatement()
+	case isKeyword(tok, "START"):
+		if isKeyword(p.peekAt(1), "BATCH") {
+			return p.parseStartBatchStatement()
+		}
+		return p.parseBeginStatement()
+	case isKeyword(tok, "COMMIT"):
+		return p.parseCommitStatement()
+	case isKeyword(tok, "ROLLBACK"):
+		return p.parseRollbackStatement()
+	case isKeyword(tok, "RUN"):
+		return p.parseRunBatchStatement()
+	case isKeyword(tok, "ABORT"):
+		return p.parseAbortBatchStatement()
 	}
 	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 }
@@ -886,6 +902,17 @@ func (p *parser) parseSetStatement() (ast.Statement, error) {
 	setTok := p.advance() // SET
 	tok := p.peek()
 	switch {
+	case isKeyword(tok, "TRANSACTION") && p.beginsTransactionMode(p.peekAt(1)):
+		// SET TRANSACTION (transaction_mode separator ",")+. If "TRANSACTION"
+		// is not followed by a transaction mode it is instead treated as an
+		// ordinary identifier (see the default case below), matching the
+		// set_statement grammar in googlesql.tm.
+		p.advance() // TRANSACTION
+		modes, err := p.parseTransactionModeList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SetTransactionStatement{Span: span(setTok.Pos, p.prevEnd()), ModeList: modes}, nil
 	case tok.Kind == token.LPAREN:
 		// SET "(" identifier_list ")" "=" expression
 		p.advance() // (
@@ -4516,6 +4543,11 @@ func (p *parser) parseBeginEndBlock() (*ast.BeginEndBlock, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if p.peek().Kind == token.EOF {
+		// In the block body the parser could still accept another statement,
+		// EXCEPTION, or END, so an unexpected end of input here is reported
+		// generically rather than as "Expected keyword END".
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Unexpected %s", describeToken(p.peek()))
 	}
 	endTok, err := p.expectKeyword("END")
 	if err != nil {
@@ -4541,14 +4573,191 @@ func (p *parser) parseExceptionHandler() (*ast.ExceptionHandlerList, error) {
 	if _, err := p.expectKeyword("THEN"); err != nil {
 		return nil, err
 	}
+	// Stop the handler body at END as well as a stray WHEN/EXCEPTION so the
+	// enclosing block reports "Expected keyword END but got ..." (the grammar
+	// allows only a single handler); see exception_handler in googlesql.tm.
 	body, err := p.parseScriptStatementList(p.prevEnd(), func() bool {
-		return isKeyword(p.peek(), "END")
+		return isKeyword(p.peek(), "END") || isKeyword(p.peek(), "WHEN") ||
+			isKeyword(p.peek(), "EXCEPTION")
 	})
 	if err != nil {
 		return nil, err
 	}
 	handler := &ast.ExceptionHandler{Span: span(whenTok.Pos, body.End()), Body: body}
 	return &ast.ExceptionHandlerList{Span: span(excTok.Pos, body.End()), Handlers: []*ast.ExceptionHandler{handler}}, nil
+}
+
+// beginStartsTransaction reports whether a "BEGIN" at statement start begins a
+// "BEGIN [TRANSACTION] ..." transaction statement rather than a begin/end
+// block. The block continues with a statement, END, or EXCEPTION; the
+// transaction statement is complete after BEGIN, optionally followed by
+// TRANSACTION or a transaction mode, and can be terminated by ";" or end of
+// input. See begin_statement and begin_end_block in googlesql.tm.
+func (p *parser) beginStartsTransaction() bool {
+	next := p.peekAt(1)
+	switch {
+	case isKeyword(next, "TRANSACTION"):
+		return true
+	case p.beginsTransactionMode(next):
+		return true
+	case next.Kind == token.SEMICOLON, next.Kind == token.EOF:
+		return true
+	}
+	return false
+}
+
+// parseBeginStatement parses begin_statement: ("START" "TRANSACTION" | "BEGIN"
+// "TRANSACTION"?) followed by an optional transaction mode list. The BEGIN or
+// START keyword is the next token. See begin_statement in googlesql.tm.
+func (p *parser) parseBeginStatement() (ast.Statement, error) {
+	kw := p.advance() // BEGIN or START
+	if isKeyword(kw, "START") {
+		if _, err := p.expectKeyword("TRANSACTION"); err != nil {
+			return nil, err
+		}
+	} else if isKeyword(p.peek(), "TRANSACTION") {
+		p.advance() // TRANSACTION
+	}
+	modes, err := p.parseTransactionModeList()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.BeginStatement{Span: span(kw.Pos, p.prevEnd()), ModeList: modes}, nil
+}
+
+// beginsTransactionMode reports whether tok can begin a transaction_mode:
+// "READ" (ONLY/WRITE) or "ISOLATION" (LEVEL ...). See transaction_mode in
+// googlesql.tm.
+func (p *parser) beginsTransactionMode(tok token.Token) bool {
+	return isKeyword(tok, "READ") || isKeyword(tok, "ISOLATION")
+}
+
+// parseTransactionModeList parses a comma-separated list of transaction modes,
+// returning nil when no mode is present; see the (transaction_mode ...)* and
+// (transaction_mode ...)+ productions in googlesql.tm.
+func (p *parser) parseTransactionModeList() (*ast.TransactionModeList, error) {
+	if !p.beginsTransactionMode(p.peek()) {
+		return nil, nil
+	}
+	first, err := p.parseTransactionMode()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.TransactionModeList{Span: span(first.Pos(), first.End()), Modes: []ast.Node{first}}
+	for p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		mode, err := p.parseTransactionMode()
+		if err != nil {
+			return nil, err
+		}
+		list.Modes = append(list.Modes, mode)
+		list.Stop = mode.End()
+	}
+	return list, nil
+}
+
+// parseTransactionMode parses a single transaction_mode: "READ ONLY",
+// "READ WRITE", or "ISOLATION LEVEL identifier [identifier]"; see
+// transaction_mode in googlesql.tm.
+func (p *parser) parseTransactionMode() (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "READ"):
+		readTok := p.advance() // READ
+		switch {
+		case isKeyword(p.peek(), "ONLY"):
+			onlyTok := p.advance()
+			return &ast.TransactionReadWriteMode{Span: span(readTok.Pos, onlyTok.End), Mode: "READ_ONLY"}, nil
+		case isKeyword(p.peek(), "WRITE"):
+			writeTok := p.advance()
+			return &ast.TransactionReadWriteMode{Span: span(readTok.Pos, writeTok.End), Mode: "READ_WRITE"}, nil
+		}
+		return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword ONLY or keyword WRITE but got %s", describeToken(p.peek()))
+	default: // ISOLATION
+		isoTok := p.advance() // ISOLATION
+		if _, err := p.expectKeyword("LEVEL"); err != nil {
+			return nil, err
+		}
+		id1, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		node := &ast.TransactionIsolationLevel{Span: span(isoTok.Pos, id1.End()), Identifier1: id1}
+		if p.atIdentifier() {
+			id2 := p.parseIdentifierToken(p.advance())
+			node.Identifier2 = id2
+			node.Stop = id2.End()
+		}
+		return node, nil
+	}
+}
+
+// atIdentifier reports whether the next token is a bare identifier (a quoted
+// identifier or a non-reserved keyword/identifier).
+func (p *parser) atIdentifier() bool {
+	tok := p.peek()
+	return tok.Kind == token.QUOTED_IDENT || (tok.Kind == token.IDENT && !isReserved(tok))
+}
+
+// parseCommitStatement parses "COMMIT [TRANSACTION]"; see commit_statement in
+// googlesql.tm. COMMIT is the next token.
+func (p *parser) parseCommitStatement() (ast.Statement, error) {
+	commitTok := p.advance() // COMMIT
+	stop := commitTok.End
+	if isKeyword(p.peek(), "TRANSACTION") {
+		stop = p.advance().End
+	}
+	return &ast.CommitStatement{Span: span(commitTok.Pos, stop)}, nil
+}
+
+// parseRollbackStatement parses "ROLLBACK [TRANSACTION]"; see rollback_statement
+// in googlesql.tm. ROLLBACK is the next token.
+func (p *parser) parseRollbackStatement() (ast.Statement, error) {
+	rollbackTok := p.advance() // ROLLBACK
+	stop := rollbackTok.End
+	if isKeyword(p.peek(), "TRANSACTION") {
+		stop = p.advance().End
+	}
+	return &ast.RollbackStatement{Span: span(rollbackTok.Pos, stop)}, nil
+}
+
+// parseStartBatchStatement parses "START BATCH [batch_type]"; see
+// start_batch_statement in googlesql.tm. START is the next token.
+func (p *parser) parseStartBatchStatement() (ast.Statement, error) {
+	startTok := p.advance() // START
+	batchTok, err := p.expectKeyword("BATCH")
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.StartBatchStatement{Span: span(startTok.Pos, batchTok.End)}
+	if p.atIdentifier() {
+		id := p.parseIdentifierToken(p.advance())
+		stmt.BatchType = id
+		stmt.Stop = id.End()
+	}
+	return stmt, nil
+}
+
+// parseRunBatchStatement parses "RUN BATCH"; see run_batch_statement in
+// googlesql.tm. RUN is the next token.
+func (p *parser) parseRunBatchStatement() (ast.Statement, error) {
+	runTok := p.advance() // RUN
+	batchTok, err := p.expectKeyword("BATCH")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.RunBatchStatement{Span: span(runTok.Pos, batchTok.End)}, nil
+}
+
+// parseAbortBatchStatement parses "ABORT BATCH"; see abort_batch_statement in
+// googlesql.tm. ABORT is the next token.
+func (p *parser) parseAbortBatchStatement() (ast.Statement, error) {
+	abortTok := p.advance() // ABORT
+	batchTok, err := p.expectKeyword("BATCH")
+	if err != nil {
+		return nil, err
+	}
+	return &ast.AbortBatchStatement{Span: span(abortTok.Pos, batchTok.End)}, nil
 }
 
 // parseScriptStatementList parses a "statement_list": a sequence of statements
@@ -4589,6 +4798,14 @@ func (p *parser) parseScriptStatement() (ast.Statement, error) {
 	case isKeyword(p.peek(), "RETURN"):
 		return p.parseReturnStatement()
 	case isKeyword(p.peek(), "BEGIN"):
+		// "BEGIN" starts either a begin/end block or a "BEGIN [TRANSACTION]"
+		// statement. A block continues with a statement, END, or EXCEPTION; a
+		// transaction statement is complete after "BEGIN" (optionally followed
+		// by TRANSACTION and transaction modes). See begin_end_block and
+		// begin_statement in googlesql.tm.
+		if p.beginStartsTransaction() {
+			return p.parseBeginStatement()
+		}
 		return p.parseBeginEndBlock()
 	case isKeyword(p.peek(), "LOOP"):
 		return p.parseLoopStatement()

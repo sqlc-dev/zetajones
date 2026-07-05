@@ -1115,6 +1115,26 @@ func nodeString(n ast.Node) string {
 		return "Script"
 	case *ast.StatementList:
 		return "StatementList"
+	case *ast.BeginStatement:
+		return "BeginStatement"
+	case *ast.SetTransactionStatement:
+		return "SetTransactionStatement"
+	case *ast.TransactionModeList:
+		return "TransactionModeList"
+	case *ast.TransactionReadWriteMode:
+		return "TransactionReadWriteMode"
+	case *ast.TransactionIsolationLevel:
+		return "TransactionIsolationLevel"
+	case *ast.CommitStatement:
+		return "CommitStatement"
+	case *ast.RollbackStatement:
+		return "RollbackStatement"
+	case *ast.StartBatchStatement:
+		return "StartBatchStatement"
+	case *ast.RunBatchStatement:
+		return "RunBatchStatement"
+	case *ast.AbortBatchStatement:
+		return "AbortBatchStatement"
 	case *ast.BeginEndBlock:
 		return "BeginEndBlock"
 	case *ast.ExceptionHandler:

@@ -157,6 +157,106 @@ func (n *AssignmentFromStruct) Children() []Node {
 	return children(n.Variables, n.Value)
 }
 
+// BeginStatement is a "BEGIN [TRANSACTION]" or "START TRANSACTION" statement
+// with an optional transaction mode list; see ASTBeginStatement in
+// googlesql/parser/parse_tree.h.
+type BeginStatement struct {
+	Span
+	ModeList *TransactionModeList `json:"mode_list,omitempty"`
+}
+
+func (n *BeginStatement) statementNode()   {}
+func (n *BeginStatement) Children() []Node { return children(n.ModeList) }
+
+// SetTransactionStatement is a "SET TRANSACTION mode[, ...]" statement; see
+// ASTSetTransactionStatement in googlesql/parser/parse_tree.h.
+type SetTransactionStatement struct {
+	Span
+	ModeList *TransactionModeList `json:"mode_list"`
+}
+
+func (n *SetTransactionStatement) statementNode()   {}
+func (n *SetTransactionStatement) Children() []Node { return children(n.ModeList) }
+
+// TransactionModeList is the list of transaction modes on a BEGIN/START/SET
+// TRANSACTION statement; see ASTTransactionModeList in
+// googlesql/parser/parse_tree.h.
+type TransactionModeList struct {
+	Span
+	Modes []Node `json:"modes"`
+}
+
+func (n *TransactionModeList) Children() []Node { return append([]Node(nil), n.Modes...) }
+
+// TransactionReadWriteMode is a "READ ONLY" or "READ WRITE" transaction mode;
+// see ASTTransactionReadWriteMode in googlesql/parser/parse_tree.h.
+type TransactionReadWriteMode struct {
+	Span
+	// Mode is "READ_ONLY" or "READ_WRITE".
+	Mode string `json:"mode"`
+}
+
+func (n *TransactionReadWriteMode) Children() []Node { return nil }
+
+// TransactionIsolationLevel is an "ISOLATION LEVEL identifier [identifier]"
+// transaction mode; see ASTTransactionIsolationLevel in
+// googlesql/parser/parse_tree.h.
+type TransactionIsolationLevel struct {
+	Span
+	Identifier1 *Identifier `json:"identifier1,omitempty"`
+	Identifier2 *Identifier `json:"identifier2,omitempty"`
+}
+
+func (n *TransactionIsolationLevel) Children() []Node {
+	return children(n.Identifier1, n.Identifier2)
+}
+
+// CommitStatement is a "COMMIT [TRANSACTION]" statement; see ASTCommitStatement
+// in googlesql/parser/parse_tree.h.
+type CommitStatement struct {
+	Span
+}
+
+func (n *CommitStatement) statementNode()   {}
+func (n *CommitStatement) Children() []Node { return nil }
+
+// RollbackStatement is a "ROLLBACK [TRANSACTION]" statement; see
+// ASTRollbackStatement in googlesql/parser/parse_tree.h.
+type RollbackStatement struct {
+	Span
+}
+
+func (n *RollbackStatement) statementNode()   {}
+func (n *RollbackStatement) Children() []Node { return nil }
+
+// StartBatchStatement is a "START BATCH [batch_type]" statement; see
+// ASTStartBatchStatement in googlesql/parser/parse_tree.h.
+type StartBatchStatement struct {
+	Span
+	BatchType *Identifier `json:"batch_type,omitempty"`
+}
+
+func (n *StartBatchStatement) statementNode()   {}
+func (n *StartBatchStatement) Children() []Node { return children(n.BatchType) }
+
+// RunBatchStatement is a "RUN BATCH" statement; see ASTRunBatchStatement in
+// googlesql/parser/parse_tree.h.
+type RunBatchStatement struct {
+	Span
+}
+
+func (n *RunBatchStatement) statementNode()   {}
+func (n *RunBatchStatement) Children() []Node { return nil }
+
+// AbortBatchStatement is an "ABORT BATCH" statement; see ASTAbortBatchStatement
+// in googlesql/parser/parse_tree.h.
+type AbortBatchStatement struct {
+	Span
+}
+
+func (n *AbortBatchStatement) statementNode()   {}
+func (n *AbortBatchStatement) Children() []Node { return nil }
+
 // Script is the top-level or procedure-body wrapper around a StatementList;
 // see ASTScript in googlesql/parser/parse_tree.h.
 type Script struct {
