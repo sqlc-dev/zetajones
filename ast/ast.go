@@ -3184,6 +3184,30 @@ func (n *ColumnPosition) Children() []Node {
 	return children(n.Identifier)
 }
 
+// SpannerAlterColumnAction is a Cloud Spanner "ALTER COLUMN identifier
+// column_schema [NOT NULL] [DEFAULT|AS ...] [OPTIONS(...)]" alter action; see
+// ASTSpannerAlterColumnAction in googlesql/parser/parse_tree.h. It is gated by
+// FEATURE_SPANNER_LEGACY_DDL.
+type SpannerAlterColumnAction struct {
+	Span
+	Column *ColumnDefinition `json:"column"`
+}
+
+func (n *SpannerAlterColumnAction) Children() []Node {
+	return children(n.Column)
+}
+
+// SpannerSetOnDeleteAction is a Cloud Spanner "SET ON DELETE {CASCADE|NO
+// ACTION}" alter action; see ASTSpannerSetOnDeleteAction in
+// googlesql/parser/parse_tree.h. Action is the referential action string; it
+// is not rendered in the debug string. Gated by FEATURE_SPANNER_LEGACY_DDL.
+type SpannerSetOnDeleteAction struct {
+	Span
+	Action string `json:"action"`
+}
+
+func (n *SpannerSetOnDeleteAction) Children() []Node { return nil }
+
 // DropColumnAction is a "DROP COLUMN [IF EXISTS] identifier" alter action; see
 // ASTDropColumnAction in googlesql/parser/parse_tree.h.
 type DropColumnAction struct {
@@ -3674,6 +3698,7 @@ type CreateTableStatement struct {
 	Name             *PathExpression       `json:"name"`
 	TableElementList *TableElementList     `json:"table_element_list,omitempty"`
 	LikeName         *PathExpression       `json:"like_name,omitempty"`
+	SpannerOptions   *SpannerTableOptions  `json:"spanner_options,omitempty"`
 	Clone            *CloneDataSource      `json:"clone,omitempty"`
 	PartitionBy      *PartitionBy          `json:"partition_by,omitempty"`
 	ClusterBy        *ClusterBy            `json:"cluster_by,omitempty"`
@@ -3684,8 +3709,38 @@ type CreateTableStatement struct {
 
 func (n *CreateTableStatement) statementNode() {}
 func (n *CreateTableStatement) Children() []Node {
-	return children(n.Name, n.TableElementList, n.LikeName, n.Clone,
+	return children(n.Name, n.TableElementList, n.LikeName, n.SpannerOptions, n.Clone,
 		n.PartitionBy, n.ClusterBy, n.WithConnection, n.Options, n.Query)
+}
+
+// SpannerTableOptions holds the Cloud Spanner "PRIMARY KEY (...) [, INTERLEAVE
+// IN PARENT ...]" options that follow the table element list in a CREATE TABLE
+// statement; see ASTSpannerTableOptions in googlesql/parser/parse_tree.h. It is
+// gated by FEATURE_SPANNER_LEGACY_DDL.
+type SpannerTableOptions struct {
+	Span
+	PrimaryKey *PrimaryKey              `json:"primary_key"`
+	Interleave *SpannerInterleaveClause `json:"interleave,omitempty"`
+}
+
+func (n *SpannerTableOptions) Children() []Node {
+	return children(n.PrimaryKey, n.Interleave)
+}
+
+// SpannerInterleaveClause is a ", INTERLEAVE IN [PARENT] path [ON DELETE ...]"
+// clause used by Cloud Spanner CREATE TABLE options and CREATE INDEX; see
+// ASTSpannerInterleaveClause in googlesql/parser/parse_tree.h. Type is "IN" or
+// "IN_PARENT"; Action is the ON DELETE referential action (IN_PARENT only).
+// Neither is rendered in the debug string.
+type SpannerInterleaveClause struct {
+	Span
+	TableName *PathExpression `json:"table_name"`
+	Type      string          `json:"type"`
+	Action    string          `json:"action,omitempty"`
+}
+
+func (n *SpannerInterleaveClause) Children() []Node {
+	return children(n.TableName)
 }
 
 // ExportDataStatement is an EXPORT DATA statement, or the inner node of a
@@ -4223,11 +4278,13 @@ type CreateIndexStatement struct {
 	Storing              *IndexStoringExpressionList `json:"storing,omitempty"`
 	PartitionBy          *PartitionBy                `json:"partition_by,omitempty"`
 	Options              *OptionsList                `json:"options,omitempty"`
+	IsNullFiltered       bool                        `json:"is_null_filtered,omitempty"`
+	SpannerInterleave    *SpannerInterleaveClause    `json:"spanner_interleave,omitempty"`
 }
 
 func (n *CreateIndexStatement) statementNode() {}
 func (n *CreateIndexStatement) Children() []Node {
-	return children(n.Name, n.TableName, n.Alias, n.UnnestExpressionList, n.IndexItemList, n.Storing, n.PartitionBy, n.Options)
+	return children(n.Name, n.TableName, n.Alias, n.UnnestExpressionList, n.IndexItemList, n.Storing, n.PartitionBy, n.Options, n.SpannerInterleave)
 }
 
 // IndexItemList is the parenthesized list of ordering expressions in a

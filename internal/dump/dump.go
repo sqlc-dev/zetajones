@@ -381,6 +381,14 @@ func nodeString(n ast.Node) string {
 		return "AddColumnAction"
 	case *ast.ColumnPosition:
 		return "ColumnPosition(" + t.Type + ")"
+	case *ast.SpannerAlterColumnAction:
+		return "SpannerAlterColumnAction"
+	case *ast.SpannerSetOnDeleteAction:
+		return "SpannerSetOnDeleteAction"
+	case *ast.SpannerTableOptions:
+		return "SpannerTableOptions"
+	case *ast.SpannerInterleaveClause:
+		return "SpannerInterleaveClause"
 	case *ast.DropColumnAction:
 		if t.IsIfExists {
 			return "DropColumnAction(is_if_exists)"

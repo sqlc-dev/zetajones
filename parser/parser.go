@@ -277,6 +277,13 @@ const FeatureForIn Feature = "FOR_IN"
 // calls in googlesql/parser/parser_internal.cc.
 const FeatureEnableAlterArrayOptions Feature = "ENABLE_ALTER_ARRAY_OPTIONS"
 
+// FeatureSpannerLegacyDDL gates the Cloud Spanner legacy DDL extensions
+// (FEATURE_SPANNER_LEGACY_DDL): PRIMARY KEY / INTERLEAVE table options, the
+// NULL_FILTERED index modifier and index INTERLEAVE clause, and the SET ON
+// DELETE and ALTER COLUMN <schema> spanner alter actions; see the
+// spanner_* productions in googlesql.tm. It is not enabled by MAXIMUM.
+const FeatureSpannerLegacyDDL Feature = "SPANNER_LEGACY_DDL"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -2520,8 +2527,9 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// CREATE [OR REPLACE] [UNIQUE] [SEARCH|VECTOR] INDEX ...; see
 	// create_index_statement in googlesql.tm. Index statements take no scope
 	// modifier, so they are recognized before scope parsing.
-	if isKeyword(p.peek(), "UNIQUE") || isKeyword(p.peek(), "SEARCH") ||
-		isKeyword(p.peek(), "VECTOR") || isKeyword(p.peek(), "INDEX") {
+	if isKeyword(p.peek(), "UNIQUE") || isKeyword(p.peek(), "NULL_FILTERED") ||
+		isKeyword(p.peek(), "SEARCH") || isKeyword(p.peek(), "VECTOR") ||
+		isKeyword(p.peek(), "INDEX") {
 		return p.parseCreateIndexStatement(createTok, isOrReplace)
 	}
 	var scope string
@@ -2704,6 +2712,16 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		}
 		stmt.TableElementList = tel
 		stmt.Stop = tel.End()
+	}
+
+	// opt_spanner_table_options: "PRIMARY KEY (...) [, INTERLEAVE IN PARENT ...]".
+	if isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY") {
+		opts, err := p.parseSpannerTableOptions()
+		if err != nil {
+			return nil, err
+		}
+		stmt.SpannerOptions = opts
+		stmt.Stop = opts.End()
 	}
 
 	// opt_like_path_expression: "LIKE table_name".
@@ -3099,7 +3117,14 @@ func (p *parser) parseTableElementList() (*ast.TableElementList, error) {
 	lparen := p.advance() // (
 	if p.peek().Kind == token.RPAREN {
 		rparen := p.peek()
-		return nil, p.errorf(rparen.Pos, "A table must define at least one column.")
+		// An empty "()" list is allowed only under FEATURE_SPANNER_LEGACY_DDL,
+		// producing an empty TableElementList; see table_element_list in
+		// googlesql.tm.
+		if !p.features.Enabled(FeatureSpannerLegacyDDL) {
+			return nil, p.errorf(rparen.Pos, "A table must define at least one column.")
+		}
+		p.advance() // )
+		return &ast.TableElementList{Span: span(lparen.Pos, rparen.End)}, nil
 	}
 	list := &ast.TableElementList{Span: span(lparen.Pos, 0)}
 	for {
@@ -3136,7 +3161,66 @@ func (p *parser) parseTableElement() (ast.Node, error) {
 	if isKeyword(p.peek(), "CHECK") && p.peekAt(1).Kind == token.LPAREN {
 		return p.parseCheckConstraint()
 	}
+	if isKeyword(p.peek(), "FOREIGN") && isKeyword(p.peekAt(1), "KEY") {
+		return p.parseForeignKey()
+	}
+	// A named table constraint is "identifier identifier table_constraint_spec"
+	// (the first identifier must be CONSTRAINT); see table_constraint_definition
+	// in googlesql.tm. It is recognized by an "identifier identifier" prefix
+	// followed by a table_constraint_spec start (CHECK "(" or FOREIGN "KEY").
+	if isIdentToken(p.peek()) && isIdentToken(p.peekAt(1)) {
+		third := p.peekAt(2)
+		if (isKeyword(third, "CHECK") && p.peekAt(3).Kind == token.LPAREN) ||
+			(isKeyword(third, "FOREIGN") && isKeyword(p.peekAt(3), "KEY")) {
+			return p.parseNamedTableConstraint()
+		}
+	}
 	return p.parseColumnDefinition()
+}
+
+// isIdentToken reports whether the token can be parsed as an identifier (a bare
+// or backtick-quoted identifier).
+func isIdentToken(tok token.Token) bool {
+	return tok.Kind == token.IDENT || tok.Kind == token.QUOTED_IDENT
+}
+
+// parseNamedTableConstraint parses the "identifier identifier
+// table_constraint_spec" form of table_constraint_definition; see googlesql.tm.
+// The first identifier must be CONSTRAINT; otherwise the reference reports a
+// spec-specific error. The constraint name is attached as the last child and
+// the node's start is moved to the CONSTRAINT keyword.
+func (p *parser) parseNamedTableConstraint() (ast.Node, error) {
+	first := p.advance() // identifier (expected: CONSTRAINT)
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	var spec ast.Node
+	if isKeyword(p.peek(), "CHECK") {
+		spec, err = p.parseCheckConstraint()
+	} else {
+		spec, err = p.parseForeignKey()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(first.Image, "CONSTRAINT") {
+		switch spec.(type) {
+		case *ast.CheckConstraint:
+			return nil, p.errorf(first.Pos, "Syntax error: Expected CONSTRAINT for check constraint definition. Check constraints on columns are not supported. Define check constraints as table elements instead")
+		case *ast.ForeignKey:
+			return nil, p.errorf(first.Pos, "Syntax error: Expected CONSTRAINT for foreign key definition")
+		}
+	}
+	switch c := spec.(type) {
+	case *ast.CheckConstraint:
+		c.ConstraintName = name
+		c.Start = first.Pos
+	case *ast.ForeignKey:
+		c.ConstraintName = name
+		c.Start = first.Pos
+	}
+	return spec, nil
 }
 
 // parseColumnDefinition parses "identifier column_schema [attributes]"; see
@@ -3150,51 +3234,168 @@ func (p *parser) parseColumnDefinition() (*ast.ColumnDefinition, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.ColumnDefinition{Span: span(name.Pos(), schema.End()), Name: name, Schema: schema}, nil
-}
-
-// parseTableColumnSchema parses a simple column schema: a type named by a path
-// expression, optionally followed by column attributes such as NOT NULL; see
-// table_column_schema and simple_column_schema_inner in googlesql.tm. The more
-// complex schema forms (arrays, structs, generated columns, collation, type
-// parameters, options) are not implemented yet.
-func (p *parser) parseTableColumnSchema() (ast.Node, error) {
-	// A column schema must begin with a type name (a path expression, in the
-	// forms currently supported). A non-identifier token here is reported as
-	// unexpected, matching the reference's generic error at this LR state.
-	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
-	}
-	typePath, err := p.parsePathExpression()
-	if err != nil {
-		return nil, err
-	}
-	schema := &ast.SimpleColumnSchema{Span: span(typePath.Pos(), typePath.End()), Type: typePath}
-	// opt_collate_clause
-	if isKeyword(p.peek(), "COLLATE") {
-		collate, err := p.parseCollate()
+	// opt_options_list on a table_column_definition attaches to the schema node
+	// (ExtendNodeRight in table_column_definition, googlesql.tm), extending its
+	// end.
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
 		if err != nil {
 			return nil, err
 		}
-		schema.Collate = collate
-		schema.Stop = collate.End()
+		switch s := schema.(type) {
+		case *ast.SimpleColumnSchema:
+			s.Options, s.Stop = opts, opts.End()
+		case *ast.ArrayColumnSchema:
+			s.Options, s.Stop = opts, opts.End()
+		case *ast.StructColumnSchema:
+			s.Options, s.Stop = opts, opts.End()
+		}
 	}
-	// opt_column_info: an optional "DEFAULT expression" (default_column_info).
-	// The GENERATED forms of a column definition are not implemented yet.
-	if isKeyword(p.peek(), "DEFAULT") {
+	return &ast.ColumnDefinition{Span: span(name.Pos(), schema.End()), Name: name, Schema: schema}, nil
+}
+
+// parseTableColumnSchema parses a table_column_schema: "column_schema_inner
+// opt_collate_clause opt_column_info" (a type, optional collation, and an
+// optional DEFAULT or GENERATED/AS clause), followed by the column_attributes
+// of the enclosing table_column_definition (parsed here so they attach to the
+// schema node); see table_column_schema and table_column_definition in
+// googlesql.tm.
+func (p *parser) parseTableColumnSchema() (ast.Node, error) {
+	schema, err := p.parseColumnSchemaInner()
+	if err != nil {
+		return nil, err
+	}
+	end := schema.End()
+	// opt_collate_clause
+	var collate *ast.Collate
+	if isKeyword(p.peek(), "COLLATE") {
+		c, err := p.parseCollate()
+		if err != nil {
+			return nil, err
+		}
+		collate = c
+		end = c.End()
+	}
+	// opt_column_info: generated_column_info or default_column_info.
+	genOrDefault, giEnd, err := p.parseOptColumnInfo()
+	if err != nil {
+		return nil, err
+	}
+	if genOrDefault != nil {
+		end = giEnd
+	}
+	// column_attributes (from table_column_definition): NOT NULL, PRIMARY KEY.
+	attrs := p.tryParseColumnAttributes()
+	if attrs != nil {
+		end = attrs.End()
+	}
+	switch s := schema.(type) {
+	case *ast.SimpleColumnSchema:
+		s.Collate, s.DefaultExpression, s.Attributes, s.Stop = collate, genOrDefault, attrs, end
+	case *ast.ArrayColumnSchema:
+		s.Collate, s.Attributes, s.Stop = collate, attrs, end
+	case *ast.StructColumnSchema:
+		s.Collate, s.Attributes, s.Stop = collate, attrs, end
+	}
+	return schema, nil
+}
+
+// parseOptColumnInfo parses opt_column_info: an optional generated_column_info
+// ("[GENERATED [ALWAYS|BY DEFAULT]] AS ..." ) or default_column_info ("DEFAULT
+// expression"); see opt_column_info in googlesql.tm. It returns the resulting
+// node (a *GeneratedColumnInfo or an expression) and the offset just past it,
+// or (nil, 0) when absent. Providing both is an error.
+func (p *parser) parseOptColumnInfo() (ast.Node, int, error) {
+	startsGenerated := func() bool {
+		return isKeyword(p.peek(), "GENERATED") || isKeyword(p.peek(), "AS")
+	}
+	bothErr := `Syntax error: "DEFAULT" and "[GENERATED [ALWAYS | BY DEFAULT]] AS" clauses must not be both provided for the column`
+	switch {
+	case startsGenerated():
+		info, err := p.parseGeneratedColumnInfo()
+		if err != nil {
+			return nil, 0, err
+		}
+		if isKeyword(p.peek(), "DEFAULT") {
+			return nil, 0, p.errorf(p.peek().Pos, "%s", bothErr)
+		}
+		return info, info.End(), nil
+	case isKeyword(p.peek(), "DEFAULT"):
 		p.advance() // DEFAULT
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, 0, err
+		}
+		if startsGenerated() {
+			return nil, 0, p.errorf(p.peek().Pos, "%s", bothErr)
+		}
+		return expr, p.extEnd(expr), nil
+	}
+	return nil, 0, nil
+}
+
+// parseGeneratedColumnInfo parses generated_column_info: "generated_mode (
+// expression ) stored_mode" or "generated_mode identity_column_info"; see
+// generated_column_info and generated_mode in googlesql.tm. generated_mode is
+// "[GENERATED [ALWAYS | BY DEFAULT]] AS". The next token is GENERATED or AS.
+func (p *parser) parseGeneratedColumnInfo() (*ast.GeneratedColumnInfo, error) {
+	start := p.peek().Pos
+	mode := "ALWAYS"
+	if isKeyword(p.peek(), "GENERATED") {
+		p.advance() // GENERATED
+		switch {
+		case isKeyword(p.peek(), "ALWAYS"):
+			p.advance() // ALWAYS
+			if _, err := p.expectKeyword("AS"); err != nil {
+				return nil, err
+			}
+		case isKeyword(p.peek(), "BY"):
+			p.advance() // BY
+			if _, err := p.expectKeyword("DEFAULT"); err != nil {
+				return nil, err
+			}
+			if _, err := p.expectKeyword("AS"); err != nil {
+				return nil, err
+			}
+			mode = "BY_DEFAULT"
+		default:
+			if _, err := p.expectKeyword("AS"); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		p.advance() // AS
+	}
+	if p.peek().Kind == token.LPAREN {
+		p.advance() // (
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
-		schema.DefaultExpression = expr
-		schema.Stop = p.extEnd(expr)
+		rparen, err := p.expect(token.RPAREN, `")"`)
+		if err != nil {
+			return nil, err
+		}
+		info := &ast.GeneratedColumnInfo{Span: span(start, rparen.End), GeneratedMode: mode, Expression: expr}
+		// stored_mode: "STORED" ["VOLATILE"] | %empty
+		if isKeyword(p.peek(), "STORED") {
+			storedTok := p.advance() // STORED
+			if isKeyword(p.peek(), "VOLATILE") {
+				volTok := p.advance()
+				info.StoredMode, info.Stop = "STORED_VOLATILE", volTok.End
+			} else {
+				info.StoredMode, info.Stop = "STORED", storedTok.End
+			}
+		}
+		return info, nil
 	}
-	if attrs := p.tryParseColumnAttributes(); attrs != nil {
-		schema.Attributes = attrs
-		schema.Stop = attrs.End()
+	// generated_mode identity_column_info
+	identity, err := p.parseIdentityColumnInfo()
+	if err != nil {
+		return nil, err
 	}
-	return schema, nil
+	return &ast.GeneratedColumnInfo{Span: span(start, identity.End()), GeneratedMode: mode, Identity: identity}, nil
 }
 
 // parseFieldSchema parses a field_schema: "column_schema_inner
@@ -3474,6 +3675,50 @@ func (p *parser) parsePrimaryKey() (*ast.PrimaryKey, error) {
 		pk.Stop = opts.End()
 	}
 	return pk, nil
+}
+
+// parseSpannerTableOptions parses opt_spanner_table_options: "PRIMARY KEY
+// (elements) [, INTERLEAVE IN PARENT path [ON DELETE action]]"; see
+// spanner_primary_key and opt_spanner_interleave_in_parent_clause in
+// googlesql.tm. PRIMARY is the next token. Requires FEATURE_SPANNER_LEGACY_DDL.
+func (p *parser) parseSpannerTableOptions() (*ast.SpannerTableOptions, error) {
+	primaryPos := p.peek().Pos
+	if !p.features.Enabled(FeatureSpannerLegacyDDL) {
+		return nil, p.errorf(primaryPos, "PRIMARY KEY must be defined in the table element list as column attribute or constraint.")
+	}
+	pk, err := p.parsePrimaryKey()
+	if err != nil {
+		return nil, err
+	}
+	opts := &ast.SpannerTableOptions{Span: span(pk.Pos(), pk.End()), PrimaryKey: pk}
+	// opt_spanner_interleave_in_parent_clause: ", INTERLEAVE IN PARENT path
+	// [ON DELETE action]".
+	if p.peek().Kind == token.COMMA && isKeyword(p.peekAt(1), "INTERLEAVE") &&
+		isKeyword(p.peekAt(2), "IN") && isKeyword(p.peekAt(3), "PARENT") {
+		commaTok := p.advance() // ,
+		p.advance()             // INTERLEAVE
+		p.advance()             // IN
+		p.advance()             // PARENT
+		path, err := p.parseMaybeDashedPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		clause := &ast.SpannerInterleaveClause{Span: span(commaTok.Pos, path.End()), TableName: path, Type: "IN_PARENT", Action: "NO ACTION"}
+		// opt_foreign_key_on_delete: "ON DELETE foreign_key_action".
+		if isKeyword(p.peek(), "ON") && isKeyword(p.peekAt(1), "DELETE") {
+			p.advance() // ON
+			p.advance() // DELETE
+			action, actEnd, err := p.parseForeignKeyAction()
+			if err != nil {
+				return nil, err
+			}
+			clause.Action = action
+			clause.Stop = actEnd
+		}
+		opts.Interleave = clause
+		opts.Stop = clause.End()
+	}
+	return opts, nil
 }
 
 // parsePrimaryKeyElementList parses "(primary_key_element [, ...])"; see
@@ -4156,6 +4401,16 @@ func (p *parser) parseCreateIndexStatement(createTok token.Token, isOrReplace bo
 		p.advance()
 		stmt.IsUnique = true
 	}
+	// opt_spanner_null_filtered: "NULL_FILTERED"; see spanner_null_filtered in
+	// googlesql.tm. Requires FEATURE_SPANNER_LEGACY_DDL; otherwise the keyword
+	// is reported as an unsupported object type.
+	if isKeyword(p.peek(), "NULL_FILTERED") {
+		nfTok := p.advance()
+		if !p.features.Enabled(FeatureSpannerLegacyDDL) {
+			return nil, p.errorf(nfTok.Pos, "null_filtered is not a supported object type")
+		}
+		stmt.IsNullFiltered = true
+	}
 	// opt_index_type: at most one of SEARCH or VECTOR; see index_type in
 	// googlesql.tm. After it, INDEX is required (so "SEARCH VECTOR" reports the
 	// INDEX-expected error at VECTOR).
@@ -4273,6 +4528,23 @@ func (p *parser) parseCreateIndexStatement(createTok token.Token, isOrReplace bo
 		}
 		stmt.Options = opts
 		stmt.Stop = opts.End()
+	}
+	// spanner_index_interleave_clause: ", INTERLEAVE IN path"; see
+	// create_index_statement_suffix in googlesql.tm. Requires
+	// FEATURE_SPANNER_LEGACY_DDL; without it the trailing "," falls through to
+	// the "Expected end of input" error.
+	if p.features.Enabled(FeatureSpannerLegacyDDL) && stmt.PartitionBy == nil &&
+		p.peek().Kind == token.COMMA && isKeyword(p.peekAt(1), "INTERLEAVE") &&
+		isKeyword(p.peekAt(2), "IN") {
+		commaTok := p.advance() // ,
+		p.advance()             // INTERLEAVE
+		p.advance()             // IN
+		path, err := p.parseMaybeDashedPathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.SpannerInterleave = &ast.SpannerInterleaveClause{Span: span(commaTok.Pos, path.End()), TableName: path, Type: "IN"}
+		stmt.Stop = path.End()
 	}
 	return stmt, nil
 }
@@ -6920,6 +7192,20 @@ func (p *parser) parseSetAlterAction() (ast.Node, error) {
 			end = jsonBody
 		}
 		return &ast.SetAsAction{Span: span(setTok.Pos, end.End()), JSONBody: jsonBody, TextBody: textBody}, nil
+	case isKeyword(next, "ON"):
+		// spanner_set_on_delete_action: "SET" "ON" "DELETE" foreign_key_action.
+		onTok := p.advance() // ON
+		if !p.features.Enabled(FeatureSpannerLegacyDDL) {
+			return nil, p.errorf(onTok.Pos, "Syntax error: Unexpected keyword ON")
+		}
+		if _, err := p.expectKeyword("DELETE"); err != nil {
+			return nil, err
+		}
+		action, actEnd, err := p.parseForeignKeyAction()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SpannerSetOnDeleteAction{Span: span(setTok.Pos, actEnd), Action: action}, nil
 	}
 	return nil, p.errorf(next.Pos, "Syntax error: Expected keyword AS or keyword DEFAULT or keyword ON or keyword OPTIONS but got %s", describeToken(next))
 }
@@ -7206,6 +7492,7 @@ func (p *parser) parseAlterConstraintAlterAction() (ast.Node, error) {
 func (p *parser) parseAlterColumnAction() (ast.Node, error) {
 	alterTok := p.advance() // ALTER
 	p.advance()             // COLUMN
+	ifPos := p.peek().Pos
 	ifExists, err := p.parseOptIfExists()
 	if err != nil {
 		return nil, err
@@ -7215,6 +7502,12 @@ func (p *parser) parseAlterColumnAction() (ast.Node, error) {
 		return nil, err
 	}
 	next := p.peek()
+	// spanner_alter_column_action: "ALTER" "COLUMN" opt_if_exists identifier
+	// column_schema_inner ...; when the token after the column name is neither
+	// SET nor DROP, this is the Spanner form (an inline column redefinition).
+	if !isKeyword(next, "SET") && !isKeyword(next, "DROP") {
+		return p.parseSpannerAlterColumnAction(alterTok, ifPos, ifExists, name)
+	}
 	switch {
 	case isKeyword(next, "SET"):
 		p.advance() // SET
@@ -7273,7 +7566,96 @@ func (p *parser) parseAlterColumnAction() (ast.Node, error) {
 		}
 		return nil, p.errorf(sub.Pos, "Syntax error: Expected keyword DEFAULT or keyword GENERATED or keyword NOT but got %s", describeToken(sub))
 	}
+	// Unreachable: the SET/DROP dispatch above is exhaustive because the
+	// non-SET/non-DROP case is handled by the Spanner form earlier.
 	return nil, p.errorf(next.Pos, "Syntax error: Expected keyword DROP or keyword SET but got %s", describeToken(next))
+}
+
+// parseSpannerAlterColumnAction parses the tail of spanner_alter_column_action:
+// "column_schema_inner [NOT NULL] [AS (expr) STORED | DEFAULT expr]
+// [OPTIONS(...)]" after "ALTER" "COLUMN" opt_if_exists identifier; see
+// spanner_alter_column_action in googlesql.tm. Requires
+// FEATURE_SPANNER_LEGACY_DDL and forbids IF EXISTS. alterTok is the ALTER
+// token, ifPos the location of a consumed IF EXISTS clause, and name the
+// column identifier.
+func (p *parser) parseSpannerAlterColumnAction(alterTok token.Token, ifPos int, ifExists bool, name *ast.Identifier) (ast.Node, error) {
+	schemaStart := p.peek().Pos
+	schema, err := p.parseColumnSchemaInner()
+	if err != nil {
+		return nil, err
+	}
+	end := schema.End()
+	// spanner_not_null_attribute?
+	var attrs *ast.ColumnAttributeList
+	if isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL") {
+		notTok := p.advance()  // NOT
+		nullTok := p.advance() // NULL
+		attr := &ast.NotNullColumnAttribute{Span: span(notTok.Pos, nullTok.End)}
+		attrs = &ast.ColumnAttributeList{Span: span(notTok.Pos, nullTok.End), Attributes: []ast.Node{attr}}
+		end = nullTok.End
+	}
+	// spanner_generated_or_default?
+	var genOrDefault ast.Node
+	switch {
+	case isKeyword(p.peek(), "AS"):
+		asTok := p.advance() // AS
+		if _, err := p.expect(token.LPAREN, `"("`); err != nil {
+			return nil, err
+		}
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.RPAREN, `")"`); err != nil {
+			return nil, err
+		}
+		storedTok, err := p.expectKeyword("STORED")
+		if err != nil {
+			return nil, err
+		}
+		genOrDefault = &ast.GeneratedColumnInfo{Span: span(asTok.Pos, storedTok.End), GeneratedMode: "ALWAYS", StoredMode: "STORED", Expression: expr}
+		end = storedTok.End
+	case isKeyword(p.peek(), "DEFAULT"):
+		p.advance() // DEFAULT
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		genOrDefault = expr
+		end = p.extEnd(expr)
+	}
+	// opt_options_list
+	var options *ast.OptionsList
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance() // OPTIONS
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		options = opts
+		end = opts.End()
+	}
+	// Feature and IF EXISTS checks happen after the schema is fully parsed, as
+	// in the reference grammar action.
+	if !p.features.Enabled(FeatureSpannerLegacyDDL) {
+		return nil, p.errorf(schemaStart, "Expected keyword DROP or keyword SET but got identifier")
+	}
+	if ifExists {
+		return nil, p.errorf(ifPos, "Syntax error: IF EXISTS is not supported")
+	}
+	// ExtendNodeRight(column_schema_inner, end, generated_or_default,
+	// not_null_attribute, options): the schema debug order is default/generated
+	// before attributes before options.
+	if s, ok := schema.(*ast.SimpleColumnSchema); ok {
+		s.DefaultExpression = genOrDefault
+		s.Attributes = attrs
+		s.Options = options
+		s.Stop = end
+	} else {
+		setColumnSchemaTail(schema, nil, attrs, options)
+	}
+	col := &ast.ColumnDefinition{Span: span(name.Pos(), end), Name: name, Schema: schema}
+	return &ast.SpannerAlterColumnAction{Span: span(alterTok.Pos, end), Column: col}, nil
 }
 
 // parseGeneratedColumnInfoForAlter parses
