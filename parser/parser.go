@@ -521,6 +521,11 @@ type parser struct {
 	// rather than an IN expression; see the pivot_clause rule and
 	// expression_higher_prec_than_and in googlesql.tm.
 	suppressTopLevelIn bool
+	// inPipeCreateTable is set while parsing the create_table_statement_prefix
+	// of a |> CREATE TABLE pipe operator, where a trailing AS query is a
+	// dedicated error rather than a valid clause; see pipe_create_table in
+	// googlesql.tm.
+	inPipeCreateTable bool
 }
 
 // setExtent records that node n's full token extent is [start, end), wider
@@ -836,6 +841,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseDropStatement()
 	case isKeyword(tok, "EXECUTE"):
 		return p.parseExecuteImmediateStatement()
+	case isKeyword(tok, "EXPORT") && isKeyword(p.peekAt(1), "DATA"):
+		return p.parseExportDataStatement()
 	case isKeyword(tok, "IMPORT"):
 		return p.parseImportStatement()
 	case isKeyword(tok, "MODULE"):
@@ -2275,6 +2282,17 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = like.End()
 	}
 
+	// opt_clone_table: "CLONE clone_data_source".
+	if isKeyword(p.peek(), "CLONE") {
+		p.advance() // CLONE
+		clone, err := p.parseCloneDataSource()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Clone = clone
+		stmt.Stop = clone.End()
+	}
+
 	// opt_partition_by_clause_no_hint: "PARTITION BY expr, ...".
 	if isKeyword(p.peek(), "PARTITION") {
 		pb, err := p.parsePartitionBy()
@@ -2316,7 +2334,12 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = opts.End()
 	}
 
-	// opt_as_query: "AS query".
+	// opt_as_query: "AS query". A |> CREATE TABLE pipe operator uses the
+	// create_table_statement_prefix rule, which excludes the AS query; the AS
+	// keyword is a dedicated error there. See pipe_create_table in googlesql.tm.
+	if isKeyword(p.peek(), "AS") && p.inPipeCreateTable {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: AS query is not allowed on pipe CREATE TABLE")
+	}
 	if isKeyword(p.peek(), "AS") {
 		p.advance()
 		queryStart := p.peek().Pos
@@ -6122,7 +6145,19 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 	var primaryEnd int // end of the primary's tokens, including any parens
 	switch {
 	case isKeyword(tok, "FROM"):
-		return p.parseFromQueryTail(start, with)
+		// A standalone FROM query is only valid with pipe syntax enabled; see
+		// the from_query alternative of query_primary_or_from_query in
+		// googlesql.tm. Without it, FROM is not a valid query start. The
+		// reference still parses the FROM clause first, so a syntax error
+		// inside the FROM leaks out ahead of the "Unexpected FROM" error.
+		fromQuery, err := p.parseFromQueryTail(start, with)
+		if err != nil {
+			return nil, err
+		}
+		if !p.features.Enabled(FeaturePipes) {
+			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected FROM")
+		}
+		return fromQuery, nil
 	case isKeyword(tok, "SELECT"):
 		sel, err := p.parseSelect()
 		if err != nil {
@@ -6146,10 +6181,21 @@ func (p *parser) parseQuery() (*ast.Query, error) {
 		}
 		// "( query ) AS alias" is only valid with pipes; see the
 		// parenthesized_query alternative of query_primary in googlesql.tm.
-		if isKeyword(p.peek(), "AS") && !p.features.Enabled(FeaturePipes) {
-			return nil, p.errorf(p.peek().Pos, "Syntax error: Alias not allowed on parenthesized outer query")
+		// With pipes it becomes an AliasedQueryExpression; without pipes the AS
+		// is an error.
+		if isKeyword(p.peek(), "AS") {
+			if !p.features.Enabled(FeaturePipes) {
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Alias not allowed on parenthesized outer query")
+			}
+			alias, err := p.parseRequiredAsAlias()
+			if err != nil {
+				return nil, err
+			}
+			aliased := &ast.AliasedQueryExpression{Span: span(tok.Pos, alias.End()), Query: inner, Alias: alias}
+			primary, primaryEnd = aliased, aliased.End()
+		} else {
+			primary, primaryEnd = inner, parenEnd
 		}
-		primary, primaryEnd = inner, parenEnd
 	default:
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
@@ -6376,25 +6422,31 @@ func (p *parser) parseFromQueryTail(start int, with *ast.WithClause) (*ast.Query
 		return nil, err
 	}
 	tok := p.peek()
-	switch {
-	case isKeyword(tok, "WHERE"):
-		return nil, p.badKeywordAfterFromQuery(tok, "WHERE", "WHERE", false)
-	case isKeyword(tok, "SELECT"):
-		return nil, p.badKeywordAfterFromQuery(tok, "SELECT", "SELECT", false)
-	case isKeyword(tok, "GROUP"):
-		return nil, p.badKeywordAfterFromQuery(tok, "GROUP BY", "AGGREGATE", false)
-	case isKeyword(tok, "ORDER"):
-		return nil, p.badKeywordAfterFromQuery(tok, "ORDER BY", "ORDER BY", true)
-	case isKeyword(tok, "UNION"):
-		return nil, p.badKeywordAfterFromQuery(tok, "UNION", "UNION", true)
-	case isKeyword(tok, "INTERSECT"):
-		return nil, p.badKeywordAfterFromQuery(tok, "INTERSECT", "INTERSECT", true)
-	case isKeyword(tok, "LIMIT"):
-		return nil, p.badKeywordAfterFromQuery(tok, "LIMIT", "LIMIT", true)
-	// EXCEPT only lexes as a set operation keyword when followed by ALL or
-	// DISTINCT (KW_EXCEPT_IN_SET_OP in the reference lookahead transformer).
-	case isKeyword(tok, "EXCEPT") && (isKeyword(p.peekAt(1), "ALL") || isKeyword(p.peekAt(1), "DISTINCT")):
-		return nil, p.badKeywordAfterFromQuery(tok, "EXCEPT", "EXCEPT", true)
+	// These dedicated "not supported after FROM query" errors suggest a pipe
+	// operator, so they only apply with pipe syntax enabled. Without pipes, a
+	// standalone FROM query is invalid outright: the caller rejects the FROM
+	// itself once its clause has parsed, so we leave any trailing keyword here.
+	if p.features.Enabled(FeaturePipes) {
+		switch {
+		case isKeyword(tok, "WHERE"):
+			return nil, p.badKeywordAfterFromQuery(tok, "WHERE", "WHERE", false)
+		case isKeyword(tok, "SELECT"):
+			return nil, p.badKeywordAfterFromQuery(tok, "SELECT", "SELECT", false)
+		case isKeyword(tok, "GROUP"):
+			return nil, p.badKeywordAfterFromQuery(tok, "GROUP BY", "AGGREGATE", false)
+		case isKeyword(tok, "ORDER"):
+			return nil, p.badKeywordAfterFromQuery(tok, "ORDER BY", "ORDER BY", true)
+		case isKeyword(tok, "UNION"):
+			return nil, p.badKeywordAfterFromQuery(tok, "UNION", "UNION", true)
+		case isKeyword(tok, "INTERSECT"):
+			return nil, p.badKeywordAfterFromQuery(tok, "INTERSECT", "INTERSECT", true)
+		case isKeyword(tok, "LIMIT"):
+			return nil, p.badKeywordAfterFromQuery(tok, "LIMIT", "LIMIT", true)
+		// EXCEPT only lexes as a set operation keyword when followed by ALL or
+		// DISTINCT (KW_EXCEPT_IN_SET_OP in the reference lookahead transformer).
+		case isKeyword(tok, "EXCEPT") && (isKeyword(p.peekAt(1), "ALL") || isKeyword(p.peekAt(1), "DISTINCT")):
+			return nil, p.badKeywordAfterFromQuery(tok, "EXCEPT", "EXCEPT", true)
+		}
 	}
 	fromQuery := &ast.FromQuery{Span: span(from.Pos(), from.End()), From: from}
 	query := &ast.Query{Span: span(start, fromQuery.End()), WithClause: with, QueryExpr: fromQuery}
@@ -6663,8 +6715,17 @@ func (p *parser) parseQueryPrimary() (ast.Node, error) {
 		}
 		// "( query ) AS alias" is only valid with pipes; see the
 		// parenthesized_query alternative of query_primary in googlesql.tm.
-		if isKeyword(p.peek(), "AS") && !p.features.Enabled(FeaturePipes) {
-			return nil, p.errorf(p.peek().Pos, "Syntax error: Alias not allowed on parenthesized outer query")
+		// With pipes it becomes an AliasedQueryExpression; without pipes the AS
+		// is an error.
+		if isKeyword(p.peek(), "AS") {
+			if !p.features.Enabled(FeaturePipes) {
+				return nil, p.errorf(p.peek().Pos, "Syntax error: Alias not allowed on parenthesized outer query")
+			}
+			alias, err := p.parseRequiredAsAlias()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.AliasedQueryExpression{Span: span(tok.Pos, alias.End()), Query: query, Alias: alias}, nil
 		}
 		return query, nil
 	}
@@ -6787,6 +6848,16 @@ func (p *parser) parsePipeOperator() (ast.Node, error) {
 			return nil, err
 		}
 		return &ast.PipeTablesample{Span: span(pipeTok.Pos, clause.End()), Sample: clause}, nil
+	case isKeyword(tok, "PIVOT"):
+		return p.parsePipePivot(pipeTok)
+	case isKeyword(tok, "EXPORT"):
+		return p.parsePipeExportData(pipeTok)
+	case isKeyword(tok, "CREATE"):
+		return p.parsePipeCreateTable(pipeTok)
+	case isKeyword(tok, "FORK"):
+		return p.parsePipeFork(pipeTok)
+	case isKeyword(tok, "TEE"):
+		return p.parsePipeTee(pipeTok)
 	case p.atSetOpMetadataStart():
 		return p.parsePipeSetOperation(pipeTok)
 	}
@@ -7040,6 +7111,174 @@ func (p *parser) parseSubpipeline() (*ast.Subpipeline, error) {
 	}
 	sub.Stop = rparen.End
 	return sub, nil
+}
+
+// parsePipePivot parses "PIVOT(...) [[AS] alias]" after a |> token; see
+// pipe_pivot in googlesql.tm. The alias is carried on the PivotClause.
+func (p *parser) parsePipePivot(pipeTok token.Token) (ast.Node, error) {
+	clause, err := p.parsePivotClause()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.PipePivot{Span: span(pipeTok.Pos, clause.End()), Pivot: clause.(*ast.PivotClause)}, nil
+}
+
+// parsePipeExportData parses "EXPORT DATA [WITH CONNECTION ...] [OPTIONS(...)]"
+// after a |> token; see pipe_export_data and export_data_no_query in
+// googlesql.tm. A trailing AS query is a dedicated error.
+func (p *parser) parsePipeExportData(pipeTok token.Token) (ast.Node, error) {
+	stmt, err := p.parseExportDataNoQuery()
+	if err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "AS") {
+		return nil, p.errorf(p.peek().Pos, "Syntax error: AS query is not allowed on pipe EXPORT DATA")
+	}
+	return &ast.PipeExportData{Span: span(pipeTok.Pos, stmt.End()), ExportData: stmt}, nil
+}
+
+// parseExportDataNoQuery parses "EXPORT DATA [WITH CONNECTION ...]
+// [OPTIONS(...)]", i.e. an ExportDataStatement without its AS query; see
+// export_data_no_query in googlesql.tm. EXPORT is the next token.
+func (p *parser) parseExportDataNoQuery() (*ast.ExportDataStatement, error) {
+	exportTok := p.advance() // EXPORT
+	dataTok, err := p.expectKeyword("DATA")
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.ExportDataStatement{Span: span(exportTok.Pos, dataTok.End)}
+	if isKeyword(p.peek(), "WITH") {
+		wc, err := p.parseWithConnectionClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.WithConnection = wc
+		stmt.Stop = wc.End()
+	}
+	if isKeyword(p.peek(), "OPTIONS") {
+		p.advance()
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Options = opts
+		stmt.Stop = opts.End()
+	}
+	return stmt, nil
+}
+
+// parseExportDataStatement parses "EXPORT DATA [WITH CONNECTION ...]
+// [OPTIONS(...)] AS query"; see export_data_statement in googlesql.tm. EXPORT
+// is the next token.
+func (p *parser) parseExportDataStatement() (ast.Statement, error) {
+	stmt, err := p.parseExportDataNoQuery()
+	if err != nil {
+		return nil, err
+	}
+	asTok, err := p.expectKeyword("AS")
+	if err != nil {
+		return nil, err
+	}
+	_ = asTok
+	query, err := p.parseQuery()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Query = query
+	// The statement covers all consumed tokens, which can exceed the query
+	// node's end: a parenthesized query keeps the location of the query inside
+	// the parentheses.
+	stmt.Stop = p.prevEnd()
+	return stmt, nil
+}
+
+// parsePipeCreateTable parses "CREATE TABLE ..." (a create_table_statement
+// without an AS query) after a |> token; see pipe_create_table in
+// googlesql.tm. A trailing AS query is a dedicated error.
+func (p *parser) parsePipeCreateTable(pipeTok token.Token) (ast.Node, error) {
+	saved := p.inPipeCreateTable
+	p.inPipeCreateTable = true
+	stmt, err := p.parseCreateStatement()
+	p.inPipeCreateTable = saved
+	if err != nil {
+		return nil, err
+	}
+	ct := stmt.(*ast.CreateTableStatement)
+	return &ast.PipeCreateTable{Span: span(pipeTok.Pos, ct.End()), CreateTable: ct}, nil
+}
+
+// parsePipeFork parses "FORK [hint] subpipeline [, subpipeline ...][,]" after
+// a |> token; see pipe_fork in googlesql.tm. At least one subpipeline is
+// required.
+func (p *parser) parsePipeFork(pipeTok token.Token) (ast.Node, error) {
+	forkTok := p.advance() // FORK
+	node := &ast.PipeFork{Span: span(pipeTok.Pos, forkTok.End)}
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if hint != nil {
+		node.Hint = hint
+		node.Stop = hint.End()
+	}
+	if p.peek().Kind != token.LPAREN {
+		return nil, p.errorf(p.peek().Pos, `Syntax error: Expected "(" or @ for hint but got %s`, describeToken(p.peek()))
+	}
+	for {
+		sub, err := p.parseSubpipeline()
+		if err != nil {
+			return nil, err
+		}
+		node.Subpipelines = append(node.Subpipelines, sub)
+		node.Stop = sub.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		node.Stop = comma.End
+		if p.peek().Kind != token.LPAREN {
+			break
+		}
+	}
+	return node, nil
+}
+
+// parsePipeTee parses "TEE [hint] [subpipeline [, subpipeline ...][,]]" after
+// a |> token; see pipe_tee in googlesql.tm. Unlike FORK, TEE allows zero
+// subpipelines.
+func (p *parser) parsePipeTee(pipeTok token.Token) (ast.Node, error) {
+	teeTok := p.advance() // TEE
+	node := &ast.PipeTee{Span: span(pipeTok.Pos, teeTok.End)}
+	hint, err := p.parseOptionalHint()
+	if err != nil {
+		return nil, err
+	}
+	if hint != nil {
+		node.Hint = hint
+		node.Stop = hint.End()
+	}
+	// TEE with no subpipeline is allowed; anything other than "(" ends the
+	// operator here.
+	if p.peek().Kind != token.LPAREN {
+		return node, nil
+	}
+	for {
+		sub, err := p.parseSubpipeline()
+		if err != nil {
+			return nil, err
+		}
+		node.Subpipelines = append(node.Subpipelines, sub)
+		node.Stop = sub.End()
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		comma := p.advance()
+		node.Stop = comma.End
+		if p.peek().Kind != token.LPAREN {
+			break
+		}
+	}
+	return node, nil
 }
 
 // parsePipeAggregate parses "AGGREGATE [expression [AS alias], ...]

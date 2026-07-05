@@ -648,6 +648,20 @@ func nodeString(n ast.Node) string {
 		return "PipeDistinct"
 	case *ast.PipeMatchRecognize:
 		return "PipeMatchRecognize"
+	case *ast.AliasedQueryExpression:
+		return "AliasedQueryExpression"
+	case *ast.PipePivot:
+		return "PipePivot"
+	case *ast.PipeExportData:
+		return "PipeExportData"
+	case *ast.PipeCreateTable:
+		return "PipeCreateTable"
+	case *ast.PipeFork:
+		return "PipeFork"
+	case *ast.PipeTee:
+		return "PipeTee"
+	case *ast.ExportDataStatement:
+		return "ExportDataStatement"
 	case *ast.MatchRecognizeClause:
 		return "MatchRecognizeClause"
 	case *ast.SampleClause:

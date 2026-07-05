@@ -772,6 +772,19 @@ func (n *Query) Children() []Node {
 	return append(out, n.PipeOperators...)
 }
 
+// AliasedQueryExpression is a parenthesized query with an alias, e.g.
+// "(SELECT 1) AS q1", used as a query primary; see ASTAliasedQueryExpression
+// in googlesql/parser/parse_tree.h. It is only valid with pipe syntax enabled.
+type AliasedQueryExpression struct {
+	Span
+	Query *Query `json:"query"`
+	Alias *Alias `json:"alias"`
+}
+
+func (n *AliasedQueryExpression) Children() []Node {
+	return children(n.Query, n.Alias)
+}
+
 // WithClause is a WITH clause holding one or more common table expression
 // entries; see ASTWithClause in googlesql/parser/parse_tree.h.
 type WithClause struct {
@@ -2872,6 +2885,7 @@ type CreateTableStatement struct {
 	Name             *PathExpression       `json:"name"`
 	TableElementList *TableElementList     `json:"table_element_list,omitempty"`
 	LikeName         *PathExpression       `json:"like_name,omitempty"`
+	Clone            *CloneDataSource      `json:"clone,omitempty"`
 	PartitionBy      *PartitionBy          `json:"partition_by,omitempty"`
 	ClusterBy        *ClusterBy            `json:"cluster_by,omitempty"`
 	WithConnection   *WithConnectionClause `json:"with_connection,omitempty"`
@@ -2881,8 +2895,23 @@ type CreateTableStatement struct {
 
 func (n *CreateTableStatement) statementNode() {}
 func (n *CreateTableStatement) Children() []Node {
-	return children(n.Name, n.TableElementList, n.LikeName,
+	return children(n.Name, n.TableElementList, n.LikeName, n.Clone,
 		n.PartitionBy, n.ClusterBy, n.WithConnection, n.Options, n.Query)
+}
+
+// ExportDataStatement is an EXPORT DATA statement, or the inner node of a
+// |> EXPORT DATA pipe operator; see ASTExportDataStatement in
+// googlesql/parser/parse_tree.h. Query is present only for the statement form.
+type ExportDataStatement struct {
+	Span
+	WithConnection *WithConnectionClause `json:"with_connection,omitempty"`
+	Options        *OptionsList          `json:"options,omitempty"`
+	Query          *Query                `json:"query,omitempty"`
+}
+
+func (n *ExportDataStatement) statementNode() {}
+func (n *ExportDataStatement) Children() []Node {
+	return children(n.WithConnection, n.Options, n.Query)
 }
 
 // CreateExternalTableStatement is a CREATE EXTERNAL TABLE statement; see
@@ -4222,6 +4251,79 @@ type PipeMatchRecognize struct {
 
 func (n *PipeMatchRecognize) Children() []Node {
 	return children(n.Clause)
+}
+
+// PipePivot is a |> PIVOT pipe operator; see ASTPipePivot in
+// googlesql/parser/parse_tree.h. The PivotClause carries the optional alias.
+type PipePivot struct {
+	Span
+	Pivot *PivotClause `json:"pivot"`
+}
+
+func (n *PipePivot) Children() []Node {
+	return children(n.Pivot)
+}
+
+// PipeExportData is a |> EXPORT DATA pipe operator; see ASTPipeExportData in
+// googlesql/parser/parse_tree.h. The ExportDataStatement never has a query
+// when used as a pipe operator.
+type PipeExportData struct {
+	Span
+	ExportData *ExportDataStatement `json:"export_data"`
+}
+
+func (n *PipeExportData) Children() []Node {
+	return children(n.ExportData)
+}
+
+// PipeCreateTable is a |> CREATE TABLE pipe operator; see ASTPipeCreateTable
+// in googlesql/parser/parse_tree.h. The CreateTableStatement never has an
+// AS query when used as a pipe operator.
+type PipeCreateTable struct {
+	Span
+	CreateTable *CreateTableStatement `json:"create_table"`
+}
+
+func (n *PipeCreateTable) Children() []Node {
+	return children(n.CreateTable)
+}
+
+// PipeFork is a |> FORK pipe operator with an optional hint and one or more
+// subpipelines; see ASTPipeFork in googlesql/parser/parse_tree.h.
+type PipeFork struct {
+	Span
+	Hint         *Hint          `json:"hint,omitempty"`
+	Subpipelines []*Subpipeline `json:"subpipelines"`
+}
+
+func (n *PipeFork) Children() []Node {
+	var out []Node
+	if n.Hint != nil {
+		out = append(out, n.Hint)
+	}
+	for _, sub := range n.Subpipelines {
+		out = append(out, sub)
+	}
+	return out
+}
+
+// PipeTee is a |> TEE pipe operator with an optional hint and zero or more
+// subpipelines; see ASTPipeTee in googlesql/parser/parse_tree.h.
+type PipeTee struct {
+	Span
+	Hint         *Hint          `json:"hint,omitempty"`
+	Subpipelines []*Subpipeline `json:"subpipelines,omitempty"`
+}
+
+func (n *PipeTee) Children() []Node {
+	var out []Node
+	if n.Hint != nil {
+		out = append(out, n.Hint)
+	}
+	for _, sub := range n.Subpipelines {
+		out = append(out, sub)
+	}
+	return out
 }
 
 // RowPatternOperation is an alternation or concatenation of row pattern
