@@ -2138,9 +2138,13 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	// opt_as_query: "AS query".
 	if isKeyword(p.peek(), "AS") {
 		p.advance()
+		queryStart := p.peek().Pos
 		query, err := p.parseQuery()
 		if err != nil {
 			return nil, err
+		}
+		if hasLockMode(query) {
+			return nil, p.errorf(queryStart, "Syntax error: Unexpected lock mode in query")
 		}
 		stmt.Query = query
 		// The statement covers all consumed tokens, which can exceed the
@@ -2596,9 +2600,13 @@ func (p *parser) parseCreateViewStatement(createTok token.Token, scope string, i
 	if _, err := p.expectKeyword("AS"); err != nil {
 		return nil, err
 	}
+	queryStart := p.peek().Pos
 	query, err := p.parseQuery()
 	if err != nil {
 		return nil, err
+	}
+	if hasLockMode(query) {
+		return nil, p.errorf(queryStart, "Syntax error: Unexpected lock mode in query")
 	}
 	stmt.Query = query
 	stmt.Stop = p.prevEnd()
@@ -2765,9 +2773,13 @@ func (p *parser) parseCreateModelStatement(createTok token.Token, scope string, 
 			stmt.AliasedQueries = list
 			stmt.Stop = p.prevEnd()
 		} else {
+			queryStart := p.peek().Pos
 			query, err := p.parseQuery()
 			if err != nil {
 				return nil, err
+			}
+			if hasLockMode(query) {
+				return nil, p.errorf(queryStart, "Syntax error: Unexpected lock mode in query")
 			}
 			stmt.Query = query
 			stmt.Stop = p.prevEnd()
@@ -3279,9 +3291,13 @@ func (p *parser) parseCreateTableFunctionStatement(createTok token.Token, scope 
 	// AS query (the string-literal body form is not exercised here).
 	if isKeyword(p.peek(), "AS") {
 		p.advance()
+		queryStart := p.peek().Pos
 		query, err := p.parseQuery()
 		if err != nil {
 			return nil, err
+		}
+		if hasLockMode(query) {
+			return nil, p.errorf(queryStart, "Syntax error: Unexpected lock mode in query")
 		}
 		stmt.Query = query
 		stmt.Stop = p.prevEnd()
@@ -3458,7 +3474,14 @@ func (p *parser) parseSqlFunctionBodyOrString() (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ast.SqlFunctionBody{Span: span(lparen.Pos, rparen.End), Expression: expr}, nil
+		body := &ast.SqlFunctionBody{Span: span(lparen.Pos, rparen.End), Expression: expr}
+		// Queries defined in function bodies must not have lock modes, to avoid
+		// unknowingly acquiring locks when executing them; see
+		// as_sql_function_body_or_string in googlesql.tm.
+		if hasLockMode(body) {
+			return nil, p.errorf(lparen.Pos, "Syntax error: Unexpected lock mode in function body query")
+		}
+		return body, nil
 	}
 	return p.parseStringLiteralValue()
 }
@@ -4808,16 +4831,22 @@ func (p *parser) tryParseIfExists() bool {
 	return false
 }
 
-// tryParseIfNotExists consumes an "IF NOT EXISTS" clause if present, reporting
-// whether it was consumed; see opt_if_not_exists in googlesql.tm.
-func (p *parser) tryParseIfNotExists() bool {
-	if isKeyword(p.peek(), "IF") && isKeyword(p.peekAt(1), "NOT") && isKeyword(p.peekAt(2), "EXISTS") {
-		p.advance()
-		p.advance()
-		p.advance()
-		return true
+// parseOptIfNotExists consumes an "IF NOT EXISTS" clause if present, reporting
+// whether it was consumed; see opt_if_not_exists in googlesql.tm. As in the
+// bison grammar, seeing the "IF" keyword commits to parsing the whole clause,
+// so "IF" must be followed by "NOT" "EXISTS" or a syntax error is reported.
+func (p *parser) parseOptIfNotExists() (bool, error) {
+	if !isKeyword(p.peek(), "IF") {
+		return false, nil
 	}
-	return false
+	p.advance() // IF
+	if _, err := p.expectKeyword("NOT"); err != nil {
+		return false, err
+	}
+	if _, err := p.expectKeyword("EXISTS"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // parseAlterAction parses a single alter action; see alter_action in
@@ -4915,7 +4944,10 @@ func (p *parser) parseAddAlterAction() (ast.Node, error) {
 // [column_position] [FILL USING expression]" after ADD; see ASTAddColumnAction.
 func (p *parser) parseAddColumnAction(addTok token.Token) (ast.Node, error) {
 	p.advance() // COLUMN
-	ifNotExists := p.tryParseIfNotExists()
+	ifNotExists, err := p.parseOptIfNotExists()
+	if err != nil {
+		return nil, err
+	}
 	col, err := p.parseColumnDefinition()
 	if err != nil {
 		return nil, err
@@ -4957,7 +4989,10 @@ func (p *parser) parseAddColumnAction(addTok token.Token) (ast.Node, error) {
 // constraint's start location is moved to the name.
 func (p *parser) parseAddNamedConstraintAction(addTok token.Token) (ast.Node, error) {
 	p.advance() // CONSTRAINT
-	ifNotExists := p.tryParseIfNotExists()
+	ifNotExists, err := p.parseOptIfNotExists()
+	if err != nil {
+		return nil, err
+	}
 	name, err := p.parseIdentifier()
 	if err != nil {
 		return nil, err
@@ -4997,7 +5032,7 @@ func (p *parser) parseConstraintSpec() (ast.Node, error) {
 // parseAddTtlAction parses "ROW DELETION POLICY [IF NOT EXISTS] (expression)"
 // after ADD; see the "ADD" "ROW" "DELETION" "POLICY" production in googlesql.tm.
 func (p *parser) parseAddTtlAction(addTok token.Token) (ast.Node, error) {
-	p.advance() // ROW
+	rowTok := p.advance() // ROW
 	if _, err := p.expectKeyword("DELETION"); err != nil {
 		return nil, err
 	}
@@ -5005,9 +5040,12 @@ func (p *parser) parseAddTtlAction(addTok token.Token) (ast.Node, error) {
 		return nil, err
 	}
 	if !p.features.Enabled(FeatureTtl) {
-		return nil, p.errorf(addTok.Pos, "Syntax error: ADD ROW DELETION POLICY clause is not supported.")
+		return nil, p.errorf(rowTok.Pos, "ADD ROW DELETION POLICY clause is not supported.")
 	}
-	ifNotExists := p.tryParseIfNotExists()
+	ifNotExists, err := p.parseOptIfNotExists()
+	if err != nil {
+		return nil, err
+	}
 	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
 		return nil, err
 	}
@@ -5026,7 +5064,8 @@ func (p *parser) parseAddTtlAction(addTok token.Token) (ast.Node, error) {
 // (expression)"; see the "REPLACE" "ROW" "DELETION" "POLICY" production.
 func (p *parser) parseReplaceAlterAction() (ast.Node, error) {
 	replaceTok := p.advance() // REPLACE
-	if _, err := p.expectKeyword("ROW"); err != nil {
+	rowTok, err := p.expectKeyword("ROW")
+	if err != nil {
 		return nil, err
 	}
 	if _, err := p.expectKeyword("DELETION"); err != nil {
@@ -5036,7 +5075,7 @@ func (p *parser) parseReplaceAlterAction() (ast.Node, error) {
 		return nil, err
 	}
 	if !p.features.Enabled(FeatureTtl) {
-		return nil, p.errorf(replaceTok.Pos, "Syntax error: REPLACE ROW DELETION POLICY clause is not supported.")
+		return nil, p.errorf(rowTok.Pos, "REPLACE ROW DELETION POLICY clause is not supported.")
 	}
 	ifExists := p.tryParseIfExists()
 	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
@@ -5085,7 +5124,7 @@ func (p *parser) parseDropAlterAction() (ast.Node, error) {
 		}
 		return &ast.DropPrimaryKeyAction{Span: span(dropTok.Pos, end), IsIfExists: ifExists}, nil
 	case isKeyword(next, "ROW"):
-		p.advance() // ROW
+		rowTok := p.advance() // ROW
 		if _, err := p.expectKeyword("DELETION"); err != nil {
 			return nil, err
 		}
@@ -5094,7 +5133,7 @@ func (p *parser) parseDropAlterAction() (ast.Node, error) {
 			return nil, err
 		}
 		if !p.features.Enabled(FeatureTtl) {
-			return nil, p.errorf(dropTok.Pos, "Syntax error: DROP ROW DELETION POLICY clause is not supported.")
+			return nil, p.errorf(rowTok.Pos, "DROP ROW DELETION POLICY clause is not supported.")
 		}
 		ifExists := p.tryParseIfExists()
 		end := policyTok.End
@@ -5210,6 +5249,25 @@ func (p *parser) parseOptionsEntry() (*ast.OptionsEntry, error) {
 		return nil, err
 	}
 	return &ast.OptionsEntry{Span: span(name.Pos(), value.End()), Name: name, Op: op, Value: value}, nil
+}
+
+// hasLockMode reports whether any node in the subtree is a LockMode clause,
+// mirroring HasLockMode in parser_internal.h. Queries used in DDL statements
+// (and function bodies) must not contain lock modes, to avoid unintentionally
+// acquiring locks when executing them.
+func hasLockMode(n ast.Node) bool {
+	if n == nil {
+		return false
+	}
+	if _, ok := n.(*ast.LockMode); ok {
+		return true
+	}
+	for _, c := range n.Children() {
+		if hasLockMode(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseQuery parses "[WITH ...] query_primary [ORDER BY] [LIMIT] [FOR
