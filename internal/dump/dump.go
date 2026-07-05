@@ -78,6 +78,14 @@ func nodeString(n ast.Node) string {
 		return "UpdateItem"
 	case *ast.UpdateSetValue:
 		return "UpdateSetValue"
+	case *ast.TruncateStatement:
+		return "TruncateStatement"
+	case *ast.CloneDataStatement:
+		return "CloneDataStatement"
+	case *ast.CloneDataSourceList:
+		return "CloneDataSourceList"
+	case *ast.CloneDataSource:
+		return "CloneDataSource"
 	case *ast.MergeStatement:
 		return "MergeStatement"
 	case *ast.MergeWhenClauseList:

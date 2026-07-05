@@ -688,8 +688,9 @@ func isKeyword(tok token.Token, kw string) bool {
 // See googlesql/parser/keywords.cc for the full list.
 var reservedKeywords = map[string]bool{
 	"ALL": true, "AND": true, "ARRAY": true, "AS": true, "ASC": true,
-	"BETWEEN": true,
-	"BY":      true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
+	"ASSERT_ROWS_MODIFIED": true,
+	"BETWEEN":              true,
+	"BY":                   true, "CASE": true, "COLLATE": true, "CROSS": true, "CURRENT": true,
 	"DESC": true, "DISTINCT": true,
 	"ELSE": true, "END": true, "ENUM": true, "EXCEPT": true, "FALSE": true, "FOR": true,
 	"FROM": true,
@@ -708,6 +709,7 @@ var reservedKeywords = map[string]bool{
 	"PROTO":   true,
 	"RESPECT": true, "RIGHT": true, "ROWS": true, "SELECT": true, "SET": true, "STRUCT": true,
 	"TABLESAMPLE": true,
+	"THEN":        true,
 	"TRUE":        true, "UNION": true, "UNNEST": true, "USING": true, "WHERE": true,
 	"WINDOW": true, "WITH": true,
 }
@@ -822,6 +824,10 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseInsertStatement()
 	case isKeyword(tok, "MERGE"):
 		return p.parseMergeStatement()
+	case isKeyword(tok, "TRUNCATE"):
+		return p.parseTruncateStatement()
+	case isKeyword(tok, "CLONE"):
+		return p.parseCloneDataStatement()
 	case isKeyword(tok, "UPDATE"):
 		return p.parseUpdateStatement()
 	case isKeyword(tok, "SET"):
@@ -1190,11 +1196,21 @@ func (p *parser) parseDeleteStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "FROM") {
 		p.advance()
 	}
-	target, err := p.parseMaybeDashedPathExpression()
+	target, err := p.parseMaybeDashedGeneralizedPathExpression()
 	if err != nil {
 		return nil, err
 	}
 	stmt := &ast.DeleteStatement{Span: span(deleteTok.Pos, p.extEnd(target)), Target: target}
+	// Optional table alias, before the WITH OFFSET / WHERE clauses; see
+	// as_alias in delete_statement in googlesql.tm.
+	alias, err := p.parseOptionalAlias()
+	if err != nil {
+		return nil, err
+	}
+	if alias != nil {
+		stmt.Alias = alias
+		stmt.Stop = alias.End()
+	}
 	if isKeyword(p.peek(), "WITH") {
 		offset, err := p.parseWithOffsetClause()
 		if err != nil {
@@ -1548,7 +1564,10 @@ func (p *parser) parseMergeSource() (ast.Node, error) {
 	if tok := p.peek(); tok.Kind != token.IDENT && tok.Kind != token.QUOTED_IDENT {
 		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 	}
-	path, err := p.parsePathExpression()
+	// merge_source is a table_path_expression, whose base is a
+	// maybe_slashed_or_dashed_path_expression; the first component may be a
+	// dashed identifier. See table_path_expression_base in googlesql.tm.
+	path, err := p.parseMaybeDashedPathExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -1679,7 +1698,7 @@ func (p *parser) parseMergeAction() (*ast.MergeAction, error) {
 		deleteTok := p.advance()
 		return &ast.MergeAction{Span: span(deleteTok.Pos, deleteTok.End), ActionType: "DELETE"}, nil
 	default:
-		return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
+		return nil, p.errorf(tok.Pos, "Syntax error: Expected keyword DELETE or keyword INSERT or keyword UPDATE but got %s", describeToken(tok))
 	}
 }
 
@@ -1715,6 +1734,105 @@ func (p *parser) parseMergeInsertValuesRow() (*ast.InsertValuesRow, error) {
 	}
 	row.Stop = rparen.End
 	return row, nil
+}
+
+// parseTruncateStatement parses a "TRUNCATE TABLE <path> [WHERE <expr>]"
+// statement; see truncate_statement in googlesql.tm.
+func (p *parser) parseTruncateStatement() (ast.Statement, error) {
+	truncateTok := p.advance() // TRUNCATE
+	if _, err := p.expectKeyword("TABLE"); err != nil {
+		return nil, err
+	}
+	target, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt := &ast.TruncateStatement{Span: span(truncateTok.Pos, target.End()), Target: target}
+	if isKeyword(p.peek(), "WHERE") {
+		p.advance()
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Where = expr
+		stmt.Stop = p.extEnd(expr)
+	}
+	return stmt, nil
+}
+
+// parseCloneDataStatement parses a "CLONE DATA INTO <path> FROM <source> [UNION
+// ALL <source>]..." statement; see clone_data_statement in googlesql.tm.
+func (p *parser) parseCloneDataStatement() (ast.Statement, error) {
+	cloneTok := p.advance() // CLONE
+	if _, err := p.expectKeyword("DATA"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("INTO"); err != nil {
+		return nil, err
+	}
+	target, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("FROM"); err != nil {
+		return nil, err
+	}
+	list, err := p.parseCloneDataSourceList()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CloneDataStatement{Span: span(cloneTok.Pos, list.End()), Target: target, Sources: list}, nil
+}
+
+// parseCloneDataSourceList parses one or more clone data sources separated by
+// "UNION ALL"; see clone_data_statement in googlesql.tm.
+func (p *parser) parseCloneDataSourceList() (*ast.CloneDataSourceList, error) {
+	first, err := p.parseCloneDataSource()
+	if err != nil {
+		return nil, err
+	}
+	list := &ast.CloneDataSourceList{Span: span(first.Pos(), first.End()), Sources: []*ast.CloneDataSource{first}}
+	for isKeyword(p.peek(), "UNION") && isKeyword(p.peekAt(1), "ALL") {
+		p.advance() // UNION
+		p.advance() // ALL
+		src, err := p.parseCloneDataSource()
+		if err != nil {
+			return nil, err
+		}
+		list.Sources = append(list.Sources, src)
+		list.Stop = src.End()
+	}
+	return list, nil
+}
+
+// parseCloneDataSource parses a single clone data source: a table path with an
+// optional FOR SYSTEM_TIME clause and WHERE clause; see clone_data_source in
+// googlesql.tm.
+func (p *parser) parseCloneDataSource() (*ast.CloneDataSource, error) {
+	path, err := p.parseMaybeDashedPathExpression()
+	if err != nil {
+		return nil, err
+	}
+	src := &ast.CloneDataSource{Span: span(path.Pos(), path.End()), Path: path}
+	if p.atForSystemTime() {
+		fst, err := p.parseForSystemTime()
+		if err != nil {
+			return nil, err
+		}
+		src.ForSystemTime = fst
+		src.Stop = fst.End()
+	}
+	if isKeyword(p.peek(), "WHERE") {
+		whereTok := p.advance()
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		wc := &ast.WhereClause{Span: span(whereTok.Pos, p.extEnd(expr)), Expr: expr}
+		src.Where = wc
+		src.Stop = wc.End()
+	}
+	return src, nil
 }
 
 // parseGeneralizedPathExpression parses a path with optional "[expr]" array
@@ -6777,34 +6895,49 @@ func (p *parser) parseTablePathExpression() (ast.Node, error) {
 	// FOR SYSTEM TIME AS OF <expression>; see at_system_time in googlesql.tm.
 	// FOR is only consumed here when followed by SYSTEM/SYSTEM_TIME; a bare
 	// FOR (e.g. FOR UPDATE lock mode) belongs to a higher-level rule.
-	if isKeyword(p.peek(), "FOR") &&
-		(isKeyword(p.peekAt(1), "SYSTEM") || isKeyword(p.peekAt(1), "SYSTEM_TIME")) {
-		forTok := p.advance() // FOR
-		if isKeyword(p.peek(), "SYSTEM_TIME") {
-			p.advance()
-		} else {
-			if _, err := p.expectKeyword("SYSTEM"); err != nil {
-				return nil, err
-			}
-			if _, err := p.expectKeyword("TIME"); err != nil {
-				return nil, err
-			}
-		}
-		if _, err := p.expectKeyword("AS"); err != nil {
-			return nil, err
-		}
-		if _, err := p.expectKeyword("OF"); err != nil {
-			return nil, err
-		}
-		expr, err := p.parseExpression()
+	if p.atForSystemTime() {
+		fst, err := p.parseForSystemTime()
 		if err != nil {
 			return nil, err
 		}
-		fst := &ast.ForSystemTime{Span: span(forTok.Pos, expr.End()), Expr: expr}
 		table.ForSystemTime = fst
 		table.Stop = fst.End()
 	}
 	return table, nil
+}
+
+// atForSystemTime reports whether the next tokens begin a FOR SYSTEM_TIME
+// clause; see at_system_time in googlesql.tm.
+func (p *parser) atForSystemTime() bool {
+	return isKeyword(p.peek(), "FOR") &&
+		(isKeyword(p.peekAt(1), "SYSTEM") || isKeyword(p.peekAt(1), "SYSTEM_TIME"))
+}
+
+// parseForSystemTime parses a "FOR SYSTEM_TIME AS OF <expression>" clause; see
+// at_system_time in googlesql.tm.
+func (p *parser) parseForSystemTime() (*ast.ForSystemTime, error) {
+	forTok := p.advance() // FOR
+	if isKeyword(p.peek(), "SYSTEM_TIME") {
+		p.advance()
+	} else {
+		if _, err := p.expectKeyword("SYSTEM"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("TIME"); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := p.expectKeyword("AS"); err != nil {
+		return nil, err
+	}
+	if _, err := p.expectKeyword("OF"); err != nil {
+		return nil, err
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ForSystemTime{Span: span(forTok.Pos, expr.End()), Expr: expr}, nil
 }
 
 // parseTVFRest parses the argument list and optional alias of a
@@ -9153,6 +9286,22 @@ func (p *parser) parseMaybeDashedPathExpression() (*ast.PathExpression, error) {
 	path, err := p.parsePathExpression()
 	p.allowDashes = prev
 	return path, err
+}
+
+// parseMaybeDashedGeneralizedPathExpression parses the target of a DELETE (or
+// UPDATE) statement: either a generalized path expression (which may contain
+// ".ident", ".(field)", and "[expr]" accesses) or a dashed path expression;
+// see maybe_dashed_generalized_path_expression in googlesql.tm. A dashed table
+// name never contains generalized accesses, so when the first identifier is
+// immediately followed by a dash it is parsed as a plain dashed path.
+func (p *parser) parseMaybeDashedGeneralizedPathExpression() (ast.Node, error) {
+	tok := p.peek()
+	if tok.Kind == token.IDENT && !isReserved(tok) {
+		if dash := p.peekAt(1); dash.Kind == token.MINUS && dash.Pos == tok.End {
+			return p.parseMaybeDashedPathExpression()
+		}
+	}
+	return p.parseGeneralizedPathExpression()
 }
 
 func (p *parser) parsePathExpression() (*ast.PathExpression, error) {

@@ -469,7 +469,8 @@ func (n *HintedStatement) Children() []Node {
 // googlesql/parser/parse_tree.h.
 type DeleteStatement struct {
 	Span
-	Target             *PathExpression     `json:"target"`
+	Target             Node                `json:"target"` // *PathExpression, *DotIdentifier, *ArrayElement, ...
+	Alias              *Alias              `json:"alias,omitempty"`
 	Offset             *WithOffset         `json:"offset,omitempty"`
 	Where              Node                `json:"where,omitempty"`
 	AssertRowsModified *AssertRowsModified `json:"assert_rows_modified,omitempty"`
@@ -478,7 +479,7 @@ type DeleteStatement struct {
 
 func (n *DeleteStatement) statementNode() {}
 func (n *DeleteStatement) Children() []Node {
-	return children(n.Target, n.Offset, n.Where, n.AssertRowsModified, n.Returning)
+	return children(n.Target, n.Alias, n.Offset, n.Where, n.AssertRowsModified, n.Returning)
 }
 
 // InsertStatement is an INSERT statement; see ASTInsertStatement in
@@ -652,6 +653,62 @@ type MergeAction struct {
 
 func (n *MergeAction) Children() []Node {
 	return children(n.InsertColumnList, n.InsertRow, n.UpdateItemList)
+}
+
+// TruncateStatement is a TRUNCATE TABLE statement; see ASTTruncateStatement in
+// googlesql/parser/parse_tree.h.
+type TruncateStatement struct {
+	Span
+	Target *PathExpression `json:"target"`
+	Where  Node            `json:"where,omitempty"`
+}
+
+func (n *TruncateStatement) statementNode() {}
+func (n *TruncateStatement) Children() []Node {
+	return children(n.Target, n.Where)
+}
+
+// CloneDataStatement is a CLONE DATA statement; see ASTCloneDataStatement in
+// googlesql/parser/parse_tree.h.
+type CloneDataStatement struct {
+	Span
+	Target  *PathExpression      `json:"target"`
+	Sources *CloneDataSourceList `json:"sources"`
+}
+
+func (n *CloneDataStatement) statementNode() {}
+func (n *CloneDataStatement) Children() []Node {
+	return children(n.Target, n.Sources)
+}
+
+// CloneDataSourceList is the list of clone data sources (joined by UNION ALL)
+// in a CLONE DATA statement; see ASTCloneDataSourceList in
+// googlesql/parser/parse_tree.h.
+type CloneDataSourceList struct {
+	Span
+	Sources []*CloneDataSource `json:"sources"`
+}
+
+func (n *CloneDataSourceList) Children() []Node {
+	var out []Node
+	for _, s := range n.Sources {
+		out = append(out, s)
+	}
+	return out
+}
+
+// CloneDataSource is a single source of a CLONE DATA statement: a table path
+// with an optional FOR SYSTEM_TIME clause and WHERE clause; see
+// ASTCloneDataSource in googlesql/parser/parse_tree.h.
+type CloneDataSource struct {
+	Span
+	Path          *PathExpression `json:"path"`
+	ForSystemTime *ForSystemTime  `json:"for_system_time,omitempty"`
+	Where         *WhereClause    `json:"where,omitempty"`
+}
+
+func (n *CloneDataSource) Children() []Node {
+	return children(n.Path, n.ForSystemTime, n.Where)
 }
 
 // AssertRowsModified is the ASSERT_ROWS_MODIFIED clause on a DML statement;
