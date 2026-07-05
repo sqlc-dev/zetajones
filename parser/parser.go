@@ -10554,8 +10554,42 @@ func (p *parser) parseIdentifierToken(tok token.Token) *ast.Identifier {
 
 func unquoteBackquoted(image string) string {
 	s := strings.TrimPrefix(strings.TrimSuffix(image, "`"), "`")
-	s = strings.ReplaceAll(s, "\\`", "`")
-	return s
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	// A backquoted identifier's content is unescaped to its value the same way
+	// ZetaSQL's tokenizer does; the debug string then re-escapes that value via
+	// ToIdentifierLiteral (see escapeIdentifier in internal/dump). Decoding the
+	// escapes here (rather than storing the raw image) is what makes a doubled
+	// "\\" render as a single "\\" in the debug output. Unknown escapes keep the
+	// backslash literally.
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '\\':
+				b.WriteByte('\\')
+				i++
+			case '`':
+				b.WriteByte('`')
+				i++
+			case 'n':
+				b.WriteByte('\n')
+				i++
+			case 'r':
+				b.WriteByte('\r')
+				i++
+			case 't':
+				b.WriteByte('\t')
+				i++
+			default:
+				b.WriteByte('\\')
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 func (p *parser) parseFromClause() (*ast.FromClause, error) {
