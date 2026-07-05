@@ -1105,9 +1105,12 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return &ast.SubpipelineStatement{Span: span(sub.Pos(), sub.End()), Subpipeline: sub}, nil
 	}
 	switch {
-	case isKeyword(tok, "GRAPH") && p.features.Enabled(FeatureSqlGraph):
+	case isKeyword(tok, "GRAPH"):
 		// A statement beginning with GRAPH is a GQL graph query statement;
-		// see gql_statement / gql_query in googlesql.tm.
+		// see gql_statement / gql_query in googlesql.tm. The grammar does not
+		// gate this on FEATURE_SQL_GRAPH (that check happens in the analyzer),
+		// so graph statements parse regardless of the enabled language
+		// features.
 		return p.parseGraphStatement()
 	case isKeyword(tok, "SELECT"), isKeyword(tok, "FROM"), isKeyword(tok, "WITH"),
 		isKeyword(tok, "TABLE"), tok.Kind == token.LPAREN:

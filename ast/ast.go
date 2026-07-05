@@ -5815,10 +5815,14 @@ type GraphElementPatternFiller struct {
 	PropSpec *GraphPropertySpecification `json:"prop_spec,omitempty"`
 	Where    *WhereClause                `json:"where,omitempty"`
 	Hint     *Hint                       `json:"hint,omitempty"`
+	// Cost is the optional "COST <expression>" edge/element weight; see
+	// opt_graph_cost in googlesql.tm. It stores the expression node directly
+	// (the COST keyword is not represented).
+	Cost Node `json:"cost,omitempty"`
 }
 
 func (n *GraphElementPatternFiller) Children() []Node {
-	return children(n.Name, n.Label, n.PropSpec, n.Where, n.Hint)
+	return children(n.Name, n.Label, n.PropSpec, n.Where, n.Hint, n.Cost)
 }
 
 // GraphPropertySpecification is the "{ name: value, ... }" property list in a

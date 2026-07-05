@@ -859,7 +859,7 @@ func (p *parser) startsGraphPattern() bool {
 		return true
 	}
 	t := p.peek()
-	if ((t.Kind == token.IDENT && !isReserved(t)) || t.Kind == token.QUOTED_IDENT) && p.peekAt(1).Kind == token.EQ {
+	if ((t.Kind == token.IDENT && !p.isReserved(t)) || t.Kind == token.QUOTED_IDENT) && p.peekAt(1).Kind == token.EQ {
 		return true
 	}
 	return false
@@ -1134,7 +1134,7 @@ func (p *parser) parseGraphPattern() (*ast.GraphPattern, error) {
 			return nil, err
 		}
 		if hint != nil {
-			next.Factors = append([]ast.Node{hint}, next.Factors...)
+			prependGraphPathFactors(next, hint)
 			next.Start = hint.Pos()
 		}
 		paths = append(paths, next)
@@ -1244,11 +1244,19 @@ func (p *parser) parseGraphPathPatternExpr() (*ast.GraphPathPattern, error) {
 // begin a prefix, while SHORTEST and CHEAPEST require a following
 // int_literal_or_parameter (otherwise the keyword is a path-variable name).
 func (p *parser) startsGraphSearchPrefix() bool {
+	return tokensStartGraphSearchPrefix(p.peek(), p.peekAt(1))
+}
+
+// tokensStartGraphSearchPrefix reports whether the token t0 (with lookahead t1)
+// begins a graph path search prefix; see graph_search_prefix in googlesql.tm.
+// ANY and ALL always begin a prefix, while SHORTEST and CHEAPEST require a
+// following int_literal_or_parameter (otherwise the keyword is an identifier).
+func tokensStartGraphSearchPrefix(t0, t1 token.Token) bool {
 	switch {
-	case isKeyword(p.peek(), "ANY"), isKeyword(p.peek(), "ALL"):
+	case isKeyword(t0, "ANY"), isKeyword(t0, "ALL"):
 		return true
-	case isKeyword(p.peek(), "SHORTEST"), isKeyword(p.peek(), "CHEAPEST"):
-		return startsIntLiteralOrParameter(p.peekAt(1))
+	case isKeyword(t0, "SHORTEST"), isKeyword(t0, "CHEAPEST"):
+		return startsIntLiteralOrParameter(t1)
 	}
 	return false
 }
@@ -1361,9 +1369,29 @@ func (p *parser) parseGraphPathFactor() (ast.Node, error) {
 	} else {
 		container = primary.(*ast.GraphPathPattern)
 	}
-	container.Factors = append([]ast.Node{quant}, container.Factors...)
+	// The quantifier is prepended leftmost; see ExtendNodeLeft in
+	// graph_quantified_path_primary in googlesql.tm.
+	prependGraphPathFactors(container, quant)
 	container.Span = span(primary.Pos(), quantEnd)
 	return container, nil
+}
+
+// prependGraphPathFactors prepends decorations to the front of a path
+// pattern's child order. Children() emits the PathName and SearchPrefix fields
+// before the factor list, so any such fields are demoted into the factor list
+// (after the new decorations) to keep the decorations leftmost, matching the
+// ExtendNodeLeft prepends in the graph pattern productions in googlesql.tm.
+func prependGraphPathFactors(pattern *ast.GraphPathPattern, decorations ...ast.Node) {
+	prefix := append([]ast.Node(nil), decorations...)
+	if pattern.PathName != nil {
+		prefix = append(prefix, pattern.PathName)
+		pattern.PathName = nil
+	}
+	if pattern.SearchPrefix != nil {
+		prefix = append(prefix, pattern.SearchPrefix)
+		pattern.SearchPrefix = nil
+	}
+	pattern.Factors = append(prefix, pattern.Factors...)
 }
 
 // startsGraphQuantifier reports whether the next token begins a graph
@@ -1402,6 +1430,12 @@ func (p *parser) parenStartsNodePattern() bool {
 		return false
 	}
 	if ((t1.Kind == token.IDENT && !p.isReserved(t1)) || t1.Kind == token.QUOTED_IDENT) && p.peekAt(2).Kind == token.EQ {
+		return false
+	}
+	// A parenthesized pattern whose content begins with a path search prefix
+	// (ANY / ALL / SHORTEST k / CHEAPEST k) is a subpath, not a node pattern
+	// (a filler never begins with a search prefix).
+	if tokensStartGraphSearchPrefix(t1, p.peekAt(2)) {
 		return false
 	}
 	return true
@@ -1450,7 +1484,7 @@ func (p *parser) parseGraphParenthesizedPathPattern() (*ast.GraphPathPattern, er
 			ret = &ast.GraphPathPattern{Factors: []ast.Node{inner}}
 		}
 		ret.Parenthesized = true
-		ret.Factors = append([]ast.Node{where}, ret.Factors...)
+		prependGraphPathFactors(ret, where)
 		ret.Span = span(lparen.Pos, rparen.End)
 		return ret, nil
 	}
@@ -1675,7 +1709,22 @@ func (p *parser) parseGraphElementPatternFiller() (*ast.GraphElementPatternFille
 		where = w
 		end = w.End()
 	}
-	return &ast.GraphElementPatternFiller{Span: span(startPos, end), Name: name, Label: label, PropSpec: propSpec, Where: where, Hint: hint}, nil
+	// opt_graph_cost: "COST" expression. The element name (an unreserved
+	// keyword "cost") is already consumed above, so a remaining COST keyword
+	// here introduces the cost expression. The filler location (@$) extends to
+	// the last consumed token, which may be past the cost expression's own end
+	// (e.g. a trailing ")" of a parenthesized cost).
+	var cost ast.Node
+	if isKeyword(p.peek(), "COST") {
+		p.advance() // COST
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		cost = expr
+		end = p.prevEnd()
+	}
+	return &ast.GraphElementPatternFiller{Span: span(startPos, end), Name: name, Label: label, PropSpec: propSpec, Where: where, Hint: hint, Cost: cost}, nil
 }
 
 // parseGraphPropertySpecification parses "{ name: value, ... }"; see
