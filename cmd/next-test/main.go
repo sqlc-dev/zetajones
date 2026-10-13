@@ -70,6 +70,12 @@ func resolve(cases []*testfile.Case, key string) (pendingItem, bool) {
 
 func main() {
 	files, err := filepath.Glob(filepath.Join("parser", "testdata", "*.test"))
+	if err == nil {
+		// Generated Spanner corpus (see cmd/spanner-corpus).
+		var spanner []string
+		spanner, err = filepath.Glob(filepath.Join("parser", "testdata", "spanner", "*.test"))
+		files = append(files, spanner...)
+	}
 	if err != nil || len(files) == 0 {
 		fmt.Fprintf(os.Stderr, "no .test files found (run from the repository root): %v\n", err)
 		os.Exit(1)

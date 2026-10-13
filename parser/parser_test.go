@@ -171,9 +171,17 @@ func TestParser(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no .test files found in testdata")
 	}
+	// Golden cases generated from Spanner's GoogleSQL reference docs (see
+	// cmd/spanner-corpus), run as subtests named "spanner/<page>".
+	spanner, err := filepath.Glob(filepath.Join("testdata", "spanner", "*.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, spanner...)
 
 	for _, path := range files {
-		t.Run(strings.TrimSuffix(filepath.Base(path), ".test"), func(t *testing.T) {
+		name, _ := filepath.Rel("testdata", path)
+		t.Run(filepath.ToSlash(strings.TrimSuffix(name, ".test")), func(t *testing.T) {
 			t.Parallel()
 			testFile(t, path)
 		})
