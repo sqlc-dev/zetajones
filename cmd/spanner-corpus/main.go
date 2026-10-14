@@ -59,7 +59,7 @@ const docsURL = "https://docs.cloud.google.com/spanner/docs/"
 
 // features are the language features Spanner's dialect needs from the
 // reference parser, including the SQL graph features.
-const features = "MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE"
+const features = "MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE"
 
 // page is a Spanner docs page, by its path under docsURL.
 type page struct {

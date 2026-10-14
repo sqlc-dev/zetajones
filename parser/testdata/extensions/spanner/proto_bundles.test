@@ -1,0 +1,53 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Proto bundles.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+CREATE PROTO BUNDLE (a.b.C, a.b.C.D,)
+--
+CreateProtoBundleStatement [0-37] [CREATE PROTO...a.b.C.D,)]
+  PathExpressionList [20-37] [(a.b.C, a.b.C.D,)]
+    PathExpression [21-26] [a.b.C]
+      Identifier(a) [21-22] [a]
+      Identifier(b) [23-24] [b]
+      Identifier(C) [25-26] [C]
+    PathExpression [28-35] [a.b.C.D]
+      Identifier(a) [28-29] [a]
+      Identifier(b) [30-31] [b]
+      Identifier(C) [32-33] [C]
+      Identifier(D) [34-35] [D]
+==
+ALTER PROTO BUNDLE INSERT (a.E) UPDATE (a.b.C) DELETE (a.F)
+--
+AlterProtoBundleStatement [0-59] [ALTER PROTO...DELETE (a.F)]
+  AlterActionList [19-59] [INSERT (a....DELETE (a.F)]
+    ProtoBundleAction(INSERT) [19-31] [INSERT (a.E)]
+      PathExpressionList [26-31] [(a.E)]
+        PathExpression [27-30] [a.E]
+          Identifier(a) [27-28] [a]
+          Identifier(E) [29-30] [E]
+    ProtoBundleAction(UPDATE) [32-46] [UPDATE (a.b.C)]
+      PathExpressionList [39-46] [(a.b.C)]
+        PathExpression [40-45] [a.b.C]
+          Identifier(a) [40-41] [a]
+          Identifier(b) [42-43] [b]
+          Identifier(C) [44-45] [C]
+    ProtoBundleAction(DELETE) [47-59] [DELETE (a.F)]
+      PathExpressionList [54-59] [(a.F)]
+        PathExpression [55-58] [a.F]
+          Identifier(a) [55-56] [a]
+          Identifier(F) [57-58] [F]
+==
+DROP PROTO BUNDLE
+--
+DropProtoBundleStatement [0-17] [DROP PROTO BUNDLE]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE PROTO BUNDLE (a.b.C)
+--
+ERROR: Syntax error: Unexpected keyword PROTO [at 1:8]
+CREATE PROTO BUNDLE (a.b.C)
+       ^

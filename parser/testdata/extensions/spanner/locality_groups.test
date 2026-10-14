@@ -1,0 +1,47 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Locality groups. CREATE LOCALITY GROUP is reference syntax (golden cases
+# in testdata/spanner); ALTER and DROP are Spanner-only.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+ALTER LOCALITY GROUP g SET OPTIONS (storage = "ssd")
+--
+AlterLocalityGroupStatement [0-52] [ALTER LOCALITY...rage = "ssd")]
+  PathExpression [21-22] [g]
+    Identifier(g) [21-22] [g]
+  AlterActionList [23-52] [SET OPTIONS (storage = "ssd")]
+    SetOptionsAction [23-52] [SET OPTIONS (storage = "ssd")]
+      OptionsList [35-52] [(storage = "ssd")]
+        OptionsEntry [36-51] [storage = "ssd"]
+          Identifier(storage) [36-43] [storage]
+          StringLiteral [46-51] ["ssd"]
+            StringLiteralComponent("ssd") [46-51] ["ssd"]
+==
+ALTER LOCALITY GROUP `default` SET OPTIONS (storage = "ssd")
+--
+AlterLocalityGroupStatement [0-60] [ALTER LOCALITY...rage = "ssd")]
+  PathExpression [21-30] [`default`]
+    Identifier(`default`) [21-30] [`default`]
+  AlterActionList [31-60] [SET OPTIONS (storage = "ssd")]
+    SetOptionsAction [31-60] [SET OPTIONS (storage = "ssd")]
+      OptionsList [43-60] [(storage = "ssd")]
+        OptionsEntry [44-59] [storage = "ssd"]
+          Identifier(storage) [44-51] [storage]
+          StringLiteral [54-59] ["ssd"]
+            StringLiteralComponent("ssd") [54-59] ["ssd"]
+==
+DROP LOCALITY GROUP g
+--
+DropStatement LOCALITY GROUP [0-21] [DROP LOCALITY GROUP g]
+  PathExpression [20-21] [g]
+    Identifier(g) [20-21] [g]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+ALTER LOCALITY GROUP g SET OPTIONS (storage = "ssd")
+--
+ERROR: Syntax error: Unexpected keyword LOCALITY [at 1:7]
+ALTER LOCALITY GROUP g SET OPTIONS (storage = "ssd")
+      ^

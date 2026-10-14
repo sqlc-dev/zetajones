@@ -3,15 +3,9 @@
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 #
 # Spanner syntax the reference parser rejects with
-# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
+# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
 # (classified "spanner" in cmd/spanner-corpus/triage.txt). There is no
 # golden parse tree for these.
-
-# https://docs.cloud.google.com/spanner/docs/named-schemas#add-fgac-to-named-schema
-# id 5f1bb1f70bc6: CREATE ROLE (named-schemas)
-# execute_query: INVALID_ARGUMENT: ROLE is not a supported object type [at 1:8]
-CREATE ROLE role1
-CREATE ROLE role2;
 
 # https://docs.cloud.google.com/spanner/docs/named-schemas#add-fgac-to-named-schema
 # id 2907f4ab8957: GRANT/REVOKE for fine-grained access control (named-schemas)

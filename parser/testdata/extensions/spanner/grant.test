@@ -1,0 +1,175 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Fine-grained access control GRANT/REVOKE. Privileges reuse the reference
+# Privileges node; objects are a PathExpressionList and grantee roles an
+# IdentifierList.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+GRANT SELECT ON TABLE t TO ROLE r
+--
+GrantToRoleStatement [0-33] [GRANT SELECT...TO ROLE r]
+  Privileges [6-12] [SELECT]
+    Privilege [6-12] [SELECT]
+      Identifier(`SELECT`) [6-12] [SELECT]
+  Identifier(TABLE) [16-21] [TABLE]
+  PathExpressionList [22-23] [t]
+    PathExpression [22-23] [t]
+      Identifier(t) [22-23] [t]
+  IdentifierList [32-33] [r]
+    Identifier(r) [32-33] [r]
+==
+GRANT SELECT(a, b), UPDATE(c), INSERT ON TABLE t, u TO ROLE r1, r2
+--
+GrantToRoleStatement [0-66] [GRANT SELECT...ROLE r1, r2]
+  Privileges [6-37] [SELECT(a,...c), INSERT]
+    Privilege [6-18] [SELECT(a, b)]
+      Identifier(`SELECT`) [6-12] [SELECT]
+      PathExpressionList [12-18] [(a, b)]
+        PathExpression [13-14] [a]
+          Identifier(a) [13-14] [a]
+        PathExpression [16-17] [b]
+          Identifier(b) [16-17] [b]
+    Privilege [20-29] [UPDATE(c)]
+      Identifier(`UPDATE`) [20-26] [UPDATE]
+      PathExpressionList [26-29] [(c)]
+        PathExpression [27-28] [c]
+          Identifier(c) [27-28] [c]
+    Privilege [31-37] [INSERT]
+      Identifier(INSERT) [31-37] [INSERT]
+  Identifier(TABLE) [41-46] [TABLE]
+  PathExpressionList [47-51] [t, u]
+    PathExpression [47-48] [t]
+      Identifier(t) [47-48] [t]
+    PathExpression [50-51] [u]
+      Identifier(u) [50-51] [u]
+  IdentifierList [60-66] [r1, r2]
+    Identifier(r1) [60-62] [r1]
+    Identifier(r2) [64-66] [r2]
+==
+REVOKE DELETE ON TABLE t FROM ROLE r
+--
+RevokeFromRoleStatement [0-36] [REVOKE DELETE...FROM ROLE r]
+  Privileges [7-13] [DELETE]
+    Privilege [7-13] [DELETE]
+      Identifier(DELETE) [7-13] [DELETE]
+  Identifier(TABLE) [17-22] [TABLE]
+  PathExpressionList [23-24] [t]
+    PathExpression [23-24] [t]
+      Identifier(t) [23-24] [t]
+  IdentifierList [35-36] [r]
+    Identifier(r) [35-36] [r]
+==
+GRANT EXECUTE ON TABLE FUNCTION f TO ROLE r
+--
+GrantToRoleStatement [0-43] [GRANT EXECUTE...TO ROLE r]
+  Privileges [6-13] [EXECUTE]
+    Privilege [6-13] [EXECUTE]
+      Identifier(EXECUTE) [6-13] [EXECUTE]
+  Identifier(TABLE) [17-22] [TABLE]
+  Identifier(`FUNCTION`) [23-31] [FUNCTION]
+  PathExpressionList [32-33] [f]
+    PathExpression [32-33] [f]
+      Identifier(f) [32-33] [f]
+  IdentifierList [42-43] [r]
+    Identifier(r) [42-43] [r]
+==
+GRANT SELECT ON CHANGE STREAM s TO ROLE r
+--
+GrantToRoleStatement [0-41] [GRANT SELECT...TO ROLE r]
+  Privileges [6-12] [SELECT]
+    Privilege [6-12] [SELECT]
+      Identifier(`SELECT`) [6-12] [SELECT]
+  Identifier(CHANGE) [16-22] [CHANGE]
+  Identifier(STREAM) [23-29] [STREAM]
+  PathExpressionList [30-31] [s]
+    PathExpression [30-31] [s]
+      Identifier(s) [30-31] [s]
+  IdentifierList [40-41] [r]
+    Identifier(r) [40-41] [r]
+==
+GRANT USAGE ON SCHEMA default TO ROLE r
+--
+GrantToRoleStatement [0-39] [GRANT USAGE...TO ROLE r]
+  Privileges [6-11] [USAGE]
+    Privilege [6-11] [USAGE]
+      Identifier(USAGE) [6-11] [USAGE]
+  Identifier(SCHEMA) [15-21] [SCHEMA]
+  PathExpressionList [22-29] [default]
+    PathExpression [22-29] [default]
+      Identifier(`default`) [22-29] [default]
+  IdentifierList [38-39] [r]
+    Identifier(r) [38-39] [r]
+==
+GRANT SELECT ON ALL TABLES IN SCHEMA s TO ROLE r
+--
+GrantToRoleStatement(all_in_schema) [0-48] [GRANT SELECT...TO ROLE r]
+  Privileges [6-12] [SELECT]
+    Privilege [6-12] [SELECT]
+      Identifier(`SELECT`) [6-12] [SELECT]
+  Identifier(TABLES) [20-26] [TABLES]
+  PathExpressionList [37-38] [s]
+    PathExpression [37-38] [s]
+      Identifier(s) [37-38] [s]
+  IdentifierList [47-48] [r]
+    Identifier(r) [47-48] [r]
+==
+REVOKE SELECT ON ALL SEQUENCES IN SCHEMA s FROM ROLE r
+--
+RevokeFromRoleStatement(all_in_schema) [0-54] [REVOKE SELECT...FROM ROLE r]
+  Privileges [7-13] [SELECT]
+    Privilege [7-13] [SELECT]
+      Identifier(`SELECT`) [7-13] [SELECT]
+  Identifier(SEQUENCES) [21-30] [SEQUENCES]
+  PathExpressionList [41-42] [s]
+    PathExpression [41-42] [s]
+      Identifier(s) [41-42] [s]
+  IdentifierList [53-54] [r]
+    Identifier(r) [53-54] [r]
+==
+GRANT ROLE a, b TO ROLE c
+--
+GrantRoleStatement [0-25] [GRANT ROLE a, b TO ROLE c]
+  IdentifierList [11-15] [a, b]
+    Identifier(a) [11-12] [a]
+    Identifier(b) [14-15] [b]
+  IdentifierList [24-25] [c]
+    Identifier(c) [24-25] [c]
+==
+REVOKE ROLE a FROM ROLE public
+--
+RevokeRoleStatement [0-30] [REVOKE ROLE a FROM ROLE public]
+  IdentifierList [12-13] [a]
+    Identifier(a) [12-13] [a]
+  IdentifierList [24-30] [public]
+    Identifier(public) [24-30] [public]
+==
+# String grantees are still the reference GrantStatement.
+GRANT SELECT ON TABLE t TO 'user@example.com'
+--
+GrantStatement [0-45] [GRANT SELECT...example.com']
+  Privileges [6-12] [SELECT]
+    Privilege [6-12] [SELECT]
+      Identifier(`SELECT`) [6-12] [SELECT]
+  Identifier(TABLE) [16-21] [TABLE]
+  PathExpression [22-23] [t]
+    Identifier(t) [22-23] [t]
+  GranteeList [27-45] ['user@example.com']
+    StringLiteral [27-45] ['user@example.com']
+      StringLiteralComponent('user@example.com') [27-45] ['user@example.com']
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+GRANT SELECT ON TABLE t TO ROLE r
+--
+ERROR: Syntax error: Expected "@" or "@@" or string literal but got identifier "ROLE" [at 1:28]
+GRANT SELECT ON TABLE t TO ROLE r
+                           ^
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+GRANT ROLE a TO ROLE c
+--
+ERROR: Syntax error: Expected keyword ON but got identifier "a" [at 1:12]
+GRANT ROLE a TO ROLE c
+           ^

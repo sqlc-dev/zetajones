@@ -113,11 +113,25 @@ type RenameStatement struct {
 	Identifier *Identifier     `json:"identifier"`
 	OldName    *PathExpression `json:"old_name"`
 	NewName    *PathExpression `json:"new_name"`
+	// MoreRenames holds the further "old TO new" pairs of a Spanner "RENAME
+	// TABLE a TO b, c TO d" statement (SPANNER_DDL); their paths follow
+	// NewName in the debug output.
+	MoreRenames []RenamePair `json:"more_renames,omitempty"`
+}
+
+// RenamePair is one additional "old TO new" pair of a RenameStatement.
+type RenamePair struct {
+	OldName *PathExpression `json:"old_name"`
+	NewName *PathExpression `json:"new_name"`
 }
 
 func (n *RenameStatement) statementNode() {}
 func (n *RenameStatement) Children() []Node {
-	return children(n.Identifier, n.OldName, n.NewName)
+	out := children(n.Identifier, n.OldName, n.NewName)
+	for _, r := range n.MoreRenames {
+		out = append(out, r.OldName, r.NewName)
+	}
+	return out
 }
 
 // SingleAssignment is "SET identifier = expression"; see ASTSingleAssignment
@@ -3468,14 +3482,19 @@ func (n *GeneratedColumnInfo) Children() []Node {
 // not represented as a child.
 type IdentityColumnInfo struct {
 	Span
-	StartWith   *IdentityColumnStartWith   `json:"start_with,omitempty"`
-	IncrementBy *IdentityColumnIncrementBy `json:"increment_by,omitempty"`
-	MaxValue    *IdentityColumnMaxValue    `json:"max_value,omitempty"`
-	MinValue    *IdentityColumnMinValue    `json:"min_value,omitempty"`
+	// SequenceKind is the Spanner sequence kind (e.g. BIT_REVERSED_POSITIVE)
+	// inside the parentheses (SPANNER_DDL).
+	SequenceKind *Identifier                `json:"sequence_kind,omitempty"`
+	StartWith    *IdentityColumnStartWith   `json:"start_with,omitempty"`
+	IncrementBy  *IdentityColumnIncrementBy `json:"increment_by,omitempty"`
+	MaxValue     *IdentityColumnMaxValue    `json:"max_value,omitempty"`
+	MinValue     *IdentityColumnMinValue    `json:"min_value,omitempty"`
+	// SkipRange is the Spanner "SKIP RANGE min, max" option (SPANNER_DDL).
+	SkipRange *IdentityColumnSkipRange `json:"skip_range,omitempty"`
 }
 
 func (n *IdentityColumnInfo) Children() []Node {
-	return children(n.StartWith, n.IncrementBy, n.MaxValue, n.MinValue)
+	return children(n.SequenceKind, n.StartWith, n.IncrementBy, n.MaxValue, n.MinValue, n.SkipRange)
 }
 
 // IdentityColumnStartWith is the "START WITH value" clause of an identity
@@ -3546,6 +3565,29 @@ type DropTtlAction struct {
 }
 
 func (n *DropTtlAction) Children() []Node { return nil }
+
+// TtlClause is a CREATE TABLE "ROW DELETION POLICY (expression)" clause; see
+// ASTTtlClause in googlesql/parser/parse_tree.h. Under SPANNER_DDL it may also
+// follow the Spanner table options after a comma.
+type TtlClause struct {
+	Span
+	Expression Node `json:"expression"`
+}
+
+func (n *TtlClause) Children() []Node { return children(n.Expression) }
+
+// CreateLocalityGroupStatement is "CREATE LOCALITY GROUP path [OPTIONS(...)]";
+// see ASTCreateLocalityGroupStatement in googlesql/parser/parse_tree.h.
+type CreateLocalityGroupStatement struct {
+	Span
+	Name    *PathExpression `json:"name"`
+	Options *OptionsList    `json:"options,omitempty"`
+}
+
+func (n *CreateLocalityGroupStatement) statementNode() {}
+func (n *CreateLocalityGroupStatement) Children() []Node {
+	return children(n.Name, n.Options)
+}
 
 // OptionsList is a parenthesized list of name = value options.
 type OptionsList struct {
@@ -3755,6 +3797,7 @@ type CreateTableStatement struct {
 	Clone            *CloneDataSource      `json:"clone,omitempty"`
 	PartitionBy      *PartitionBy          `json:"partition_by,omitempty"`
 	ClusterBy        *ClusterBy            `json:"cluster_by,omitempty"`
+	Ttl              *TtlClause            `json:"ttl,omitempty"`
 	WithConnection   *WithConnectionClause `json:"with_connection,omitempty"`
 	Options          *OptionsList          `json:"options,omitempty"`
 	Query            *Query                `json:"query,omitempty"`
@@ -3763,7 +3806,7 @@ type CreateTableStatement struct {
 func (n *CreateTableStatement) statementNode() {}
 func (n *CreateTableStatement) Children() []Node {
 	return children(n.Name, n.TableElementList, n.LikeName, n.SpannerOptions, n.Clone,
-		n.PartitionBy, n.ClusterBy, n.WithConnection, n.Options, n.Query)
+		n.PartitionBy, n.ClusterBy, n.Ttl, n.WithConnection, n.Options, n.Query)
 }
 
 // SpannerTableOptions holds the Cloud Spanner "PRIMARY KEY (...) [, INTERLEAVE
@@ -3877,16 +3920,18 @@ func (n *ColumnDefinition) Children() []Node {
 // optional ColumnAttributeList holds trailing attributes such as NOT NULL.
 type SimpleColumnSchema struct {
 	Span
-	Type              *PathExpression      `json:"type"`
-	TypeParameters    *TypeParameterList   `json:"type_parameters,omitempty"`
-	Collate           *Collate             `json:"collate,omitempty"`
-	DefaultExpression Node                 `json:"default_expression,omitempty"`
-	Attributes        *ColumnAttributeList `json:"attributes,omitempty"`
-	Options           *OptionsList         `json:"options,omitempty"`
+	Type              *PathExpression    `json:"type"`
+	TypeParameters    *TypeParameterList `json:"type_parameters,omitempty"`
+	Collate           *Collate           `json:"collate,omitempty"`
+	DefaultExpression Node               `json:"default_expression,omitempty"`
+	// OnUpdate is the Spanner "ON UPDATE (expression)" clause (SPANNER_DDL).
+	OnUpdate   *ColumnOnUpdateClause `json:"on_update,omitempty"`
+	Attributes *ColumnAttributeList  `json:"attributes,omitempty"`
+	Options    *OptionsList          `json:"options,omitempty"`
 }
 
 func (n *SimpleColumnSchema) Children() []Node {
-	return children(n.Type, n.TypeParameters, n.Collate, n.DefaultExpression, n.Attributes, n.Options)
+	return children(n.Type, n.TypeParameters, n.Collate, n.DefaultExpression, n.OnUpdate, n.Attributes, n.Options)
 }
 
 // ArrayColumnSchema is an "ARRAY<field_schema>" column schema; see
@@ -4342,11 +4387,15 @@ type CreateIndexStatement struct {
 	Options              *OptionsList                `json:"options,omitempty"`
 	IsNullFiltered       bool                        `json:"is_null_filtered,omitempty"`
 	SpannerInterleave    *SpannerInterleaveClause    `json:"spanner_interleave,omitempty"`
+	// OrderBy and Where are the Spanner search/vector index "ORDER BY ..." and
+	// "WHERE ..." clauses (SPANNER_DDL).
+	OrderBy *OrderBy     `json:"order_by,omitempty"`
+	Where   *WhereClause `json:"where,omitempty"`
 }
 
 func (n *CreateIndexStatement) statementNode() {}
 func (n *CreateIndexStatement) Children() []Node {
-	return children(n.Name, n.TableName, n.Alias, n.UnnestExpressionList, n.IndexItemList, n.Storing, n.PartitionBy, n.Options, n.SpannerInterleave)
+	return children(n.Name, n.TableName, n.Alias, n.UnnestExpressionList, n.IndexItemList, n.Storing, n.PartitionBy, n.OrderBy, n.Where, n.Options, n.SpannerInterleave)
 }
 
 // IndexItemList is the parenthesized list of ordering expressions in a
@@ -6194,7 +6243,10 @@ func (n *GraphDynamicProperties) Children() []Node { return children(n.Expressio
 // the debug string).
 type AlterIndexStatement struct {
 	Span
-	Vector     bool             `json:"vector,omitempty"`
+	Vector bool `json:"vector,omitempty"`
+	// Plain marks a Spanner "ALTER INDEX" (SPANNER_DDL) as opposed to ALTER
+	// SEARCH INDEX; neither is shown in the debug string.
+	Plain      bool             `json:"plain,omitempty"`
 	IsIfExists bool             `json:"is_if_exists,omitempty"`
 	Name       *PathExpression  `json:"name"`
 	Table      *PathExpression  `json:"table,omitempty"`

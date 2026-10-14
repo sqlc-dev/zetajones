@@ -1,0 +1,103 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Change streams.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+CREATE CHANGE STREAM s
+--
+CreateChangeStreamStatement [0-22] [CREATE CHANGE STREAM s]
+  PathExpression [21-22] [s]
+    Identifier(s) [21-22] [s]
+==
+CREATE CHANGE STREAM s FOR ALL OPTIONS (retention_period = "36h")
+--
+CreateChangeStreamStatement [0-65] [CREATE CHANGE...eriod = "36h")]
+  PathExpression [21-22] [s]
+    Identifier(s) [21-22] [s]
+  ChangeStreamForClause(all) [23-30] [FOR ALL]
+  OptionsList [39-65] [(retention_period = "36h")]
+    OptionsEntry [40-64] [retention_period = "36h"]
+      Identifier(retention_period) [40-56] [retention_period]
+      StringLiteral [59-64] ["36h"]
+        StringLiteralComponent("36h") [59-64] ["36h"]
+==
+CREATE CHANGE STREAM IF NOT EXISTS s FOR a(x, y), b, c()
+--
+CreateChangeStreamStatement(is_if_not_exists) [0-56] [CREATE CHANGE...y), b, c()]
+  PathExpression [35-36] [s]
+    Identifier(s) [35-36] [s]
+  ChangeStreamForClause [37-56] [FOR a(x, y), b, c()]
+    ChangeStreamTrackedTable [41-48] [a(x, y)]
+      PathExpression [41-42] [a]
+        Identifier(a) [41-42] [a]
+      ColumnList [42-48] [(x, y)]
+        Identifier(x) [43-44] [x]
+        Identifier(y) [46-47] [y]
+    ChangeStreamTrackedTable [50-51] [b]
+      PathExpression [50-51] [b]
+        Identifier(b) [50-51] [b]
+    ChangeStreamTrackedTable [53-56] [c()]
+      PathExpression [53-54] [c]
+        Identifier(c) [53-54] [c]
+      ColumnList [54-56] [()]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE CHANGE STREAM s FOR ALL
+--
+ERROR: CHANGE is not a supported object type [at 1:8]
+CREATE CHANGE STREAM s FOR ALL
+       ^
+==
+ALTER CHANGE STREAM s SET FOR a(x), b
+--
+AlterChangeStreamStatement [0-37] [ALTER CHANGE...FOR a(x), b]
+  PathExpression [20-21] [s]
+    Identifier(s) [20-21] [s]
+  AlterActionList [22-37] [SET FOR a(x), b]
+    SetChangeStreamForAction [22-37] [SET FOR a(x), b]
+      ChangeStreamForClause [26-37] [FOR a(x), b]
+        ChangeStreamTrackedTable [30-34] [a(x)]
+          PathExpression [30-31] [a]
+            Identifier(a) [30-31] [a]
+          ColumnList [31-34] [(x)]
+            Identifier(x) [32-33] [x]
+        ChangeStreamTrackedTable [36-37] [b]
+          PathExpression [36-37] [b]
+            Identifier(b) [36-37] [b]
+==
+ALTER CHANGE STREAM s SET OPTIONS (retention_period = "36h")
+--
+AlterChangeStreamStatement [0-60] [ALTER CHANGE...period = "36h")]
+  PathExpression [20-21] [s]
+    Identifier(s) [20-21] [s]
+  AlterActionList [22-60] [SET OPTIONS..._period = "36h")]
+    SetOptionsAction [22-60] [SET OPTIONS..._period = "36h")]
+      OptionsList [34-60] [(retention_period = "36h")]
+        OptionsEntry [35-59] [retention_period = "36h"]
+          Identifier(retention_period) [35-51] [retention_period]
+          StringLiteral [54-59] ["36h"]
+            StringLiteralComponent("36h") [54-59] ["36h"]
+==
+ALTER CHANGE STREAM s DROP FOR ALL
+--
+AlterChangeStreamStatement [0-34] [ALTER CHANGE...DROP FOR ALL]
+  PathExpression [20-21] [s]
+    Identifier(s) [20-21] [s]
+  AlterActionList [22-34] [DROP FOR ALL]
+    DropChangeStreamForAllAction [22-34] [DROP FOR ALL]
+==
+DROP CHANGE STREAM s
+--
+DropStatement CHANGE STREAM [0-20] [DROP CHANGE STREAM s]
+  PathExpression [19-20] [s]
+    Identifier(s) [19-20] [s]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+DROP CHANGE STREAM s
+--
+ERROR: CHANGE is not a supported object type [at 1:6]
+DROP CHANGE STREAM s
+     ^

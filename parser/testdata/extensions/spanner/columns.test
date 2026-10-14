@@ -1,0 +1,190 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Spanner column definitions. Attributes before the DEFAULT or generated
+# clause (NOT NULL) and after it (HIDDEN, PLACEMENT KEY, ...) form one
+# ColumnAttributeList that follows the DEFAULT/generated child, as the
+# reference's SpannerAlterColumnAction orders them.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+CREATE TABLE t (a INT64 NOT NULL DEFAULT (1)) PRIMARY KEY (a)
+--
+CreateTableStatement [0-61] [CREATE TABLE...PRIMARY KEY (a)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-45] [(a INT64 NOT NULL DEFAULT (1))]
+    ColumnDefinition [16-44] [a INT64 NOT NULL DEFAULT (1)]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-44] [INT64 NOT NULL DEFAULT (1)]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+        IntLiteral(1) [42-43] [1]
+        ColumnAttributeList [24-32] [NOT NULL]
+          NotNullColumnAttribute [24-32] [NOT NULL]
+  SpannerTableOptions [46-61] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [46-61] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [58-61] [(a)]
+        PrimaryKeyElement(ASC) [59-60] [a]
+          Identifier(a) [59-60] [a]
+==
+CREATE TABLE t (a INT64 NOT NULL AS (b + 1) STORED, b INT64) PRIMARY KEY (a)
+--
+CreateTableStatement [0-76] [CREATE TABLE...PRIMARY KEY (a)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-60] [(a INT64 NOT..., b INT64)]
+    ColumnDefinition [16-50] [a INT64 NOT...1) STORED]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-50] [INT64 NOT...1) STORED]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+        GeneratedColumnInfo(generated_mode=ALWAYS, stored_mode=STORED) [33-50] [AS (b + 1) STORED]
+          BinaryExpression(+) [37-42] [b + 1]
+            PathExpression [37-38] [b]
+              Identifier(b) [37-38] [b]
+            IntLiteral(1) [41-42] [1]
+        ColumnAttributeList [24-32] [NOT NULL]
+          NotNullColumnAttribute [24-32] [NOT NULL]
+    ColumnDefinition [52-59] [b INT64]
+      Identifier(b) [52-53] [b]
+      SimpleColumnSchema [54-59] [INT64]
+        PathExpression [54-59] [INT64]
+          Identifier(INT64) [54-59] [INT64]
+  SpannerTableOptions [61-76] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [61-76] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [73-76] [(a)]
+        PrimaryKeyElement(ASC) [74-75] [a]
+          Identifier(a) [74-75] [a]
+==
+CREATE TABLE t (a TIMESTAMP NOT NULL DEFAULT (PENDING_COMMIT_TIMESTAMP()) ON UPDATE (PENDING_COMMIT_TIMESTAMP()) OPTIONS (allow_commit_timestamp = true)) PRIMARY KEY (a)
+--
+CreateTableStatement [0-169] [CREATE TABLE...PRIMARY KEY (a)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-153] [(a TIMESTAMP...estamp = true))]
+    ColumnDefinition [16-152] [a TIMESTAMP...imestamp = true)]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-152] [TIMESTAMP..._timestamp = true)]
+        PathExpression [18-27] [TIMESTAMP]
+          Identifier(TIMESTAMP) [18-27] [TIMESTAMP]
+        FunctionCall [46-72] [PENDING_COMMIT_TIMESTAMP()]
+          PathExpression [46-70] [PENDING_COMMIT_TIMESTAMP]
+            Identifier(PENDING_COMMIT_TIMESTAMP) [46-70] [PENDING_COMMIT_TIMESTAMP]
+        ColumnOnUpdateClause [74-112] [ON UPDATE...OMMIT_TIMESTAMP())]
+          FunctionCall [85-111] [PENDING_COMMIT_TIMESTAMP()]
+            PathExpression [85-109] [PENDING_COMMIT_TIMESTAMP]
+              Identifier(PENDING_COMMIT_TIMESTAMP) [85-109] [PENDING_COMMIT_TIMESTAMP]
+        ColumnAttributeList [28-36] [NOT NULL]
+          NotNullColumnAttribute [28-36] [NOT NULL]
+        OptionsList [121-152] [(allow_commit_tim...mp = true)]
+          OptionsEntry [122-151] [allow_commit_timestamp = true]
+            Identifier(allow_commit_timestamp) [122-144] [allow_commit_timestamp]
+            BooleanLiteral(true) [147-151] [true]
+  SpannerTableOptions [154-169] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [154-169] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [166-169] [(a)]
+        PrimaryKeyElement(ASC) [167-168] [a]
+          Identifier(a) [167-168] [a]
+==
+CREATE TABLE t (a STRING(MAX) NOT NULL PLACEMENT KEY) PRIMARY KEY (a)
+--
+CreateTableStatement [0-69] [CREATE TABLE...PRIMARY KEY (a)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-53] [(a STRING(...PLACEMENT KEY)]
+    ColumnDefinition [16-52] [a STRING(MAX...PLACEMENT KEY]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-52] [STRING(MAX...PLACEMENT KEY]
+        PathExpression [18-24] [STRING]
+          Identifier(STRING) [18-24] [STRING]
+        TypeParameterList [24-28] [(MAX]
+          MaxLiteral() [25-28] [MAX]
+        ColumnAttributeList [30-52] [NOT NULL PLACEMENT KEY]
+          NotNullColumnAttribute [30-38] [NOT NULL]
+          PlacementKeyColumnAttribute [39-52] [PLACEMENT KEY]
+  SpannerTableOptions [54-69] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [54-69] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [66-69] [(a)]
+        PrimaryKeyElement(ASC) [67-68] [a]
+          Identifier(a) [67-68] [a]
+==
+CREATE TABLE t (a INT64 AUTO_INCREMENT PRIMARY KEY)
+--
+CreateTableStatement [0-51] [CREATE TABLE...PRIMARY KEY)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-51] [(a INT64 AUTO_INC...IMARY KEY)]
+    ColumnDefinition [16-50] [a INT64 AUTO_INCR...RIMARY KEY]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-50] [INT64 AUTO_INCREM...RIMARY KEY]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+        ColumnAttributeList [24-50] [AUTO_INCREMENT PRIMARY KEY]
+          AutoIncrementColumnAttribute [24-38] [AUTO_INCREMENT]
+          PrimaryKeyColumnAttribute(ENFORCED) [39-50] [PRIMARY KEY]
+==
+CREATE TABLE t (a ARRAY<FLOAT32>(vector_length=>128) NOT NULL) PRIMARY KEY (a)
+--
+CreateTableStatement [0-78] [CREATE TABLE...PRIMARY KEY (a)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-62] [(a ARRAY<FLOAT32...NOT NULL)]
+    ColumnDefinition [16-61] [a ARRAY<FLOAT32...) NOT NULL]
+      Identifier(a) [16-17] [a]
+      ArrayColumnSchema [18-61] [ARRAY<FLOAT32...) NOT NULL]
+        SimpleColumnSchema [24-31] [FLOAT32]
+          PathExpression [24-31] [FLOAT32]
+            Identifier(FLOAT32) [24-31] [FLOAT32]
+        TypeParameterList [32-51] [(vector_length=>128]
+          NamedArgument [33-51] [vector_length=>128]
+            Identifier(vector_length) [33-46] [vector_length]
+            IntLiteral(128) [48-51] [128]
+        ColumnAttributeList [53-61] [NOT NULL]
+          NotNullColumnAttribute [53-61] [NOT NULL]
+  SpannerTableOptions [63-78] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [63-78] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [75-78] [(a)]
+        PrimaryKeyElement(ASC) [76-77] [a]
+          Identifier(a) [76-77] [a]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE TABLE t (a INT64 NOT NULL DEFAULT (1)) PRIMARY KEY (a)
+--
+ERROR: Syntax error: Expected ")" or "," but got keyword DEFAULT [at 1:34]
+CREATE TABLE t (a INT64 NOT NULL DEFAULT (1)) PRIMARY KEY (a)
+                                 ^
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE TABLE t (a ARRAY<FLOAT32>(vector_length=>128)) PRIMARY KEY (a)
+--
+ERROR: Syntax error: Unexpected identifier "vector_length" [at 1:34]
+CREATE TABLE t (a ARRAY<FLOAT32>(vector_length=>128)) PRIMARY KEY (a)
+                                 ^
+==
+# A non-stored generated column in ALTER COLUMN.
+ALTER TABLE t ALTER COLUMN a STRING(100) AS (b)
+--
+AlterTableStatement [0-47] [ALTER TABLE...100) AS (b)]
+  PathExpression [12-13] [t]
+    Identifier(t) [12-13] [t]
+  AlterActionList [14-47] [ALTER COLUMN...100) AS (b)]
+    SpannerAlterColumnAction [14-47] [ALTER COLUMN...100) AS (b)]
+      ColumnDefinition [27-47] [a STRING(100) AS (b)]
+        Identifier(a) [27-28] [a]
+        SimpleColumnSchema [29-47] [STRING(100) AS (b)]
+          PathExpression [29-35] [STRING]
+            Identifier(STRING) [29-35] [STRING]
+          TypeParameterList [35-39] [(100]
+            IntLiteral(100) [36-39] [100]
+          GeneratedColumnInfo(generated_mode=ALWAYS) [41-47] [AS (b)]
+            PathExpression [45-46] [b]
+              Identifier(b) [45-46] [b]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+ALTER TABLE t ALTER COLUMN a STRING(100) AS (b)
+--
+ERROR: Syntax error: Expected keyword STORED but got end of statement [at 1:48]
+ALTER TABLE t ALTER COLUMN a STRING(100) AS (b)
+                                               ^
