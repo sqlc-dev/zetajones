@@ -61,6 +61,42 @@ Each `<name>.metadata.json` sidecar (ours, not vendored) tracks:
 
 A `.test` file with no sidecar passes completely.
 
+## Spanner Corpus
+
+`parser/testdata/spanner/` holds golden cases generated (not vendored) from the
+GoogleSQL examples in Cloud Spanner's docs: the reference pages
+(docs.cloud.google.com/spanner/docs/reference/standard-sql/) at the top level
+and the guide pages under `guides/` (page list in `cmd/spanner-corpus/pages.go`).
+The parser tests run them alongside the vendored files, as subtests named
+`spanner/<page>`, with the same `parse_todo` sidecars.
+
+- `<page>.test` — examples the reference parser accepts (statement, script
+  or expression mode), with its output as the golden tree.
+- `<page>.spanner.sql` — Spanner-only syntax the reference parser rejects
+  (e.g. `GRANT ... TO ROLE`, change streams, `CREATE PROTO BUNDLE`,
+  `vector_length`). No golden output: this is the backlog of syntax that
+  needs a design decision before zetajones can parse it.
+- `<page>.rejected.sql` — rejected examples not yet triaged. Classify each by
+  id in `cmd/spanner-corpus/triage.txt` as `spanner`, `typo` (broken in the
+  docs) or `fragment`, then regenerate; this file should not exist after.
+
+Grammar templates, partial clauses, bare graph patterns and examples marked
+`-- Error:` are dropped automatically (see `fragmentReason`; `-v` lists
+them), as are PostgreSQL tabs and query-result comments.
+
+Regenerate (pages are cached in `.spanner-docs/`; `-refresh` re-downloads),
+then re-record the todos, since regeneration renumbers cases and drops the
+sidecars:
+
+```bash
+go run ./cmd/spanner-corpus
+go test ./parser -check-parse
+```
+
+`go run ./cmd/spanner-corpus -discover` lists guide pages with GoogleSQL
+examples that `pages.go` does not include yet. Do not hand-edit generated
+files; change `cmd/spanner-corpus` instead.
+
 ## Alternation Groups
 
 Cases whose SQL or option lines contain `{{a|b|c}}` groups expand into the
@@ -100,7 +136,7 @@ The grammar and AST are defined in
 - `googlesql/parser/*.tm` / grammar files — syntax reference
 
 For new test queries, golden output comes from the prebuilt reference binary
-(pinned in `cmd/regenerate-parse/main.go`, must match the vendored testdata
+(pinned in `internal/refparse/refparse.go`, must match the vendored testdata
 release):
 
 ```bash

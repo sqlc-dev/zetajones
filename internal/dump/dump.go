@@ -354,6 +354,15 @@ func nodeString(n ast.Node) string {
 			return "DropRowAccessPolicyStatement(is_if_exists)"
 		}
 		return "DropRowAccessPolicyStatement"
+	case *ast.DropIndexStatement:
+		name := "DropSearchIndexStatement"
+		if t.Vector {
+			name = "DropVectorIndexStatement"
+		}
+		if t.IsIfExists {
+			return name + "(is_if_exists)"
+		}
+		return name
 	case *ast.DropAllRowAccessPoliciesStatement:
 		return "DropAllRowAccessPoliciesStatement"
 	case *ast.DescribeStatement:
@@ -389,6 +398,18 @@ func nodeString(n ast.Node) string {
 		return "SpannerTableOptions"
 	case *ast.SpannerInterleaveClause:
 		return "SpannerInterleaveClause"
+	case *ast.AlterIndexStatement:
+		if t.IsIfExists {
+			return "AlterIndexStatement(is_if_exists)"
+		}
+		return "AlterIndexStatement"
+	case *ast.AddColumnIdentifierAction:
+		if t.IsIfNotExists {
+			return "AddColumnIdentifierAction(is_if_not_exists)"
+		}
+		return "AddColumnIdentifierAction"
+	case *ast.RebuildAction:
+		return "RebuildAction"
 	case *ast.DropColumnAction:
 		if t.IsIfExists {
 			return "DropColumnAction(is_if_exists)"
@@ -667,6 +688,8 @@ func nodeString(n ast.Node) string {
 		return "ColumnAttributeList"
 	case *ast.NotNullColumnAttribute:
 		return "NotNullColumnAttribute"
+	case *ast.HiddenColumnAttribute:
+		return "HiddenColumnAttribute"
 	case *ast.PrimaryKeyColumnAttribute:
 		if t.Enforced {
 			return "PrimaryKeyColumnAttribute(ENFORCED)"
@@ -1102,6 +1125,48 @@ func nodeString(n ast.Node) string {
 		return fmt.Sprintf("CreateExternalSchemaStatement(%s)", strings.Join(mods, ", "))
 	case *ast.DefineTableStatement:
 		return "DefineTableStatement"
+	case *ast.CreatePropertyGraphStatement:
+		// Modifier order matches the base ASTCreateStatement modifiers:
+		// scope, is_or_replace, is_if_not_exists.
+		var mods []string
+		switch t.Scope {
+		case "PRIVATE":
+			mods = append(mods, "is_private")
+		case "PUBLIC":
+			mods = append(mods, "is_public")
+		case "TEMP":
+			mods = append(mods, "is_temp")
+		}
+		if t.IsOrReplace {
+			mods = append(mods, "is_or_replace")
+		}
+		if t.IsIfNotExists {
+			mods = append(mods, "is_if_not_exists")
+		}
+		if len(mods) == 0 {
+			return "CreatePropertyGraphStatement"
+		}
+		return fmt.Sprintf("CreatePropertyGraphStatement(%s)", strings.Join(mods, ", "))
+	case *ast.GraphElementTableList:
+		return "GraphElementTableList"
+	case *ast.GraphElementTable:
+		return "GraphElementTable"
+	case *ast.GraphNodeTableReference:
+		return "GraphNodeTableReference(" + t.Type + ")"
+	case *ast.GraphElementLabelAndPropertiesList:
+		return "GraphElementLabelAndPropertiesList"
+	case *ast.GraphElementLabelAndProperties:
+		return "GraphElementLabelAndProperties"
+	case *ast.GraphProperties:
+		return "GraphProperties"
+	case *ast.GraphDerivedPropertyList:
+		return "GraphDerivedPropertyList"
+	case *ast.GraphDerivedProperty:
+		return "GraphDerivedProperty"
+	case *ast.GraphDynamicLabel:
+		return "GraphDynamicLabel"
+	case *ast.GraphDynamicProperties:
+		return "GraphDynamicProperties"
 	case *ast.CreateConstantStatement:
 		// Modifier order matches the base ASTCreateStatement modifiers:
 		// scope, is_or_replace, is_if_not_exists.

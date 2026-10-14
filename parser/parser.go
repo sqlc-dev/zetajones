@@ -2814,6 +2814,11 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if isKeyword(p.peek(), "MODEL") {
 		return p.parseCreateModelStatement(createTok, scope, isOrReplace)
 	}
+	// CREATE [OR REPLACE] [scope] PROPERTY GRAPH ...; see
+	// create_property_graph_statement in googlesql.tm.
+	if isKeyword(p.peek(), "PROPERTY") {
+		return p.parseCreatePropertyGraphStatement(createTok, scope, isOrReplace)
+	}
 	// CREATE [OR REPLACE] [scope] CONSTANT [IF NOT EXISTS] <path> = <expr>; see
 	// create_constant_statement in googlesql.tm.
 	if isKeyword(p.peek(), "CONSTANT") {
@@ -3867,19 +3872,28 @@ func (p *parser) parseStructColumnField() (*ast.StructColumnField, error) {
 }
 
 // tryParseColumnAttributes parses a run of column attributes trailing a column
-// schema; see column_attributes in googlesql.tm. Only NOT NULL is implemented
-// (the sole attribute exercised by the external-table tests). It returns nil
-// when no attribute is present.
+// schema; see column_attributes in googlesql.tm. NOT NULL, PRIMARY KEY and
+// HIDDEN are implemented. It returns nil when no attribute is present.
 func (p *parser) tryParseColumnAttributes() *ast.ColumnAttributeList {
 	startsAttr := func() bool {
 		return (isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL")) ||
-			(isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY"))
+			(isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY")) ||
+			isKeyword(p.peek(), "HIDDEN")
 	}
 	if !startsAttr() {
 		return nil
 	}
 	list := &ast.ColumnAttributeList{}
 	for startsAttr() {
+		if isKeyword(p.peek(), "HIDDEN") {
+			hiddenTok := p.advance() // HIDDEN
+			if len(list.Attributes) == 0 {
+				list.Start = hiddenTok.Pos
+			}
+			list.Stop = hiddenTok.End
+			list.Attributes = append(list.Attributes, &ast.HiddenColumnAttribute{Span: span(hiddenTok.Pos, hiddenTok.End)})
+			continue
+		}
 		if isKeyword(p.peek(), "PRIMARY") {
 			primaryTok := p.advance() // PRIMARY
 			keyTok := p.advance()     // KEY
@@ -6322,6 +6336,15 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 		// the unquoted keyword ROW triggers this; a quoted `row` object type
 		// falls through to the generic handling below.
 		return p.parseDropRowAccessPolicyStatement(dropTok)
+	case isKeyword(kindTok, "SEARCH"), isKeyword(kindTok, "VECTOR"):
+		return p.parseDropIndexStatement(dropTok)
+	case isKeyword(kindTok, "PROPERTY"):
+		// DROP PROPERTY GRAPH; see schema_object_kind in googlesql.tm.
+		p.advance() // PROPERTY
+		if _, err := p.expectKeyword("GRAPH"); err != nil {
+			return nil, err
+		}
+		objectKind = "PROPERTY GRAPH"
 	case isKeyword(kindTok, "ALL"):
 		// DROP ALL ROW [ACCESS] POLICIES ON ...; see
 		// drop_all_row_access_policies_statement in googlesql.tm.
@@ -6497,6 +6520,151 @@ func (p *parser) parseDropRowAccessPolicyStatement(dropTok token.Token) (ast.Sta
 		Name:       namePath,
 		Target:     target,
 	}, nil
+}
+
+// parseDropIndexStatement parses "DROP {SEARCH|VECTOR} INDEX [IF EXISTS]
+// path [ON path]"; see the "DROP" index_type "INDEX" production of
+// drop_statement in googlesql.tm. The DROP keyword is already consumed; the
+// parser is at SEARCH or VECTOR.
+func (p *parser) parseDropIndexStatement(dropTok token.Token) (ast.Statement, error) {
+	kindTok := p.advance() // SEARCH or VECTOR
+	if _, err := p.expectKeyword("INDEX"); err != nil {
+		return nil, err
+	}
+	stmt := &ast.DropIndexStatement{Vector: isKeyword(kindTok, "VECTOR"), IsIfExists: p.tryParseIfExists()}
+	name, err := p.parsePathExpression()
+	if err != nil {
+		return nil, err
+	}
+	stmt.Name = name
+	end := name.End()
+	if isKeyword(p.peek(), "ON") {
+		p.advance() // ON
+		table, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Table = table
+		end = table.End()
+	}
+	stmt.Span = span(dropTok.Pos, end)
+	return stmt, nil
+}
+
+// parseAlterIndexStatement parses "ALTER {SEARCH|VECTOR} INDEX [IF EXISTS]
+// path [ON path] alter_index_action, ..."; see the "ALTER" alter_index_type
+// "INDEX" production of alter_statement and alter_index_action in
+// googlesql.tm. The ALTER keyword is already consumed; the parser is at
+// SEARCH or VECTOR.
+func (p *parser) parseAlterIndexStatement(alterTok token.Token) (ast.Statement, error) {
+	kindTok := p.advance() // SEARCH or VECTOR
+	if _, err := p.expectKeyword("INDEX"); err != nil {
+		return nil, err
+	}
+	stmt := &ast.AlterIndexStatement{Vector: isKeyword(kindTok, "VECTOR"), IsIfExists: p.tryParseIfExists()}
+	var err error
+	if stmt.Name, err = p.parsePathExpression(); err != nil {
+		return nil, err
+	}
+	if isKeyword(p.peek(), "ON") {
+		p.advance() // ON
+		if stmt.Table, err = p.parsePathExpression(); err != nil {
+			return nil, err
+		}
+	}
+	list := &ast.AlterActionList{}
+	for {
+		action, err := p.parseAlterIndexAction()
+		if err != nil {
+			return nil, err
+		}
+		list.Actions = append(list.Actions, action)
+		if p.peek().Kind != token.COMMA {
+			break
+		}
+		p.advance() // ,
+	}
+	list.Span = span(list.Actions[0].Pos(), p.prevEnd())
+	stmt.Actions = list
+	stmt.Span = span(alterTok.Pos, p.prevEnd())
+	return stmt, nil
+}
+
+// parseAlterIndexAction parses one alter_index_action: SET OPTIONS (...),
+// ADD COLUMN [IF NOT EXISTS] c [OPTIONS(...)], DROP COLUMN [IF EXISTS] c,
+// ALTER COLUMN [IF EXISTS] c SET OPTIONS (...), or REBUILD.
+func (p *parser) parseAlterIndexAction() (ast.Node, error) {
+	tok := p.peek()
+	switch {
+	case isKeyword(tok, "REBUILD"):
+		p.advance()
+		return &ast.RebuildAction{Span: span(tok.Pos, tok.End)}, nil
+	case isKeyword(tok, "SET"):
+		p.advance() // SET
+		if _, err := p.expectKeyword("OPTIONS"); err != nil {
+			return nil, err
+		}
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.SetOptionsAction{Span: span(tok.Pos, opts.End()), Options: opts}, nil
+	case isKeyword(tok, "ADD"):
+		p.advance() // ADD
+		if _, err := p.expectKeyword("COLUMN"); err != nil {
+			return nil, err
+		}
+		ifNotExists, err := p.parseOptIfNotExists()
+		if err != nil {
+			return nil, err
+		}
+		col, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		action := &ast.AddColumnIdentifierAction{IsIfNotExists: ifNotExists, Column: col}
+		if isKeyword(p.peek(), "OPTIONS") {
+			p.advance() // OPTIONS
+			if action.Options, err = p.parseOptionsList(); err != nil {
+				return nil, err
+			}
+		}
+		action.Span = span(tok.Pos, p.prevEnd())
+		return action, nil
+	case isKeyword(tok, "DROP"):
+		p.advance() // DROP
+		if _, err := p.expectKeyword("COLUMN"); err != nil {
+			return nil, err
+		}
+		ifExists := p.tryParseIfExists()
+		col, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.DropColumnAction{Span: span(tok.Pos, col.End()), IsIfExists: ifExists, Name: col}, nil
+	case isKeyword(tok, "ALTER"):
+		p.advance() // ALTER
+		if _, err := p.expectKeyword("COLUMN"); err != nil {
+			return nil, err
+		}
+		ifExists := p.tryParseIfExists()
+		col, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("SET"); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("OPTIONS"); err != nil {
+			return nil, err
+		}
+		opts, err := p.parseOptionsList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AlterColumnOptionsAction{Span: span(tok.Pos, opts.End()), IsIfExists: ifExists, Column: col, Options: opts}, nil
+	}
+	return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 }
 
 // parseDropAllRowAccessPoliciesStatement parses
@@ -6827,6 +6995,8 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 	case isKeyword(kindTok, "FUNCTION"):
 		p.advance()
 		unsupported = "FUNCTION"
+	case isKeyword(kindTok, "SEARCH"), isKeyword(kindTok, "VECTOR"):
+		return p.parseAlterIndexStatement(alterTok)
 	case isKeyword(kindTok, "INDEX"):
 		p.advance()
 		unsupported = "INDEX"
