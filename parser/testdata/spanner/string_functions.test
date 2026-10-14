@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#byte_length
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 [mode=expression]
@@ -86,12 +86,6 @@ FunctionCall [0-23]
 SELECT
   'абвгд' AS characters,
   CHARACTER_LENGTH('абвгд') AS char_length_example
-
-/*------------+---------------------+
- | characters | char_length_example |
- +------------+---------------------+
- | абвгд      |                   5 |
- +------------+---------------------*/
 --
 QueryStatement [0-92]
   Query [0-92]
@@ -564,12 +558,6 @@ FunctionCall [0-24]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#ends_with
 SELECT ENDS_WITH('apple', 'e') as example
-
-/*---------+
- | example |
- +---------+
- |    True |
- +---------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -894,12 +882,6 @@ QueryStatement [0-51]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#lpad
 SELECT FORMAT('%T', LPAD('c', 5)) AS results
-
-/*---------+
- | results |
- +---------+
- | "    c" |
- +---------*/
 --
 QueryStatement [0-44]
   Query [0-44]
@@ -922,12 +904,6 @@ QueryStatement [0-44]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#lpad
 SELECT LPAD('b', 5, 'a') AS results
-
-/*---------+
- | results |
- +---------+
- | aaaab   |
- +---------*/
 --
 QueryStatement [0-35]
   Query [0-35]
@@ -947,12 +923,6 @@ QueryStatement [0-35]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#lpad
 SELECT LPAD('abc', 10, 'ghd') AS results
-
-/*------------+
- | results    |
- +------------+
- | ghdghdgabc |
- +------------*/
 --
 QueryStatement [0-40]
   Query [0-40]
@@ -972,12 +942,6 @@ QueryStatement [0-40]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#lpad
 SELECT LPAD('abc', 2, 'd') AS results
-
-/*---------+
- | results |
- +---------+
- | ab      |
- +---------*/
 --
 QueryStatement [0-37]
   Query [0-37]
@@ -997,12 +961,6 @@ QueryStatement [0-37]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#lpad
 SELECT FORMAT('%T', LPAD(b'abc', 10, b'ghd')) AS results
-
-/*---------------+
- | results       |
- +---------------+
- | b"ghdghdgabc" |
- +---------------*/
 --
 QueryStatement [0-56]
   Query [0-56]
@@ -1027,12 +985,6 @@ QueryStatement [0-56]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#ltrim
 SELECT CONCAT('#', LTRIM('   apple   '), '#') AS example
-
-/*-------------+
- | example     |
- +-------------+
- | #apple   #  |
- +-------------*/
 --
 QueryStatement [0-56]
   Query [0-56]
@@ -1056,12 +1008,6 @@ QueryStatement [0-56]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#ltrim
 SELECT LTRIM('***apple***', '*') AS example
-
-/*-----------+
- | example   |
- +-----------+
- | apple***  |
- +-----------*/
 --
 QueryStatement [0-43]
   Query [0-43]
@@ -1080,12 +1026,6 @@ QueryStatement [0-43]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#ltrim
 SELECT LTRIM('xxxapplexxx', 'xyz') AS example
-
-/*-----------+
- | example   |
- +-----------+
- | applexxx  |
- +-----------*/
 --
 QueryStatement [0-45]
   Query [0-45]
@@ -1145,12 +1085,6 @@ QueryStatement [0-132]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#normalize
 SELECT NORMALIZE('Raha\u2004Mahan', NFKC) AS normalized_name
-
-/*-----------------+
- | normalized_name |
- +-----------------+
- | Raha Mahan      |
- +-----------------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -1169,12 +1103,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#normalize
 SELECT NORMALIZE('Raha\u2005Mahan', NFKC) AS normalized_name
-
-/*-----------------+
- | normalized_name |
- +-----------------+
- | Raha Mahan      |
- +-----------------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -1193,12 +1121,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#normalize
 SELECT NORMALIZE('Raha\u2006Mahan', NFKC) AS normalized_name
-
-/*-----------------+
- | normalized_name |
- +-----------------+
- | Raha Mahan      |
- +-----------------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -1217,12 +1139,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#normalize
 SELECT NORMALIZE('Raha Mahan', NFKC) AS normalized_name
-
-/*-----------------+
- | normalized_name |
- +-----------------+
- | Raha Mahan      |
- +-----------------*/
 --
 QueryStatement [0-55]
   Query [0-55]
@@ -1496,12 +1412,6 @@ FunctionCall [0-30]
 SELECT
   'foo@example.com' AS email,
   REGEXP_CONTAINS('foo@example.com', r'@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+') AS is_valid
-
-/*-----------------+----------+
- | email           | is_valid |
- +-----------------+----------+
- | foo@example.com | TRUE     |
- +-----------------+----------*/
 --
 QueryStatement [0-120]
   Query [0-120]
@@ -1527,12 +1437,6 @@ QueryStatement [0-120]
 SELECT
   'www.example.net' AS email,
   REGEXP_CONTAINS('www.example.net', r'@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+') AS is_valid
-
-/*-----------------+----------+
- | email           | is_valid |
- +-----------------+----------+
- | www.example.net | FALSE    |
- +-----------------+----------*/
 --
 QueryStatement [0-120]
   Query [0-120]
@@ -1748,12 +1652,6 @@ FunctionCall [0-29]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#regexp_extract
 SELECT REGEXP_EXTRACT('foo@example.com', r'^[a-zA-Z0-9_.+-]+') AS user_name
-
-/*-----------+
- | user_name |
- +-----------+
- | foo       |
- +-----------*/
 --
 QueryStatement [0-75]
   Query [0-75]
@@ -1772,12 +1670,6 @@ QueryStatement [0-75]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#regexp_extract
 SELECT REGEXP_EXTRACT('foo@example.com', r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.([a-zA-Z0-9-.]+$)')
-
-/*------------------+
- | top_level_domain |
- +------------------+
- | com              |
- +------------------*/
 --
 QueryStatement [0-95]
   Query [0-95]
@@ -1798,12 +1690,6 @@ SELECT
   REGEXP_EXTRACT('ab', '(.)b') AS result_b,
   REGEXP_EXTRACT('xyztb', '(.)+b') AS result_c,
   REGEXP_EXTRACT('ab', '(z)?b') AS result_d
-
-/*-------------------------------------------+
- | result_a | result_b | result_c | result_d |
- +-------------------------------------------+
- | ab       | a        | t        | NULL     |
- +-------------------------------------------*/
 --
 QueryStatement [0-184]
   Query [0-184]
@@ -1864,12 +1750,6 @@ FunctionCall [0-33]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#regexp_extract_all
 SELECT REGEXP_EXTRACT_ALL('Try `func(x)` or `func(y)`', '`(.+?)`') AS example
-
-/*--------------------+
- | example            |
- +--------------------+
- | [func(x), func(y)] |
- +--------------------*/
 --
 QueryStatement [0-77]
   Query [0-77]
@@ -1920,12 +1800,6 @@ FunctionCall [0-42]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#regexp_replace
 SELECT REGEXP_REPLACE('Jane Doe', r'^([\p{L}\x27-]+)\s+([\p{L}\x27-]+)$', r'\2, \1') AS formatted_name
-
-/*----------------+
- | formatted_name |
- +----------------+
- | Doe, Jane      |
- +----------------*/
 --
 QueryStatement [0-102]
   Query [0-102]
@@ -1958,12 +1832,6 @@ FunctionCall [0-35]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#repeat
 SELECT REPEAT('abc', 3) AS results
-
-/*-----------+
- | results   |
- |-----------|
- | abcabcabc |
- +-----------*/
 --
 QueryStatement [0-34]
   Query [0-34]
@@ -1981,12 +1849,6 @@ QueryStatement [0-34]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#repeat
 SELECT REPEAT('abc', NULL) AS results
-
-/*---------+
- | results |
- |---------|
- | NULL    |
- +---------*/
 --
 QueryStatement [0-37]
   Query [0-37]
@@ -2004,12 +1866,6 @@ QueryStatement [0-37]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#repeat
 SELECT REPEAT(NULL, 3) AS results
-
-/*---------+
- | results |
- |---------|
- | NULL    |
- +---------*/
 --
 QueryStatement [0-33]
   Query [0-33]
@@ -2117,12 +1973,6 @@ FunctionCall [0-14]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#reverse
 SELECT REVERSE('abc') AS results
-
-/*---------+
- | results |
- +---------+
- | cba     |
- +---------*/
 --
 QueryStatement [0-32]
   Query [0-32]
@@ -2139,12 +1989,6 @@ QueryStatement [0-32]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#reverse
 SELECT FORMAT('%T', REVERSE(b'1a3')) AS results
-
-/*---------+
- | results |
- +---------+
- | b"3a1"  |
- +---------*/
 --
 QueryStatement [0-47]
   Query [0-47]
@@ -2166,12 +2010,6 @@ QueryStatement [0-47]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rpad
 SELECT FORMAT('%T', RPAD('c', 5)) AS results
-
-/*---------+
- | results |
- +---------+
- | "c    " |
- +---------*/
 --
 QueryStatement [0-44]
   Query [0-44]
@@ -2194,12 +2032,6 @@ QueryStatement [0-44]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rpad
 SELECT RPAD('b', 5, 'a') AS results
-
-/*---------+
- | results |
- +---------+
- | baaaa   |
- +---------*/
 --
 QueryStatement [0-35]
   Query [0-35]
@@ -2219,12 +2051,6 @@ QueryStatement [0-35]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rpad
 SELECT RPAD('abc', 10, 'ghd') AS results
-
-/*------------+
- | results    |
- +------------+
- | abcghdghdg |
- +------------*/
 --
 QueryStatement [0-40]
   Query [0-40]
@@ -2244,12 +2070,6 @@ QueryStatement [0-40]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rpad
 SELECT RPAD('abc', 2, 'd') AS results
-
-/*---------+
- | results |
- +---------+
- | ab      |
- +---------*/
 --
 QueryStatement [0-37]
   Query [0-37]
@@ -2269,12 +2089,6 @@ QueryStatement [0-37]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rpad
 SELECT FORMAT('%T', RPAD(b'abc', 10, b'ghd')) AS results
-
-/*---------------+
- | results       |
- +---------------+
- | b"abcghdghdg" |
- +---------------*/
 --
 QueryStatement [0-56]
   Query [0-56]
@@ -2299,12 +2113,6 @@ QueryStatement [0-56]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rtrim
 SELECT RTRIM('***apple***', '*') AS example
-
-/*-----------+
- | example   |
- +-----------+
- | ***apple  |
- +-----------*/
 --
 QueryStatement [0-43]
   Query [0-43]
@@ -2323,12 +2131,6 @@ QueryStatement [0-43]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#rtrim
 SELECT RTRIM('applexxz', 'xyz') AS example
-
-/*---------+
- | example |
- +---------+
- | apple   |
- +---------*/
 --
 QueryStatement [0-42]
   Query [0-42]
@@ -2383,12 +2185,6 @@ FunctionCall [0-14]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#soundex
 SELECT 'Ashcraft' AS value, SOUNDEX('Ashcraft') AS soundex
-
-/*----------------------+---------+
- | value                | soundex |
- +----------------------+---------+
- | Ashcraft             | A261    |
- +----------------------+---------*/
 --
 QueryStatement [0-58]
   Query [0-58]
@@ -2474,12 +2270,6 @@ QueryStatement [0-188]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 0) AS example
-
-/*---------+
- | example |
- +---------+
- |         |
- +---------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -2500,12 +2290,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 2) AS example
-
-/*---------+
- | example |
- +---------+
- | www.abc |
- +---------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -2526,12 +2310,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 1) AS example
-
-/*---------+
- | example |
- +---------+
- | www     |
- +---------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -2552,12 +2330,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", -1, 1) AS example
-
-/*---------+
- | example |
- +---------+
- | com     |
- +---------*/
 --
 QueryStatement [0-61]
   Query [0-61]
@@ -2579,12 +2351,6 @@ QueryStatement [0-61]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 3) AS example
-
-/*-------------+
- | example     |
- +-------------+
- | www.abc.xyz |
- +------------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -2605,12 +2371,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 0, 3) AS example
-
-/*-------------+
- | example     |
- +-------------+
- | www.abc.xyz |
- +------------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -2631,12 +2391,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 5, 3) AS example
-
-/*---------+
- | example |
- +---------+
- |         |
- +--------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -2657,12 +2411,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", -5, 3) AS example
-
-/*-------------+
- | example     |
- +-------------+
- | www.abc.xyz |
- +------------*/
 --
 QueryStatement [0-61]
   Query [0-61]
@@ -2684,12 +2432,6 @@ QueryStatement [0-61]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 3) AS example
-
-/*---------+
- | example |
- +---------+
- | xyz.com |
- +--------*/
 --
 QueryStatement [0-57]
   Query [0-57]
@@ -2709,12 +2451,6 @@ QueryStatement [0-57]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR('aaa***bbb***ccc', '**', 1, 2) AS example
-
-/*-----------+
- | example   |
- +-----------+
- | aaa***bbb |
- +----------*/
 --
 QueryStatement [0-61]
   Query [0-61]
@@ -2735,12 +2471,6 @@ QueryStatement [0-61]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#split_substr
 SELECT SPLIT_SUBSTR('aaa***bbb***ccc', '**', 2, 2) AS example
-
-/*------------+
- | example    |
- +------------+
- | *bbb***ccc |
- +-----------*/
 --
 QueryStatement [0-61]
   Query [0-61]
@@ -2773,12 +2503,6 @@ FunctionCall [0-26]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#starts_with
 SELECT STARTS_WITH('bar', 'b') AS example
-
-/*---------+
- | example |
- +---------+
- |    True |
- +---------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -2809,12 +2533,6 @@ FunctionCall [0-23]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#strpos
 SELECT STRPOS('foo@example.com', '@') AS example
-
-/*---------+
- | example |
- +---------+
- |       4 |
- +---------*/
 --
 QueryStatement [0-48]
   Query [0-48]
@@ -2833,12 +2551,6 @@ QueryStatement [0-48]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#substr
 SELECT SUBSTR('apple', 2) AS example
-
-/*---------+
- | example |
- +---------+
- | pple    |
- +---------*/
 --
 QueryStatement [0-36]
   Query [0-36]
@@ -2856,12 +2568,6 @@ QueryStatement [0-36]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#substr
 SELECT SUBSTR('apple', 2, 2) AS example
-
-/*---------+
- | example |
- +---------+
- | pp      |
- +---------*/
 --
 QueryStatement [0-39]
   Query [0-39]
@@ -2880,12 +2586,6 @@ QueryStatement [0-39]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#substr
 SELECT SUBSTR('apple', -2) AS example
-
-/*---------+
- | example |
- +---------+
- | le      |
- +---------*/
 --
 QueryStatement [0-37]
   Query [0-37]
@@ -2904,12 +2604,6 @@ QueryStatement [0-37]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#substr
 SELECT SUBSTR('apple', 1, 123) AS example
-
-/*---------+
- | example |
- +---------+
- | apple   |
- +---------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -2928,12 +2622,6 @@ QueryStatement [0-41]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#substr
 SELECT SUBSTR('apple', 123) AS example
-
-/*---------+
- | example |
- +---------+
- |         |
- +---------*/
 --
 QueryStatement [0-38]
   Query [0-38]
@@ -2951,12 +2639,6 @@ QueryStatement [0-38]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#substr
 SELECT SUBSTR('apple', 123, 5) AS example
-
-/*---------+
- | example |
- +---------+
- |         |
- +---------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -3069,12 +2751,6 @@ FunctionCall [0-21]
 SELECT
   'foo' AS word,
   TO_CODE_POINTS('foo') AS code_points
-
-/*---------+------------------------------------+
- | word    | code_points                        |
- +---------+------------------------------------+
- | foo     | [102, 111, 111]                    |
- +---------+------------------------------------*/
 --
 QueryStatement [0-62]
   Query [0-62]
@@ -3098,12 +2774,6 @@ QueryStatement [0-62]
 SELECT
   'bar' AS word,
   TO_CODE_POINTS('bar') AS code_points
-
-/*---------+------------------------------------+
- | word    | code_points                        |
- +---------+------------------------------------+
- | bar     | [98, 97, 114]                      |
- +---------+------------------------------------*/
 --
 QueryStatement [0-62]
   Query [0-62]
@@ -3127,12 +2797,6 @@ QueryStatement [0-62]
 SELECT
   'baz' AS word,
   TO_CODE_POINTS('baz') AS code_points
-
-/*---------+------------------------------------+
- | word    | code_points                        |
- +---------+------------------------------------+
- | baz     | [98, 97, 122]                      |
- +---------+------------------------------------*/
 --
 QueryStatement [0-62]
   Query [0-62]
@@ -3156,12 +2820,6 @@ QueryStatement [0-62]
 SELECT
   'giraffe' AS word,
   TO_CODE_POINTS('giraffe') AS code_points
-
-/*---------+------------------------------------+
- | word    | code_points                        |
- +---------+------------------------------------+
- | giraffe | [103, 105, 114, 97, 102, 102, 101] |
- +---------+------------------------------------*/
 --
 QueryStatement [0-70]
   Query [0-70]
@@ -3185,12 +2843,6 @@ QueryStatement [0-70]
 SELECT
   'llama' AS word,
   TO_CODE_POINTS('llama') AS code_points
-
-/*---------+------------------------------------+
- | word    | code_points                        |
- +---------+------------------------------------+
- | llama   | [108, 108, 97, 109, 97]            |
- +---------+------------------------------------*/
 --
 QueryStatement [0-66]
   Query [0-66]
@@ -3214,12 +2866,6 @@ QueryStatement [0-66]
 SELECT
   b'\x66\x6f\x6f' AS bytes_value,
   TO_CODE_POINTS(b'\x66\x6f\x6f') AS bytes_value_as_integer
-
-/*------------------+------------------------+
- | bytes_value      | bytes_value_as_integer |
- +------------------+------------------------+
- | foo              | [102, 111, 111]        |
- +------------------+------------------------*/
 --
 QueryStatement [0-100]
   Query [0-100]
@@ -3243,12 +2889,6 @@ QueryStatement [0-100]
 SELECT
   b'\x00\x01\x10\xff' AS bytes_value,
   TO_CODE_POINTS(b'\x00\x01\x10\xff') AS bytes_value_as_integer
-
-/*------------------+------------------------+
- | bytes_value      | bytes_value_as_integer |
- +------------------+------------------------+
- | \x00\x01\x10\xff | [0, 1, 16, 255]        |
- +------------------+------------------------*/
 --
 QueryStatement [0-108]
   Query [0-108]
@@ -3306,12 +2946,6 @@ FunctionCall [0-13]
 SELECT
   b'\x00\x01\x02\x03\xAA\xEE\xEF\xFF' AS byte_string,
   TO_HEX(b'\x00\x01\x02\x03\xAA\xEE\xEF\xFF') AS hex_string
-
-/*----------------------------------+------------------+
- | byte_string                      | hex_string       |
- +----------------------------------+------------------+
- | \x00\x01\x02\x03\xaa\xee\xef\xff | 00010203aaeeefff |
- +----------------------------------+------------------*/
 --
 QueryStatement [0-120]
   Query [0-120]
@@ -3333,12 +2967,6 @@ QueryStatement [0-120]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#trim
 SELECT CONCAT('#', TRIM( '   apple   '), '#') AS example
-
-/*----------+
- | example  |
- +----------+
- | #apple#  |
- +----------*/
 --
 QueryStatement [0-56]
   Query [0-56]
@@ -3362,12 +2990,6 @@ QueryStatement [0-56]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#trim
 SELECT TRIM('***apple***', '*') AS example
-
-/*---------+
- | example |
- +---------+
- | apple   |
- +---------*/
 --
 QueryStatement [0-42]
   Query [0-42]
@@ -3386,12 +3008,6 @@ QueryStatement [0-42]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#trim
 SELECT TRIM('xzxapplexxy', 'xyz') as example
-
-/*---------+
- | example |
- +---------+
- | apple   |
- +---------*/
 --
 QueryStatement [0-44]
   Query [0-44]
@@ -3414,12 +3030,6 @@ SELECT
   TRIM('W̊aba', 'Y̊') AS b,
   TRIM('abaŪ̊', 'Y̊') AS c,
   TRIM('Ū̊aba', 'Y̊') AS d
-
-/*------+------+------+------+
- | a    | b    | c    | d    |
- +------+------+------+------+
- | abaW | W̊aba | abaŪ | Ūaba |
- +------+------+------+------*/
 --
 QueryStatement [0-127]
   Query [0-127]
@@ -3470,11 +3080,6 @@ QueryStatement [0-127]
 SELECT b'apple', TRIM(b'apple', b'na\xab') AS example
 
 -- Note that the result of TRIM is of type BYTES, displayed as a base64-encoded string.
-/*----------------------+------------------+
- | item                 | example          |
- +----------------------+------------------+
- | YXBwbGU=             | cHBsZQ==         |
- +----------------------+------------------*/
 --
 QueryStatement [0-53]
   Query [0-53]
@@ -3516,12 +3121,6 @@ FunctionCall [0-12]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/string_functions#upper
 SELECT UPPER('foo') AS example
-
-/*---------+
- | example |
- +---------+
- | FOO     |
- +---------*/
 --
 QueryStatement [0-30]
   Query [0-30]

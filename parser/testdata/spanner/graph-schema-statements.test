@@ -113,14 +113,6 @@ CreatePropertyGraphStatement(is_or_replace) [0-397]
 GRAPH FinGraph
 MATCH (p:Person)
 RETURN p.name
-
-/*---------+
- | name    |
- +---------+
- | Alex    |
- | Dana    |
- | Lee     |
- +---------*/
 --
 QueryStatement [0-45]
   Query [0-45]

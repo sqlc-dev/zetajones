@@ -8,17 +8,6 @@
 GRAPH FinGraph
 MATCH (n)
 RETURN n.name, n.id
-
-/*-----------+
- | name | id |
- +-----------+
- | NULL | 7  |
- | NULL | 16 |
- | NULL | 20 |
- | Alex | 1  |
- | Dana | 2  |
- | Lee  | 3  |
- +-----------*/
 --
 QueryStatement [0-44]
   Query [0-44]
@@ -50,12 +39,6 @@ QueryStatement [0-44]
 GRAPH FinGraph
 MATCH ()-[e]->()
 RETURN COUNT(e.id) AS results
-
-/*---------+
- | results |
- +---------+
- | 8       |
- +---------*/
 --
 QueryStatement [0-61]
   Query [0-61]
@@ -92,12 +75,6 @@ QueryStatement [0-61]
 GRAPH FinGraph
 MATCH ()-[e]-()
 RETURN COUNT(e.id) AS results
-
-/*---------+
- | results |
- +---------+
- | 16      |
- +---------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -138,18 +115,6 @@ MATCH
 RETURN
   p.name, src.id AS src_account_id, mid.id AS mid_account_id,
   dst.id AS dst_account_id
-
-/*---------------------------------------------------------+
- | name | src_account_id | mid_account_id | dst_account_id |
- +---------------------------------------------------------+
- | Alex | 20             | 7              | 16             |
- | Alex | 20             | 7              | 16             |
- | Dana | 16             | 20             | 7              |
- | Dana | 16             | 20             | 16             |
- | Lee  | 7              | 16             | 20             |
- | Lee  | 7              | 16             | 20             |
- | Lee  | 20             | 16             | 20             |
- +---------------------------------------------------------*/
 --
 QueryStatement [0-221]
   Query [0-221]
@@ -232,6 +197,57 @@ QueryStatement [0-221]
                       Identifier(id) [201-203]
                     Alias [204-221]
                       Identifier(dst_account_id) [207-221]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples
+GRAPH FinGraph
+MATCH p=(account:Account {is_blocked: false})-[transfer:Transfers]-(dst:Account)
+RETURN TO_JSON(p) as results
+--
+QueryStatement [0-124]
+  Query [0-124]
+    GqlQuery [0-124]
+      GraphTableQuery [0-124]
+        PathExpression [6-14]
+          Identifier(FinGraph) [6-14]
+        GqlOperatorList [15-124]
+          GqlOperatorList [15-124]
+            GqlMatch [15-95]
+              GraphPattern [21-95]
+                GraphPathPattern [21-95]
+                  Identifier(p) [21-22]
+                  GraphNodePattern [23-60]
+                    GraphElementPatternFiller [24-59]
+                      Identifier(account) [24-31]
+                      GraphLabelFilter [31-39]
+                        GraphElementLabel [32-39]
+                          Identifier(Account) [32-39]
+                      GraphPropertySpecification [40-59]
+                        GraphPropertyNameAndValue [41-58]
+                          Identifier(is_blocked) [41-51]
+                          BooleanLiteral(false) [53-58]
+                  GraphEdgePattern [60-82]
+                    GraphElementPatternFiller [62-80]
+                      Identifier(transfer) [62-70]
+                      GraphLabelFilter [70-80]
+                        GraphElementLabel [71-80]
+                          Identifier(Transfers) [71-80]
+                  GraphNodePattern [82-95]
+                    GraphElementPatternFiller [83-94]
+                      Identifier(dst) [83-86]
+                      GraphLabelFilter [86-94]
+                        GraphElementLabel [87-94]
+                          Identifier(Account) [87-94]
+            GqlReturn [96-124]
+              Select [103-124]
+                SelectList [103-124]
+                  SelectColumn [103-124]
+                    FunctionCall [103-113]
+                      PathExpression [103-110]
+                        Identifier(TO_JSON) [103-110]
+                      PathExpression [111-112]
+                        Identifier(p) [111-112]
+                    Alias [114-124]
+                      Identifier(results) [117-124]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#definitions_2
 GRAPH FinGraph
@@ -319,17 +335,6 @@ BracedConstructor [0-47]
 GRAPH FinGraph
 MATCH (n)
 RETURN LABELS(n) AS label
-
-/*-----------+
- | label     |
- +-----------+
- | [Account] |
- | [Account] |
- | [Account] |
- | [Person]  |
- | [Person]  |
- | [Person]  |
- +-----------*/
 --
 QueryStatement [0-50]
   Query [0-50]
@@ -361,19 +366,6 @@ QueryStatement [0-50]
 GRAPH FinGraph
 MATCH -[e]->
 RETURN e.id
-
-/*----+
- | id |
- +----+
- | 20 |
- | 7  |
- | 7  |
- | 20 |
- | 16 |
- | 1  |
- | 3  |
- | 2  |
- +----*/
 --
 QueryStatement [0-39]
   Query [0-39]
@@ -401,14 +393,6 @@ QueryStatement [0-39]
 GRAPH FinGraph
 MATCH (n:Person)
 RETURN n.name, n.id
-
-/*-----------+
- | name | id |
- +-----------+
- | Alex | 1  |
- | Dana | 2  |
- | Lee  | 3  |
- +-----------*/
 --
 QueryStatement [0-51]
   Query [0-51]
@@ -443,17 +427,6 @@ QueryStatement [0-51]
 GRAPH FinGraph
 MATCH (n:Person|Account)
 RETURN n.id, n.name, n.nick_name
-
-/*----------------------------+
- | id | name | nick_name      |
- +----------------------------+
- | 7  | NULL | Vacation Fund  |
- | 16 | NULL | Vacation Fund  |
- | 20 | NULL | Rainy Day Fund |
- | 1  | Alex | NULL           |
- | 2  | Dana | NULL           |
- | 3  | Lee  | NULL           |
- +----------------------------*/
 --
 QueryStatement [0-72]
   Query [0-72]
@@ -495,12 +468,6 @@ QueryStatement [0-72]
 GRAPH FinGraph
 MATCH (n:Person WHERE n.birthday > '1990-01-10')
 RETURN n.name
-
-/*------+
- | name |
- +------+
- | Alex |
- +------*/
 --
 QueryStatement [0-77]
   Query [0-77]
@@ -539,13 +506,6 @@ GRAPH FinGraph
 MATCH -[e:Owns WHERE e.create_time > '2020-01-14'
                  AND e.create_time < '2020-05-14']->
 RETURN e.id
-
-/*----+
- | id |
- +----+
- | 2  |
- | 3  |
- +----*/
 --
 QueryStatement [0-129]
   Query [0-129]
@@ -590,14 +550,6 @@ QueryStatement [0-129]
 GRAPH FinGraph
 MATCH (n:Person|Account WHERE PROPERTY_EXISTS(n, name))
 RETURN n.id, n.name
-
-/*-----------+
- | id | name |
- +-----------+
- | 1  | Alex |
- | 2  | Dana |
- | 3  | Lee  |
- +-----------*/
 --
 QueryStatement [0-90]
   Query [0-90]
@@ -643,12 +595,6 @@ QueryStatement [0-90]
 GRAPH FinGraph
 MATCH (a:Account {is_blocked: false, nick_name: 'Vacation Fund'})
 RETURN a.id
-
-/*----+
- | id |
- +----+
- | 7  |
- +----*/
 --
 QueryStatement [0-92]
   Query [0-92]
@@ -687,16 +633,6 @@ QueryStatement [0-92]
 GRAPH FinGraph
 MATCH (src:Account)-[transfer:Transfers]->(dst:Account)
 RETURN src.id AS src_id, transfer.amount, dst.id AS dst_id
-
-/*--------------------------+
- | src_id | amount | dst_id |
- +--------------------------+
- | 7      | 300    | 16     |
- | 7      | 100    | 16     |
- | 16     | 300    | 20     |
- | 20     | 500    | 7      |
- | 20     | 200    | 16     |
- +--------------------------*/
 --
 QueryStatement [0-129]
   Query [0-129]
@@ -751,21 +687,6 @@ QueryStatement [0-129]
 GRAPH FinGraph
 MATCH (src:Account)-[transfer:Transfers]-(dst:Account)
 RETURN src.id AS src_id, transfer.amount, dst.id AS dst_id
-
-/*--------------------------+
- | src_id | amount | dst_id |
- +--------------------------+
- | 16     | 300    | 7      |
- | 16     | 100    | 7      |
- | 20     | 300    | 7      |
- | 7      | 500    | 16     |
- | 7      | 200    | 16     |
- | 20     | 300    | 16     |
- | 20     | 100    | 16     |
- | 16     | 300    | 20     |
- | 7      | 500    | 20     |
- | 16     | 200    | 20     |
- +--------------------------*/
 --
 QueryStatement [0-128]
   Query [0-128]
@@ -820,14 +741,6 @@ QueryStatement [0-128]
 GRAPH FinGraph
 MATCH (account:Account)<-(person:Person)
 RETURN account.id, person.name
-
-/*------------+
- | id  | name |
- +------------+
- | 7   | Alex |
- | 20  | Dana |
- | 16  | Lee  |
- +------------*/
 --
 QueryStatement [0-86]
   Query [0-86]
@@ -869,13 +782,6 @@ QueryStatement [0-86]
 GRAPH FinGraph
 MATCH (a:Account)-[t1:Transfers]->(mid:Account)-[t2:Transfers]->(a:Account)
 RETURN a.id AS a_id
-
-/*------+
- | a_id |
- +------+
- | 16   |
- | 20   |
- +------*/
 --
 QueryStatement [0-110]
   Query [0-110]
@@ -932,18 +838,6 @@ QueryStatement [0-110]
 GRAPH FinGraph
 MATCH (a:Account)-[t1:Transfers]->(mid:Account)-[t2:Transfers]->(a2)
 RETURN a.id AS a_id, a2.id AS a2_id
-
-/*--------------+
- | a_id | a2_id |
- +--------------+
- | 20   | 16    |
- | 20   | 16    |
- | 7    | 20    |
- | 7    | 20    |
- | 20   | 20    |
- | 16   | 7     |
- | 16   | 16    |
- +--------------*/
 --
 QueryStatement [0-119]
   Query [0-119]
@@ -1004,16 +898,6 @@ GRAPH FinGraph
 MATCH (a:Account)-[t1:Transfers]->(mid:Account)-[t2:Transfers]->(a2)
 WHERE a.id != a2.id
 RETURN a.id AS a_id, a2.id AS a2_id
-
-/*--------------+
- | a_id | a2_id |
- +--------------+
- | 20   | 16    |
- | 20   | 16    |
- | 7    | 20    |
- | 7    | 20    |
- | 16   | 7     |
- +--------------*/
 --
 QueryStatement [0-139]
   Query [0-139]
@@ -1083,18 +967,6 @@ MATCH
   ((src:Account)-[t1:Transfers]->(mid:Account))-[t2:Transfers]->(dst:Account)
 RETURN
   src.id AS src_account_id, mid.id AS mid_account_id, dst.id AS dst_account_id
-
-/*--------------------------------------------------+
- | src_account_id | mid_account_id | dst_account_id |
- +--------------------------------------------------+
- | 20             | 7              | 16             |
- | 20             | 7              | 16             |
- | 7              | 16             | 20             |
- | 7              | 16             | 20             |
- | 20             | 16             | 20             |
- | 16             | 20             | 7              |
- | 16             | 20             | 16             |
- +--------------------------------------------------*/
 --
 QueryStatement [0-184]
   Query [0-184]
@@ -1165,17 +1037,6 @@ GRAPH FinGraph
 MATCH (src:Account {id: 7})-[e:Transfers]->{1, 3}(dst:Account)
 WHERE src != dst
 RETURN ARRAY_LENGTH(e) AS hops, dst.id AS dst_account_id
-
-/*-----------------------+
- | hops | dst_account_id |
- +-----------------------+
- | 1    | 16             |
- | 3    | 16             |
- | 3    | 16             |
- | 1    | 16             |
- | 2    | 20             |
- | 2    | 20             |
- +-----------------------*/
 --
 QueryStatement [0-151]
   Query [0-151]
@@ -1247,14 +1108,6 @@ MATCH
   ((:Account)-[:Transfers]->(mid:Account {is_blocked:true})){1,2}
   -[:Transfers]->(dst:Account)
 RETURN src.id AS src_account_id, dst.id AS dst_account_id
-
-/*---------------------------------+
- | src_account_id | dst_account_id |
- +---------------------------------+
- | 7              | 20             |
- | 7              | 20             |
- | 20             | 20             |
- +---------------------------------*/
 --
 QueryStatement [0-191]
   Query [0-191]
@@ -1336,13 +1189,6 @@ LET total_amount = SUM(e.amount)
 RETURN
   src.id AS src_account_id, dst.id AS dst_account_id,
   ARRAY_LENGTH(e) AS number_of_hops, total_amount
-
-/*-----------------------------------------------------------------+
- | src_account_id | dst_account_id | number_of_hops | total_amount |
- +-----------------------------------------------------------------+
- | 7              | 16             | 1              | 300          |
- | 7              | 20             | 2              | 600          |
- +-----------------------------------------------------------------*/
 --
 QueryStatement [0-269]
   Query [0-269]
@@ -1439,19 +1285,6 @@ GRAPH FinGraph
 MATCH TRAIL (a)->{2,}(b)
 RETURN DISTINCT a.id AS src_id, b.id AS dest_id
 ORDER BY src_id, dest_id
-
-/*------------------+
- | src_id | dest_id |
- +------------------+
- | 7      | 7       |
- | 7      | 16      |
- | 7      | 20      |
- | 16     | 7       |
- | 16     | 16      |
- | 20     | 7       |
- | 20     | 16      |
- | 20     | 20      |
- +------------------*/
 --
 QueryStatement [0-112]
   Query [0-112]
@@ -1505,14 +1338,6 @@ QueryStatement [0-112]
 GRAPH FinGraph
 MATCH (n:Person)
 RETURN n.name
-
-/*------+
- | name |
- +------+
- | Alex |
- | Dana |
- | Lee  |
- +------*/
 --
 QueryStatement [0-45]
   Query [0-45]
@@ -1543,17 +1368,6 @@ QueryStatement [0-45]
 GRAPH FinGraph
 MATCH (n:Person|Account)
 RETURN n.id
-
-/*----+
- | id |
- +----+
- | 7  |
- | 16 |
- | 20 |
- | 1  |
- | 2  |
- | 3  |
- +----*/
 --
 QueryStatement [0-51]
   Query [0-51]
@@ -1588,14 +1402,6 @@ GRAPH FinGraph
 MATCH ANY SHORTEST (a:Account {is_blocked:true})-[t:Transfers]->{1, 4} (b:Account)
 LET path_length = COUNT(t)
 RETURN a.id AS a_id, path_length, b.id AS b_id
-
-/*------+-------------+------+
- | a_id | path_length | b_id |
- +------+-------------+------+
- |   16 |           2 |   16 |
- |   16 |           2 |    7 |
- |   16 |           1 |   20 |
- +------+-------------+------*/
 --
 QueryStatement [0-171]
   Query [0-171]
@@ -1669,13 +1475,6 @@ QueryStatement [0-171]
 GRAPH FinGraph
 MATCH ANY (a:Account {is_blocked: true})->(mid:Account)->(b:Account)
 RETURN a.id AS a_id, mid.id AS mid_id, b.id AS b_id
-
-/*------+--------+------+
- | a_id | mid_id | b_id |
- +------+--------+------+
- | 16   | 20     | 16   |
- | 16   | 20     | 7    |
- +------+--------+------*/
 --
 QueryStatement [0-135]
   Query [0-135]
@@ -1737,15 +1536,128 @@ QueryStatement [0-135]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples_6
 GRAPH FinGraph
+MATCH ALL (a:Account {id: 20})-[t:Transfers]->(b:Account)
+RETURN a.id AS a_id, t.amount, b.id AS b_id
+
+-- Equivalent:
+--
+QueryStatement [0-116]
+  Query [0-116]
+    GqlQuery [0-116]
+      GraphTableQuery [0-116]
+        PathExpression [6-14]
+          Identifier(FinGraph) [6-14]
+        GqlOperatorList [15-116]
+          GqlOperatorList [15-116]
+            GqlMatch [15-72]
+              GraphPattern [21-72]
+                GraphPathPattern [21-72]
+                  GraphPathSearchPrefix [21-24]
+                  GraphNodePattern [25-45]
+                    GraphElementPatternFiller [26-44]
+                      Identifier(a) [26-27]
+                      GraphLabelFilter [27-35]
+                        GraphElementLabel [28-35]
+                          Identifier(Account) [28-35]
+                      GraphPropertySpecification [36-44]
+                        GraphPropertyNameAndValue [37-43]
+                          Identifier(id) [37-39]
+                          IntLiteral(20) [41-43]
+                  GraphEdgePattern [45-61]
+                    GraphElementPatternFiller [47-58]
+                      Identifier(t) [47-48]
+                      GraphLabelFilter [48-58]
+                        GraphElementLabel [49-58]
+                          Identifier(Transfers) [49-58]
+                  GraphNodePattern [61-72]
+                    GraphElementPatternFiller [62-71]
+                      Identifier(b) [62-63]
+                      GraphLabelFilter [63-71]
+                        GraphElementLabel [64-71]
+                          Identifier(Account) [64-71]
+            GqlReturn [73-116]
+              Select [80-116]
+                SelectList [80-116]
+                  SelectColumn [80-92]
+                    PathExpression [80-84]
+                      Identifier(a) [80-81]
+                      Identifier(id) [82-84]
+                    Alias [85-92]
+                      Identifier(a_id) [88-92]
+                  SelectColumn [94-102]
+                    PathExpression [94-102]
+                      Identifier(t) [94-95]
+                      Identifier(amount) [96-102]
+                  SelectColumn [104-116]
+                    PathExpression [104-108]
+                      Identifier(b) [104-105]
+                      Identifier(id) [106-108]
+                    Alias [109-116]
+                      Identifier(b_id) [112-116]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples_6
+GRAPH FinGraph
+MATCH (a:Account {id: 20})-[t:Transfers]->(b:Account)
+RETURN a.id AS a_id, t.amount, b.id AS b_id
+--
+QueryStatement [0-112]
+  Query [0-112]
+    GqlQuery [0-112]
+      GraphTableQuery [0-112]
+        PathExpression [6-14]
+          Identifier(FinGraph) [6-14]
+        GqlOperatorList [15-112]
+          GqlOperatorList [15-112]
+            GqlMatch [15-68]
+              GraphPattern [21-68]
+                GraphPathPattern [21-68]
+                  GraphNodePattern [21-41]
+                    GraphElementPatternFiller [22-40]
+                      Identifier(a) [22-23]
+                      GraphLabelFilter [23-31]
+                        GraphElementLabel [24-31]
+                          Identifier(Account) [24-31]
+                      GraphPropertySpecification [32-40]
+                        GraphPropertyNameAndValue [33-39]
+                          Identifier(id) [33-35]
+                          IntLiteral(20) [37-39]
+                  GraphEdgePattern [41-57]
+                    GraphElementPatternFiller [43-54]
+                      Identifier(t) [43-44]
+                      GraphLabelFilter [44-54]
+                        GraphElementLabel [45-54]
+                          Identifier(Transfers) [45-54]
+                  GraphNodePattern [57-68]
+                    GraphElementPatternFiller [58-67]
+                      Identifier(b) [58-59]
+                      GraphLabelFilter [59-67]
+                        GraphElementLabel [60-67]
+                          Identifier(Account) [60-67]
+            GqlReturn [69-112]
+              Select [76-112]
+                SelectList [76-112]
+                  SelectColumn [76-88]
+                    PathExpression [76-80]
+                      Identifier(a) [76-77]
+                      Identifier(id) [78-80]
+                    Alias [81-88]
+                      Identifier(a_id) [84-88]
+                  SelectColumn [90-98]
+                    PathExpression [90-98]
+                      Identifier(t) [90-91]
+                      Identifier(amount) [92-98]
+                  SelectColumn [100-112]
+                    PathExpression [100-104]
+                      Identifier(b) [100-101]
+                      Identifier(id) [102-104]
+                    Alias [105-112]
+                      Identifier(b_id) [108-112]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples_6
+GRAPH FinGraph
 MATCH ANY (a:Account {id: 20})->(mid:Account)->(a:Account)
 MATCH ALL (p:Person)->(mid)
 RETURN p.name, mid.id
-
-/*------+----+
- | name | id |
- +------+----+
- | Lee  | 16 |
- +------+----*/
 --
 QueryStatement [0-123]
   Query [0-123]
@@ -1894,12 +1806,6 @@ MATCH
   ANY (a:Account {id: 20})->(mid:Account)->(a:Account)->(mid:Account)->(a:Account),
   ALL (p:Person)->(a)
 RETURN p.name
-
-/*------+
- | name |
- +------+
- | Dana |
- +------*/
 --
 QueryStatement [12-152]
   Query [12-152]
@@ -1977,12 +1883,6 @@ GRAPH FinGraph
 MATCH ANY (a:Account {id: 20})->(mid:Account)->(a:Account)->(mid:Account)->(a:Account)
 MATCH ALL (p:Person)->(mid)
 RETURN p.name
-
-/*------+
- | name |
- +------+
- | Lee  |
- +------*/
 --
 QueryStatement [12-155]
   Query [12-155]
@@ -2172,20 +2072,6 @@ GRAPH FinGraph
 MATCH ANY CHEAPEST (a:Account)-[t:Transfers COST t.amount]->{1,3}(b:Account)
 LET total_cost = sum(t.amount)
 RETURN a.id AS a_id, b.id AS b_id, total_cost
-
-/*------+------+------------+
- | a_id | b_id | total_cost |
- +------+------+------------+
- | 7    | 7    | 900        |
- | 7    | 16   | 100        |
- | 7    | 20   | 400        |
- | 16   | 7    | 800        |
- | 16   | 16   | 500        |
- | 16   | 20   | 300        |
- | 20   | 7    | 500        |
- | 20   | 16   | 200        |
- | 20   | 20   | 500        |
- +------+------+------------*/
 --
 QueryStatement [0-168]
   Query [0-168]
@@ -2263,14 +2149,6 @@ MATCH
 WHERE a1.id < a4.id
 RETURN
   t1.id as transfer1_id, t2.id as transfer2_id, t3.id as transfer3_id
-
-/*--------------+--------------+--------------+
- | transfer1_id | transfer2_id | transfer3_id |
- +--------------+--------------+--------------+
- | 16           | 20           | 16           |
- | 7            | 16           | 20           |
- | 7            | 16           | 20           |
- +--------------+--------------+--------------*/
 --
 QueryStatement [0-227]
   Query [0-227]
@@ -2364,16 +2242,6 @@ MATCH
 RETURN
   a1.id as account1_id, a2.id as account2_id,
   a3.id as account3_id
-
-/*-------------+-------------+-------------+
- | account1_id | account2_id | account3_id |
- +-------------+-------------+-------------+
- | 20          | 7           | 16          |
- | 20          | 7           | 16          |
- | 7           | 16          | 20          |
- | 7           | 16          | 20          |
- | 16          | 20          | 7           |
- +-------------+-------------+-------------*/
 --
 QueryStatement [0-180]
   Query [0-180]
@@ -2448,13 +2316,6 @@ WHERE a1.id < a4.id
 RETURN
   t1.id as transfer1_id, t2.id as transfer2_id,
   t3.id as transfer3_id
-
-/*--------------+--------------+--------------+
- | transfer1_id | transfer2_id | transfer3_id |
- +--------------+--------------+--------------+
- | 7            | 16           | 20           |
- | 7            | 16           | 20           |
- +--------------+--------------+-------------*/
 --
 QueryStatement [0-230]
   Query [0-230]
@@ -2542,14 +2403,98 @@ QueryStatement [0-230]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples_7
 GRAPH FinGraph
+MATCH TRAIL (a1)-[t1]-(a2), (a2)-[t1]-(a3)
+RETURN COUNT(1) as num_paths
+--
+QueryStatement [0-86]
+  Query [0-86]
+    GqlQuery [0-86]
+      GraphTableQuery [0-86]
+        PathExpression [6-14]
+          Identifier(FinGraph) [6-14]
+        GqlOperatorList [15-86]
+          GqlOperatorList [15-86]
+            GqlMatch [15-57]
+              GraphPattern [21-57]
+                GraphPathPattern [21-41]
+                  GraphPathMode [21-26]
+                  GraphNodePattern [27-31]
+                    GraphElementPatternFiller [28-30]
+                      Identifier(a1) [28-30]
+                  GraphEdgePattern [31-37]
+                    GraphElementPatternFiller [33-35]
+                      Identifier(t1) [33-35]
+                  GraphNodePattern [37-41]
+                    GraphElementPatternFiller [38-40]
+                      Identifier(a2) [38-40]
+                GraphPathPattern [43-57]
+                  GraphNodePattern [43-47]
+                    GraphElementPatternFiller [44-46]
+                      Identifier(a2) [44-46]
+                  GraphEdgePattern [47-53]
+                    GraphElementPatternFiller [49-51]
+                      Identifier(t1) [49-51]
+                  GraphNodePattern [53-57]
+                    GraphElementPatternFiller [54-56]
+                      Identifier(a3) [54-56]
+            GqlReturn [58-86]
+              Select [65-86]
+                SelectList [65-86]
+                  SelectColumn [65-86]
+                    FunctionCall [65-73]
+                      PathExpression [65-70]
+                        Identifier(COUNT) [65-70]
+                      IntLiteral(1) [71-72]
+                    Alias [74-86]
+                      Identifier(num_paths) [77-86]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples_7
+GRAPH FinGraph
+MATCH TRAIL (a1)-[t1]-(a2)-[t1]-(a3)
+RETURN COUNT(1) as num_paths
+--
+QueryStatement [0-80]
+  Query [0-80]
+    GqlQuery [0-80]
+      GraphTableQuery [0-80]
+        PathExpression [6-14]
+          Identifier(FinGraph) [6-14]
+        GqlOperatorList [15-80]
+          GqlOperatorList [15-80]
+            GqlMatch [15-51]
+              GraphPattern [21-51]
+                GraphPathPattern [21-51]
+                  GraphPathMode [21-26]
+                  GraphNodePattern [27-31]
+                    GraphElementPatternFiller [28-30]
+                      Identifier(a1) [28-30]
+                  GraphEdgePattern [31-37]
+                    GraphElementPatternFiller [33-35]
+                      Identifier(t1) [33-35]
+                  GraphNodePattern [37-41]
+                    GraphElementPatternFiller [38-40]
+                      Identifier(a2) [38-40]
+                  GraphEdgePattern [41-47]
+                    GraphElementPatternFiller [43-45]
+                      Identifier(t1) [43-45]
+                  GraphNodePattern [47-51]
+                    GraphElementPatternFiller [48-50]
+                      Identifier(a3) [48-50]
+            GqlReturn [52-80]
+              Select [59-80]
+                SelectList [59-80]
+                  SelectColumn [59-80]
+                    FunctionCall [59-67]
+                      PathExpression [59-64]
+                        Identifier(COUNT) [59-64]
+                      IntLiteral(1) [65-66]
+                    Alias [68-80]
+                      Identifier(num_paths) [71-80]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-patterns#examples_7
+GRAPH FinGraph
 MATCH TRAIL (a1:Account)-[t1:Transfers]->{4}(a5:Account)
 RETURN COUNT(1) as num_paths
-
-/*-----------+
- | num_paths |
- +-----------+
- | 6         |
- +-----------*/
 --
 QueryStatement [0-100]
   Query [0-100]
@@ -2599,12 +2544,6 @@ QueryStatement [0-100]
 GRAPH FinGraph
 MATCH TRAIL (WALK (a1:Account)-[t1:Transfers]->{4}(a5:Account))
 RETURN COUNT(1) as num_paths
-
-/*-----------+
- | num_paths |
- +-----------+
- | 6         |
- +-----------*/
 --
 QueryStatement [0-107]
   Query [0-107]
@@ -2658,12 +2597,6 @@ MATCH
   (TRAIL (a1:Account)-[t1:Transfers]->{3}(a4:Account))
   -[t4:Transfers]->(a5:Account)
 RETURN COUNT(1) as num_paths
-
-/*-----------+
- | num_paths |
- +-----------+
- | 14        |
- +-----------*/
 --
 QueryStatement [0-136]
   Query [0-136]
@@ -2726,12 +2659,6 @@ QueryStatement [0-136]
 GRAPH FinGraph
 MATCH (TRAIL -[t1:Transfers]->()-[t2:Transfers]->()-[t3:Transfers]->){2}
 RETURN COUNT(1) as num_paths
-
-/*-----------+
- | num_paths |
- +-----------+
- | 26        |
- +-----------*/
 --
 QueryStatement [0-116]
   Query [0-116]
@@ -2784,12 +2711,6 @@ QueryStatement [0-116]
 GRAPH FinGraph
 MATCH TRAIL -[:Transfers]->{6}
 RETURN COUNT(1) as num_paths
-
-/*-----------+
- | num_paths |
- +-----------+
- | 0         |
- +-----------*/
 --
 QueryStatement [0-74]
   Query [0-74]
@@ -2863,12 +2784,6 @@ QueryStatement [9-85]
 GRAPH FinGraph
 MATCH ANY SHORTEST (TRAIL ->{1,4})
 RETURN COUNT(1) as num_paths
-
-/*-----------+
- | num_paths |
- +-----------+
- | 18        |
- +-----------*/
 --
 QueryStatement [0-78]
   Query [0-78]

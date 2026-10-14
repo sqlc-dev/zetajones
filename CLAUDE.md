@@ -64,18 +64,25 @@ A `.test` file with no sidecar passes completely.
 ## Spanner Corpus
 
 `parser/testdata/spanner/` holds golden cases generated (not vendored) from the
-SQL examples in Cloud Spanner's GoogleSQL reference
-(docs.cloud.google.com/spanner/docs/reference/standard-sql/): DDL, DML,
-queries, pipe syntax, procedural language, graph and function pages. The
-parser tests run them alongside the vendored files, as subtests named
+GoogleSQL examples in Cloud Spanner's docs: the reference pages
+(docs.cloud.google.com/spanner/docs/reference/standard-sql/) at the top level
+and the guide pages under `guides/` (page list in `cmd/spanner-corpus/pages.go`).
+The parser tests run them alongside the vendored files, as subtests named
 `spanner/<page>`, with the same `parse_todo` sidecars.
 
 - `<page>.test` — examples the reference parser accepts (statement, script
   or expression mode), with its output as the golden tree.
-- `<page>.rejected.sql` — examples the reference parser rejects. These are
-  Spanner-only syntax GoogleSQL's parser lacks (e.g. `GRANT ... TO ROLE`,
-  `CREATE PROTO BUNDLE`, `vector_length`), doc typos, or grammar/fragment
-  snippets. They have no golden output; triage them by hand.
+- `<page>.spanner.sql` — Spanner-only syntax the reference parser rejects
+  (e.g. `GRANT ... TO ROLE`, change streams, `CREATE PROTO BUNDLE`,
+  `vector_length`). No golden output: this is the backlog of syntax that
+  needs a design decision before zetajones can parse it.
+- `<page>.rejected.sql` — rejected examples not yet triaged. Classify each by
+  id in `cmd/spanner-corpus/triage.txt` as `spanner`, `typo` (broken in the
+  docs) or `fragment`, then regenerate; this file should not exist after.
+
+Grammar templates, partial clauses, bare graph patterns and examples marked
+`-- Error:` are dropped automatically (see `fragmentReason`; `-v` lists
+them), as are PostgreSQL tabs and query-result comments.
 
 Regenerate (pages are cached in `.spanner-docs/`; `-refresh` re-downloads),
 then re-record the todos, since regeneration renumbers cases and drops the
@@ -86,7 +93,9 @@ go run ./cmd/spanner-corpus
 go test ./parser -check-parse
 ```
 
-Do not hand-edit these files; change `cmd/spanner-corpus` instead.
+`go run ./cmd/spanner-corpus -discover` lists guide pages with GoogleSQL
+examples that `pages.go` does not include yet. Do not hand-edit generated
+files; change `cmd/spanner-corpus` instead.
 
 ## Alternation Groups
 

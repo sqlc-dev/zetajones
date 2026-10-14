@@ -73,7 +73,7 @@ func main() {
 	if err == nil {
 		// Generated Spanner corpus (see cmd/spanner-corpus).
 		var spanner []string
-		spanner, err = filepath.Glob(filepath.Join("parser", "testdata", "spanner", "*.test"))
+		spanner, err = testfile.FindFiles(filepath.Join("parser", "testdata", "spanner"))
 		files = append(files, spanner...)
 	}
 	if err != nil || len(files) == 0 {

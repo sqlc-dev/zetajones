@@ -2,16 +2,10 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#stddev_samp
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, 14, 18]) AS x
-
-/*---------+
- | results |
- +---------+
- | 4       |
- +---------*/
 --
 QueryStatement [0-63]
   Query [0-63]
@@ -38,12 +32,6 @@ QueryStatement [0-63]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#stddev_samp
 SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, 14, NULL]) AS x
-
-/*--------------------+
- | results            |
- +--------------------+
- | 2.8284271247461903 |
- +--------------------*/
 --
 QueryStatement [0-65]
   Query [0-65]
@@ -70,12 +58,6 @@ QueryStatement [0-65]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#stddev_samp
 SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, NULL]) AS x
-
-/*---------+
- | results |
- +---------+
- | NULL    |
- +---------*/
 --
 QueryStatement [0-61]
   Query [0-61]
@@ -101,12 +83,6 @@ QueryStatement [0-61]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#stddev_samp
 SELECT STDDEV_SAMP(x) AS results FROM UNNEST([NULL]) AS x
-
-/*---------+
- | results |
- +---------+
- | NULL    |
- +---------*/
 --
 QueryStatement [0-57]
   Query [0-57]
@@ -131,12 +107,6 @@ QueryStatement [0-57]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#stddev_samp
 SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, 14, CAST('Infinity' as FLOAT64)]) AS x
-
-/*---------+
- | results |
- +---------+
- | NaN     |
- +---------*/
 --
 QueryStatement [0-88]
   Query [0-88]
@@ -168,12 +138,6 @@ QueryStatement [0-88]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#var_samp
 SELECT VAR_SAMP(x) AS results FROM UNNEST([10, 14, 18]) AS x
-
-/*---------+
- | results |
- +---------+
- | 16      |
- +---------*/
 --
 QueryStatement [0-60]
   Query [0-60]
@@ -200,12 +164,6 @@ QueryStatement [0-60]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#var_samp
 SELECT VAR_SAMP(x) AS results FROM UNNEST([10, 14, NULL]) AS x
-
-/*---------+
- | results |
- +---------+
- | 8       |
- +---------*/
 --
 QueryStatement [0-62]
   Query [0-62]
@@ -232,12 +190,6 @@ QueryStatement [0-62]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#var_samp
 SELECT VAR_SAMP(x) AS results FROM UNNEST([10, NULL]) AS x
-
-/*---------+
- | results |
- +---------+
- | NULL    |
- +---------*/
 --
 QueryStatement [0-58]
   Query [0-58]
@@ -263,12 +215,6 @@ QueryStatement [0-58]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#var_samp
 SELECT VAR_SAMP(x) AS results FROM UNNEST([NULL]) AS x
-
-/*---------+
- | results |
- +---------+
- | NULL    |
- +---------*/
 --
 QueryStatement [0-54]
   Query [0-54]
@@ -293,12 +239,6 @@ QueryStatement [0-54]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/statistical_aggregate_functions#var_samp
 SELECT VAR_SAMP(x) AS results FROM UNNEST([10, 14, CAST('Infinity' as FLOAT64)]) AS x
-
-/*---------+
- | results |
- +---------+
- | NaN     |
- +---------*/
 --
 QueryStatement [0-85]
   Query [0-85]

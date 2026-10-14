@@ -2,19 +2,13 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/operators
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/operators#field_access_operator
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 SELECT
   STRUCT(
     STRUCT('Yonge Street' AS street, 'Canada' AS country)
       AS address).address.country
-
-/*---------+
- | country |
- +---------+
- | Canada  |
- +---------*/
 --
 QueryStatement [0-108]
   Query [0-108]
@@ -47,12 +41,6 @@ SELECT
 \  ["coffee", "tea", "milk"][OFFSET(0)] AS item_offset,
 \  ["coffee", "tea", "milk"][ORDINAL(1)] AS item_ordinal,
 \  ["coffee", "tea", "milk"][SAFE_OFFSET(6)] AS item_safe_offset
-
-/*---------------------+-------------+--------------+------------------+
- | item_array          | item_offset | item_ordinal | item_safe_offset |
- +---------------------+-------------+--------------+------------------+
- | [coffee, tea, milk] | coffee      | coffee       | NULL             |
- +---------------------+-------------+--------------+------------------*/
 --
 QueryStatement [0-225]
   Query [0-225]
@@ -191,12 +179,6 @@ QueryStatement [0-285]
 SELECT
   DATE "2021-05-20" - DATE "2020-04-19" AS date_diff,
   TIMESTAMP "2021-06-01 12:34:56.789" - TIMESTAMP "2021-05-31 00:00:00" AS time_diff
-
-/*-------------------+------------------------+
- | date_diff         | time_diff              |
- +-------------------+------------------------+
- | 0-0 396 0:0:0     | 0-0 0 36:34:56.789     |
- +-------------------+------------------------*/
 --
 QueryStatement [0-145]
   Query [0-145]
@@ -259,12 +241,6 @@ SELECT
   INTERVAL 35 SECOND * 4 AS mul2,
   INTERVAL 10 YEAR / 3 AS div1,
   INTERVAL 1 MONTH / 12 AS div2
-
-/*----------------+--------------+-------------+--------------+
- | mul1           | mul2         | div1        | div2         |
- +----------------+--------------+-------------+--------------+
- | 0-0 0 10:20:30 | 0-0 0 0:2:20 | 3-4 0 0:0:0 | 0-0 2 12:0:0 |
- +----------------+--------------+-------------+--------------*/
 --
 QueryStatement [0-152]
   Query [0-152]
@@ -311,12 +287,6 @@ SELECT 'a' FROM entry_table WHERE entry = 'a'
 -- a => 'a' = 'a' => TRUE
 -- b => 'b' = 'a' => FALSE
 -- NULL => NULL = 'a' => NULL
-
-/*-------+
- | entry |
- +-------+
- | a     |
- +-------*/
 --
 QueryStatement [0-45]
   Query [0-45]
@@ -342,13 +312,6 @@ SELECT entry FROM entry_table WHERE NOT (entry = 'a')
 -- a => NOT('a' = 'a') => NOT(TRUE) => FALSE
 -- b => NOT('b' = 'a') => NOT(FALSE) => TRUE
 -- NULL => NOT(NULL = 'a') => NOT(NULL) => NULL
-
-/*-------+
- | entry |
- +-------+
- | b     |
- | c     |
- +-------*/
 --
 QueryStatement [0-53]
   Query [0-53]
@@ -375,12 +338,6 @@ SELECT entry FROM entry_table WHERE entry IS NULL
 -- a => 'a' IS NULL => FALSE
 -- b => 'b' IS NULL => FALSE
 -- NULL => NULL IS NULL => TRUE
-
-/*-------+
- | entry |
- +-------+
- | NULL  |
- +-------*/
 --
 QueryStatement [0-49]
   Query [0-49]

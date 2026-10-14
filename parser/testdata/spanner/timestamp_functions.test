@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/timestamp_functions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/timestamp_functions#current_timestamp
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 [mode=expression]
@@ -44,12 +44,6 @@ SELECT
     DAY
     FROM TIMESTAMP('2008-12-25 05:30:00+00') AT TIME ZONE 'America/Los_Angeles')
     AS the_day_california
-
-/*-------------+--------------------+
- | the_day_utc | the_day_california |
- +-------------+--------------------+
- | 25          | 24                 |
- +-------------+--------------------*/
 --
 QueryStatement [0-236]
   Query [0-236]
@@ -91,11 +85,6 @@ SELECT
 
 -- Display of results may differ, depending upon the environment and
 -- time zone where this query was executed.
-/*---------+---------+------+------+
- | isoyear | isoweek | year | week |
- +---------+---------+------+------+
- | 2005    | 1       | 2005 | 1    |
- +---------+---------+------+------*/
 --
 QueryStatement [0-281]
   Query [0-281]
@@ -156,11 +145,6 @@ SELECT
 
 -- Display of results may differ, depending upon the environment and time zone
 -- where this query was executed.
-/*---------+---------+------+------+
- | isoyear | isoweek | year | week |
- +---------+---------+------+------+
- | 2008    | 1       | 2007 | 52    |
- +---------+---------+------+------*/
 --
 QueryStatement [0-339]
   Query [0-339]
@@ -229,11 +213,6 @@ SELECT
 
 -- Display of results may differ, depending upon the environment and time zone
 -- where this query was executed.
-/*---------+---------+------+------+
- | isoyear | isoweek | year | week |
- +---------+---------+------+------+
- | 2009    | 1       | 2009 | 0    |
- +---------+---------+------+------*/
 --
 QueryStatement [0-339]
   Query [0-339]
@@ -302,11 +281,6 @@ SELECT
 
 -- Display of results may differ, depending upon the environment and time zone
 -- where this query was executed.
-/*---------+---------+------+------+
- | isoyear | isoweek | year | week |
- +---------+---------+------+------+
- | 2009    | 53      | 2009 | 52   |
- +---------+---------+------+------*/
 --
 QueryStatement [0-339]
   Query [0-339]
@@ -375,11 +349,6 @@ SELECT
 
 -- Display of results may differ, depending upon the environment and time zone
 -- where this query was executed.
-/*---------+---------+------+------+
- | isoyear | isoweek | year | week |
- +---------+---------+------+------+
- | 2017    | 1       | 2017 | 1    |
- +---------+---------+------+------*/
 --
 QueryStatement [0-339]
   Query [0-339]
@@ -448,11 +417,6 @@ SELECT
 
 -- Display of results may differ, depending upon the environment and time zone
 -- where this query was executed.
-/*---------+---------+------+------+
- | isoyear | isoweek | year | week |
- +---------+---------+------+------+
- | 2017    | 21      | 2017 | 21   |
- +---------+---------+------+------*/
 --
 QueryStatement [0-339]
   Query [0-339]

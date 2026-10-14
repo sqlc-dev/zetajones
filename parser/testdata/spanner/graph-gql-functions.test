@@ -18,14 +18,6 @@ FunctionCall [0-33]
 GRAPH FinGraph
 MATCH (:Person)-[o:Owns]->(a:Account)
 RETURN a.id AS account_id, DESTINATION_NODE_ID(o) AS destination_node_id
-
-/*------------------------------------------+
- |account_id | destination_node_id          |
- +-----------|------------------------------+
- | 7         | mUZpbkdyYXBoLkFjY291bnQAeJEO |
- | 16        | mUZpbkdyYXBoLkFjY291bnQAeJEg |
- | 20        | mUZpbkdyYXBoLkFjY291bnQAeJEo |
- +------------------------------------------*/
 --
 QueryStatement [0-125]
   Query [0-125]
@@ -88,24 +80,6 @@ GRAPH FinGraph
 MATCH p=(src:Account)-[t1:Transfers]->(mid:Account)-[t2:Transfers]->(dst:Account)
 LET es = EDGES(p)
 RETURN ARRAY_CONCAT(ARRAY_TRANSFORM(es, e -> e.Id), [dst.Id]) as ids_in_path
-
-/*-------------+
- | ids_in_path |
- +-------------+
- | [16,20,7]   |
- +-------------+
- | [20,7,16]   |
- +-------------+
- | [20,7,16]   |
- +-------------+
- | [16,20,16]  |
- +-------------+
- | [7,16,20]   |
- +-------------+
- | [7,16,20]   |
- +-------------+
- | [20,16,20]  |
- +-------------*/
 --
 QueryStatement [0-191]
   Query [0-191]
@@ -269,14 +243,6 @@ RETURN
   p.name AS name,
   ELEMENT_DEFINITION_NAME(p) AS node_element_definition_name,
   ELEMENT_DEFINITION_NAME(o) AS edge_element_definition_name
-
-/*--------------------------------------------------------------------+
- | name | node_element_definition_name | edge_element_definition_name |
- +------|------------------------------|------------------------------+
- | Alex | Person                       | Owns                         |
- | Dana | Person                       | Owns                         |
- | Lee  | Person                       | Owns                         |
- +--------------------------------------------------------------------*/
 --
 QueryStatement [0-200]
   Query [0-200]
@@ -346,14 +312,6 @@ FunctionCall [0-19]
 GRAPH FinGraph
 MATCH (p:Person)-[o:Owns]->(:Account)
 RETURN p.name AS name, ELEMENT_ID(p) AS node_element_id, ELEMENT_ID(o) AS edge_element_id
-
-/*--------------------------------------------------------------------------------------------------------------------------------------------+
- | name | node_element_id              | edge_element_id                                                                                      |
- +------|------------------------------|------------------------------------------------------------------------------------------------------+
- | Alex | mUZpbkdyYXBoLlBlcnNvbgB4kQI= | mUZpbkdyYXBoLlBlcnNvbk93bkFjY291bnQAeJECkQ6ZRmluR3JhcGguUGVyc29uAHiRAplGaW5HcmFwaC5BY2NvdW50AHiRDg== |
- | Dana | mUZpbkdyYXBoLlBlcnNvbgB4kQQ= | mUZpbkdyYXBoLlBlcnNvbk93bkFjY291bnQAeJEGkSCZRmluR3JhcGguUGVyc29uAHiRBplGaW5HcmFwaC5BY2NvdW50AHiRIA== |
- | Lee  | mUZpbkdyYXBoLlBlcnNvbgB4kQY= | mUZpbkdyYXBoLlBlcnNvbk93bkFjY291bnQAeJEEkSiZRmluR3JhcGguUGVyc29uAHiRBJlGaW5HcmFwaC5BY2NvdW50AHiRKA== |
- +--------------------------------------------------------------------------------------------------------------------------------------------*/
 --
 QueryStatement [0-142]
   Query [0-142]
@@ -423,18 +381,6 @@ FunctionCall [0-22]
 GRAPH FinGraph
 MATCH p=(src:Account)-[t1:Transfers]->(mid:Account)-[t2:Transfers]->(dst:Account)
 RETURN src.id AS source_account_id, IS_ACYCLIC(p) AS is_acyclic_path
-
-/*-------------------------------------+
- | source_account_id | is_acyclic_path |
- +-------------------------------------+
- | 16                | TRUE            |
- | 20                | TRUE            |
- | 20                | TRUE            |
- | 16                | FALSE           |
- | 7                 | TRUE            |
- | 7                 | TRUE            |
- | 20                | FALSE           |
- +-------------------------------------*/
 --
 QueryStatement [0-165]
   Query [0-165]
@@ -514,15 +460,6 @@ MATCH p=(a1:Account)-[t1:Transfers where t1.amount > 200]->
 RETURN
   IS_SIMPLE(p) AS is_simple_path,
   a1.id as a1_id, a2.id as a2_id, a3.id as a3_id, a4.id as a4_id
-
-/*----------------+-------+-------+-------+-------+
- | is_simple_path | a1_id | a2_id | a3_id | a4_id |
- +----------------+-------+-------+-------+-------+
- | TRUE           | 7     | 16    | 20    | 7     |
- | TRUE           | 16    | 20    | 7     | 16    |
- | FALSE          | 7     | 16    | 20    | 16    |
- | TRUE           | 20    | 7     | 16    | 20    |
- +----------------+-------+-------+-------+-------*/
 --
 QueryStatement [0-312]
   Query [0-312]
@@ -650,14 +587,6 @@ MATCH
 WHERE a1.id < a4.id
 RETURN
   IS_TRAIL(p) AS is_trail_path, t1.id as t1_id, t2.id as t2_id, t3.id as t3_id
-
-/*---------------+-------+-------+-------+
- | is_trail_path | t1_id | t2_id | t3_id |
- +---------------+-------+-------+-------+
- | FALSE         | 16    | 20    | 16    |
- | TRUE          | 7     | 16    | 20    |
- | TRUE          | 7     | 16    | 20    |
- +---------------+-------+-------+-------*/
 --
 QueryStatement [0-235]
   Query [0-235]
@@ -874,13 +803,6 @@ RETURN
   JSON_QUERY(TO_JSON(p)[0], '$.labels') AS element_a,
   JSON_QUERY(TO_JSON(p)[1], '$.labels') AS element_b,
   JSON_QUERY(TO_JSON(p)[2], '$.labels') AS element_c
-
-/*-------------------------------------------+
- | element_a   | element_b     | element_c   |
- +-------------------------------------------+
- | ["Account"] | ["Transfers"] | ["Account"] |
- | ...         | ...           | ...         |
- +-------------------------------------------*/
 --
 QueryStatement [0-298]
   Query [0-298]
@@ -1406,18 +1328,6 @@ FunctionCall [0-23]
 GRAPH FinGraph
 MATCH p=(src:Account)-[t1:Transfers]->(mid:Account)-[t2:Transfers]->(dst:Account)
 RETURN PATH_LENGTH(p) AS results
-
-/*---------+
- | results |
- +---------+
- | 2       |
- | 2       |
- | 2       |
- | 2       |
- | 2       |
- | 2       |
- | 2       |
- +---------*/
 --
 QueryStatement [0-129]
   Query [0-129]
@@ -1487,17 +1397,6 @@ FunctionCall [0-23]
 GRAPH FinGraph
 MATCH (n:Person|Account)
 RETURN PROPERTY_NAMES(n) AS property_names, n.id
-
-/*-----------------------------------------------+
- | label                                    | id |
- +-----------------------------------------------+
- | [create_time, id, is_blocked, nick_name] | 7  |
- | [create_time, id, is_blocked, nick_name] | 16 |
- | [create_time, id, is_blocked, nick_name] | 20 |
- | [birthday, city, country, id, name]      | 1  |
- | [birthday, city, country, id, name]      | 2  |
- | [birthday, city, country, id, name]      | 3  |
- +-----------------------------------------------*/
 --
 QueryStatement [0-88]
   Query [0-88]
@@ -1549,14 +1448,6 @@ FunctionCall [0-28]
 GRAPH FinGraph
 MATCH (p:Person)-[o:Owns]->(:Account)
 RETURN p.name AS name, SOURCE_NODE_ID(o) AS source_node_id
-
-/*-------------------------------------+
- | name | source_node_id               |
- +------|------------------------------+
- | Alex | mUZpbkdyYXBoLlBlcnNvbgB4kQI= |
- | Dana | mUZpbkdyYXBoLlBlcnNvbgB4kQQ= |
- | Lee  | mUZpbkdyYXBoLlBlcnNvbgB4kQY= |
- +-------------------------------------*/
 --
 QueryStatement [0-111]
   Query [0-111]
@@ -1609,12 +1500,6 @@ GRAPH FinGraph
 LET arr = [1, 2, 3]
 LET total = SUM(arr)
 RETURN total
-
-/*-------+
- | total |
- +-------+
- | 6     |
- +-------*/
 --
 QueryStatement [0-68]
   Query [0-68]
@@ -1653,12 +1538,6 @@ GRAPH FinGraph
 LET arr = [STRUCT(1 as x, 10 as y), STRUCT(2, 9), STRUCT(3, 8)]
 LET total = SUM(arr.x)
 RETURN total
-
-/*-------+
- | total |
- +-------+
- | 6     |
- +-------*/
 --
 QueryStatement [0-114]
   Query [0-114]
@@ -1714,12 +1593,6 @@ GRAPH FinGraph
 LET arr = [STRUCT(1 as x, 10 as y), STRUCT(2, 9), STRUCT(3, 8)]
 LET avg_sum = AVG(arr.x + arr.y)
 RETURN avg_sum
-
-/*---------+
- | avg_sum |
- +---------+
- | 11      |
- +---------*/
 --
 QueryStatement [0-126]
   Query [0-126]
@@ -1779,12 +1652,6 @@ GRAPH FinGraph
 LET arr = [STRUCT(1 as x, 9 as y), STRUCT(2, 9), STRUCT(4, 8)]
 LET result = ARRAY_AGG(arr.x + arr.y)
 RETURN result
-
-/*--------------+
- | result       |
- +--------------+
- | [10, 11, 12] |
- +--------------*/
 --
 QueryStatement [0-129]
   Query [0-129]
@@ -1995,15 +1862,6 @@ LET num_transfers = COUNT(e)
 LET unique_amount_transfers = COUNT(DISTINCT e.amount)
 FILTER unique_amount_transfers != num_transfers
 RETURN src.id as src_id, num_transfers, unique_amount_transfers, dst.id AS destination_account_id
-
-/*---------------------------------------------------------------------------+
- | src_id | num_transfers | unique_transfers_amount | destination_account_id |
- +---------------------------------------------------------------------------+
- | 7      | 3             | 2                       | 16                     |
- | 20     | 3             | 2                       | 16                     |
- | 7      | 2             | 1                       | 20                     |
- | 16     | 3             | 2                       | 20                     |
- +---------------------------------------------------------------------------*/
 --
 QueryStatement [0-316]
   Query [0-316]
@@ -2101,13 +1959,6 @@ LET total_amount = SUM(e.amount)
 RETURN
   src.id AS source_account_id, dst.id AS destination_account_id,
   ARRAY_AGG(total_amount) as total_amounts_per_path
-
-/*---------------------------------------------------------------------+
- | source_account_id | destination_account_id | total_amounts_per_path |
- +---------------------------------------------------------------------+
- | 7                 | 16                     | [300, 100]             |
- | 7                 | 20                     | [600, 400]             |
- +---------------------------------------------------------------------*/
 --
 QueryStatement [0-233]
   Query [0-233]

@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#debug_tokenlist
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 [mode=expression]
@@ -398,13 +398,6 @@ SELECT
   a.Description, SCORE_NGRAMS(a.DescriptionSubstrTokens, 'clasic albun') AS Score
 FROM
   Albums a
-
-/*-----------------+---------------------+
- | Description     | Score               |
- +-----------------+---------------------+
- | rock album      | 0.14285714285714285 |
- | classical album | 0.38095238095238093 |
- +-----------------+---------------------*/
 --
 QueryStatement [0-104]
   Query [0-104]
@@ -438,12 +431,6 @@ FROM Albums a
 WHERE SEARCH_NGRAMS(a.DescriptionSubstrTokens, 'clasic albun')
 ORDER BY SCORE_NGRAMS(a.DescriptionSubstrTokens, 'clasic albun') DESC
 LIMIT 1
-
-/*-----------------+
- | Description     |
- +-----------------+
- | classical album |
- +-----------------*/
 --
 QueryStatement [0-175]
   Query [0-175]
@@ -1819,112 +1806,94 @@ QueryStatement [50-116]
           IntLiteral(2) [115-116]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#tokenize_json
-/*---------+
- | AlbumId |
- +---------+
- | 2       |
- +---------*/
-
 -- Query for albums available on vinyl.
 SELECT a.AlbumId
 FROM Albums a
 WHERE JSON_CONTAINS(a.Metadata, JSON '{"AvailableFormats": ["vinyl"]}')
 --
-QueryStatement [107-209]
-  Query [107-209]
-    Select [107-209]
-      SelectList [114-123]
-        SelectColumn [114-123]
-          PathExpression [114-123]
-            Identifier(a) [114-115]
-            Identifier(AlbumId) [116-123]
-      FromClause [124-137]
-        TablePathExpression [129-137]
-          PathExpression [129-135]
-            Identifier(Albums) [129-135]
-          Alias [136-137]
-            Identifier(a) [136-137]
-      WhereClause [138-209]
-        FunctionCall [144-209]
-          PathExpression [144-157]
-            Identifier(JSON_CONTAINS) [144-157]
-          PathExpression [158-168]
-            Identifier(a) [158-159]
-            Identifier(Metadata) [160-168]
-          JSONLiteral [170-208]
-            StringLiteral [175-208]
-              StringLiteralComponent('{"AvailableFormats": ["vinyl"]}') [175-208]
+QueryStatement [40-142]
+  Query [40-142]
+    Select [40-142]
+      SelectList [47-56]
+        SelectColumn [47-56]
+          PathExpression [47-56]
+            Identifier(a) [47-48]
+            Identifier(AlbumId) [49-56]
+      FromClause [57-70]
+        TablePathExpression [62-70]
+          PathExpression [62-68]
+            Identifier(Albums) [62-68]
+          Alias [69-70]
+            Identifier(a) [69-70]
+      WhereClause [71-142]
+        FunctionCall [77-142]
+          PathExpression [77-90]
+            Identifier(JSON_CONTAINS) [77-90]
+          PathExpression [91-101]
+            Identifier(a) [91-92]
+            Identifier(Metadata) [93-101]
+          JSONLiteral [103-141]
+            StringLiteral [108-141]
+              StringLiteralComponent('{"AvailableFormats": ["vinyl"]}') [108-141]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#tokenize_json
-/*---------+
- | AlbumId |
- +---------+
- | 1       |
- +---------*/
-
 -- Query for albums with a regional release in Japan.
 SELECT a.AlbumId
 FROM Albums a
 WHERE JSON_CONTAINS(a.Metadata, JSON '{"RegionalReleases": [{"Region": "Japan"}]}')
 --
-QueryStatement [121-235]
-  Query [121-235]
-    Select [121-235]
-      SelectList [128-137]
-        SelectColumn [128-137]
-          PathExpression [128-137]
-            Identifier(a) [128-129]
-            Identifier(AlbumId) [130-137]
-      FromClause [138-151]
-        TablePathExpression [143-151]
-          PathExpression [143-149]
-            Identifier(Albums) [143-149]
-          Alias [150-151]
-            Identifier(a) [150-151]
-      WhereClause [152-235]
-        FunctionCall [158-235]
-          PathExpression [158-171]
-            Identifier(JSON_CONTAINS) [158-171]
-          PathExpression [172-182]
-            Identifier(a) [172-173]
-            Identifier(Metadata) [174-182]
-          JSONLiteral [184-234]
-            StringLiteral [189-234]
-              StringLiteralComponent('{"RegionalReleases": [{"Region": "Japan"}]}') [189-234]
+QueryStatement [54-168]
+  Query [54-168]
+    Select [54-168]
+      SelectList [61-70]
+        SelectColumn [61-70]
+          PathExpression [61-70]
+            Identifier(a) [61-62]
+            Identifier(AlbumId) [63-70]
+      FromClause [71-84]
+        TablePathExpression [76-84]
+          PathExpression [76-82]
+            Identifier(Albums) [76-82]
+          Alias [83-84]
+            Identifier(a) [83-84]
+      WhereClause [85-168]
+        FunctionCall [91-168]
+          PathExpression [91-104]
+            Identifier(JSON_CONTAINS) [91-104]
+          PathExpression [105-115]
+            Identifier(a) [105-106]
+            Identifier(Metadata) [107-115]
+          JSONLiteral [117-167]
+            StringLiteral [122-167]
+              StringLiteralComponent('{"RegionalReleases": [{"Region": "Japan"}]}') [122-167]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#tokenize_json
-/*---------+
- | AlbumId |
- +---------+
- | 3       |
- +---------*/
-
 -- Query for reissued albums (those with a reissue date).
 SELECT a.AlbumId
 FROM Albums a
 WHERE a.Metadata.ReissueDate IS NOT NULL
 --
-QueryStatement [125-196]
-  Query [125-196]
-    Select [125-196]
-      SelectList [132-141]
-        SelectColumn [132-141]
-          PathExpression [132-141]
-            Identifier(a) [132-133]
-            Identifier(AlbumId) [134-141]
-      FromClause [142-155]
-        TablePathExpression [147-155]
-          PathExpression [147-153]
-            Identifier(Albums) [147-153]
-          Alias [154-155]
-            Identifier(a) [154-155]
-      WhereClause [156-196]
-        BinaryExpression(IS NOT) [162-196]
-          PathExpression [162-184]
-            Identifier(a) [162-163]
-            Identifier(Metadata) [164-172]
-            Identifier(ReissueDate) [173-184]
-          NullLiteral(NULL) [192-196]
+QueryStatement [58-129]
+  Query [58-129]
+    Select [58-129]
+      SelectList [65-74]
+        SelectColumn [65-74]
+          PathExpression [65-74]
+            Identifier(a) [65-66]
+            Identifier(AlbumId) [67-74]
+      FromClause [75-88]
+        TablePathExpression [80-88]
+          PathExpression [80-86]
+            Identifier(Albums) [80-86]
+          Alias [87-88]
+            Identifier(a) [87-88]
+      WhereClause [89-129]
+        BinaryExpression(IS NOT) [95-129]
+          PathExpression [95-117]
+            Identifier(a) [95-96]
+            Identifier(Metadata) [97-105]
+            Identifier(ReissueDate) [106-117]
+          NullLiteral(NULL) [125-129]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#tokenize_ngrams
 CREATE TABLE Albums (
@@ -2191,41 +2160,35 @@ QueryStatement [0-78]
             IntLiteral(3) [75-76]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#tokenize_number
-/*---------+
- | AlbumId |
- +---------+
- | 1       |
- +---------*/
-
 SELECT a.AlbumId
 FROM Albums a
 WHERE ARRAY_INCLUDES_ANY(a.TrackRating, [3, 4, 5])
 --
-QueryStatement [67-148]
-  Query [67-148]
-    Select [67-148]
-      SelectList [74-83]
-        SelectColumn [74-83]
-          PathExpression [74-83]
-            Identifier(a) [74-75]
-            Identifier(AlbumId) [76-83]
-      FromClause [84-97]
-        TablePathExpression [89-97]
-          PathExpression [89-95]
-            Identifier(Albums) [89-95]
-          Alias [96-97]
-            Identifier(a) [96-97]
-      WhereClause [98-148]
-        FunctionCall [104-148]
-          PathExpression [104-122]
-            Identifier(ARRAY_INCLUDES_ANY) [104-122]
-          PathExpression [123-136]
-            Identifier(a) [123-124]
-            Identifier(TrackRating) [125-136]
-          ArrayConstructor [138-147]
-            IntLiteral(3) [139-140]
-            IntLiteral(4) [142-143]
-            IntLiteral(5) [145-146]
+QueryStatement [0-81]
+  Query [0-81]
+    Select [0-81]
+      SelectList [7-16]
+        SelectColumn [7-16]
+          PathExpression [7-16]
+            Identifier(a) [7-8]
+            Identifier(AlbumId) [9-16]
+      FromClause [17-30]
+        TablePathExpression [22-30]
+          PathExpression [22-28]
+            Identifier(Albums) [22-28]
+          Alias [29-30]
+            Identifier(a) [29-30]
+      WhereClause [31-81]
+        FunctionCall [37-81]
+          PathExpression [37-55]
+            Identifier(ARRAY_INCLUDES_ANY) [37-55]
+          PathExpression [56-69]
+            Identifier(a) [56-57]
+            Identifier(TrackRating) [58-69]
+          ArrayConstructor [71-80]
+            IntLiteral(3) [72-73]
+            IntLiteral(4) [75-76]
+            IntLiteral(5) [78-79]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/search_functions#tokenize_number
 SELECT a.AlbumId

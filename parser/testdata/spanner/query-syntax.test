@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/query-syntax
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/query-syntax#select_star
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 SELECT * FROM (SELECT "apple" AS fruit, "carrot" AS vegetable)
@@ -289,12 +289,6 @@ QueryStatement [0-138]
             Identifier(orders) [132-138]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/query-syntax#select_replace
-/*----------+-----------+----------+
- | order_id | item_name | quantity |
- +----------+-----------+----------+
- | 5        | widget    | 200      |
- +----------+-----------+----------*/
-
 WITH orders AS
   (SELECT 5 as order_id,
   "sprocket" as item_name,
@@ -302,43 +296,43 @@ WITH orders AS
 SELECT * REPLACE (quantity/2 AS quantity)
 FROM orders
 --
-QueryStatement [187-326]
-  Query [187-326]
-    WithClause [187-272]
-      WithClauseEntry [192-272]
-        AliasedQuery [192-272]
-          Identifier(orders) [192-198]
-          Query [204-272]
-            Select [205-271]
-              SelectList [212-271]
-                SelectColumn [212-225]
-                  IntLiteral(5) [212-213]
-                  Alias [214-225]
-                    Identifier(order_id) [217-225]
-                SelectColumn [229-252]
-                  StringLiteral [229-239]
-                    StringLiteralComponent("sprocket") [229-239]
-                  Alias [240-252]
-                    Identifier(item_name) [243-252]
-                SelectColumn [256-271]
-                  IntLiteral(200) [256-259]
-                  Alias [260-271]
-                    Identifier(quantity) [263-271]
-    Select [273-326]
-      SelectList [280-314]
-        SelectColumn [280-314]
-          StarWithModifiers [280-314]
-            StarModifiers [282-314]
-              StarReplaceItem [291-313]
-                BinaryExpression(/) [291-301]
-                  PathExpression [291-299]
-                    Identifier(quantity) [291-299]
-                  IntLiteral(2) [300-301]
-                Identifier(quantity) [305-313]
-      FromClause [315-326]
-        TablePathExpression [320-326]
-          PathExpression [320-326]
-            Identifier(orders) [320-326]
+QueryStatement [0-139]
+  Query [0-139]
+    WithClause [0-85]
+      WithClauseEntry [5-85]
+        AliasedQuery [5-85]
+          Identifier(orders) [5-11]
+          Query [17-85]
+            Select [18-84]
+              SelectList [25-84]
+                SelectColumn [25-38]
+                  IntLiteral(5) [25-26]
+                  Alias [27-38]
+                    Identifier(order_id) [30-38]
+                SelectColumn [42-65]
+                  StringLiteral [42-52]
+                    StringLiteralComponent("sprocket") [42-52]
+                  Alias [53-65]
+                    Identifier(item_name) [56-65]
+                SelectColumn [69-84]
+                  IntLiteral(200) [69-72]
+                  Alias [73-84]
+                    Identifier(quantity) [76-84]
+    Select [86-139]
+      SelectList [93-127]
+        SelectColumn [93-127]
+          StarWithModifiers [93-127]
+            StarModifiers [95-127]
+              StarReplaceItem [104-126]
+                BinaryExpression(/) [104-114]
+                  PathExpression [104-112]
+                    Identifier(quantity) [104-112]
+                  IntLiteral(2) [113-114]
+                Identifier(quantity) [118-126]
+      FromClause [128-139]
+        TablePathExpression [133-139]
+          PathExpression [133-139]
+            Identifier(orders) [133-139]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/query-syntax#using_structs_with_select
 SELECT STRUCT(1, 2) FROM Users
@@ -4683,13 +4677,6 @@ JOIN
       WHERE PlayerStats.OpponentID = Roster.SchoolID
     )) AS PlayerMatches
   ON PlayerMatches.LastName = 'Buchanan'
-
-/*------------+----------+----------+------------+--------------+
- | LastName   | SchoolID | LastName | OpponentID | PointsScored |
- +------------+----------+----------+------------+--------------+
- | Adams      | 50       | Buchanan | 50         | 13           |
- | Eisenhower | 77       | Buchanan | 77         | 0            |
- +------------+----------+----------+------------+--------------*/
 --
 QueryStatement [0-214]
   Query [0-214]
@@ -6990,12 +6977,6 @@ WITH
   A AS (SELECT 1 AS n),
   B AS (SELECT * FROM A)
 SELECT * FROM B
-
-/*---+
- | n |
- +---+
- | 1 |
- +---*/
 --
 QueryStatement [0-69]
   Query [0-69]
@@ -7785,12 +7766,6 @@ QueryStatement [0-96]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/query-syntax#value_tables
 SELECT * FROM (SELECT AS VALUE STRUCT(123 AS a, FALSE AS b))
-
-/*-----+-------+
- | a   | b     |
- +-----+-------+
- | 123 | FALSE |
- +-----+-------*/
 --
 QueryStatement [0-60]
   Query [0-60]

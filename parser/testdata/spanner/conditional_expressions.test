@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#case_expr
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 WITH Numbers AS (
@@ -21,15 +21,6 @@ SELECT
     END
     AS result
 FROM Numbers
-
-/*------------------+
- | A  | B  | result |
- +------------------+
- | 90 | 2  | red    |
- | 50 | 8  | blue   |
- | 60 | 6  | green  |
- | 50 | 10 | blue   |
- +------------------*/
 --
 QueryStatement [0-245]
   Query [0-245]
@@ -120,14 +111,6 @@ SELECT
     END
     AS result
 FROM Numbers
-
-/*------------------+
- | A  | B  | result |
- +------------------+
- | 90 | 2  | red    |
- | 50 | 6  | blue   |
- | 20 | 10 | green  |
- +------------------*/
 --
 QueryStatement [0-225]
   Query [0-225]
@@ -199,12 +182,6 @@ QueryStatement [0-225]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#coalesce
 SELECT COALESCE('A', 'B', 'C') as result
-
-/*--------+
- | result |
- +--------+
- | A      |
- +--------*/
 --
 QueryStatement [0-40]
   Query [0-40]
@@ -225,12 +202,6 @@ QueryStatement [0-40]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#coalesce
 SELECT COALESCE(NULL, 'B', 'C') as result
-
-/*--------+
- | result |
- +--------+
- | B      |
- +--------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -252,12 +223,6 @@ QueryStatement [0-41]
 -- The first expression is non-NULL, so it's used. The division-by-zero error
 -- from the second expression isn't produced.
 SELECT COALESCE(10, 1 / 0) as result
-
-/*--------+
- | result |
- +--------+
- | 10     |
- +--------*/
 --
 QueryStatement [124-160]
   Query [124-160]
@@ -351,12 +316,6 @@ SELECT
   10 AS A,
   20 AS B,
   IF(10 < 20, 'true', 'false') AS result
-
-/*------------------+
- | A  | B  | result |
- +------------------+
- | 10 | 20 | true   |
- +------------------*/
 --
 QueryStatement [0-69]
   Query [0-69]
@@ -389,12 +348,6 @@ SELECT
   30 AS A,
   20 AS B,
   IF(30 < 20, 'true', 'false') AS result
-
-/*------------------+
- | A  | B  | result |
- +------------------+
- | 30 | 20 | false  |
- +------------------*/
 --
 QueryStatement [0-69]
   Query [0-69]
@@ -436,12 +389,6 @@ FunctionCall [0-25]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#ifnull
 SELECT IFNULL(NULL, 0) as result
-
-/*--------+
- | result |
- +--------+
- | 0      |
- +--------*/
 --
 QueryStatement [0-32]
   Query [0-32]
@@ -458,12 +405,6 @@ QueryStatement [0-32]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#ifnull
 SELECT IFNULL(10, 0) as result
-
-/*--------+
- | result |
- +--------+
- | 10     |
- +--------*/
 --
 QueryStatement [0-30]
   Query [0-30]
@@ -482,12 +423,6 @@ QueryStatement [0-30]
 -- The first expression is non-NULL, so it's used. The division-by-zero error
 -- from the second expression isn't produced.
 SELECT IFNULL(10, 1 / 0) as result
-
-/*--------+
- | result |
- +--------+
- | 10     |
- +--------*/
 --
 QueryStatement [124-158]
   Query [124-158]
@@ -518,12 +453,6 @@ FunctionCall [0-27]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#nullif
 SELECT NULLIF(0, 0) as result
-
-/*--------+
- | result |
- +--------+
- | NULL   |
- +--------*/
 --
 QueryStatement [0-29]
   Query [0-29]
@@ -540,12 +469,6 @@ QueryStatement [0-29]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/conditional_expressions#nullif
 SELECT NULLIF(10, 0) as result
-
-/*--------+
- | result |
- +--------+
- | 10     |
- +--------*/
 --
 QueryStatement [0-30]
   Query [0-30]

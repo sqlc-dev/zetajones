@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/mathematical_functions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/mathematical_functions#abs
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 [mode=expression]
@@ -397,12 +397,6 @@ FunctionCall [0-29]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/mathematical_functions#dot_product
 SELECT DOT_PRODUCT([100], [200]) AS results
-
-/*---------+
- | results |
- +---------+
- | 20000   |
- +---------*/
 --
 QueryStatement [0-43]
   Query [0-43]
@@ -421,12 +415,6 @@ QueryStatement [0-43]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/mathematical_functions#dot_product
 SELECT DOT_PRODUCT([100, 10], [200, 6]) AS results
-
-/*---------+
- | results |
- +---------+
- | 20060   |
- +---------*/
 --
 QueryStatement [0-50]
   Query [0-50]
@@ -447,12 +435,6 @@ QueryStatement [0-50]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/mathematical_functions#dot_product
 SELECT DOT_PRODUCT([100, 10, 1], [200, 6, 2]) AS results
-
-/*---------+
- | results |
- +---------+
- | 20062   |
- +---------*/
 --
 QueryStatement [0-56]
   Query [0-56]
@@ -475,12 +457,6 @@ QueryStatement [0-56]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/mathematical_functions#dot_product
 SELECT DOT_PRODUCT([], []) AS results
-
-/*---------+
- | results |
- +---------+
- | 0       |
- +---------*/
 --
 QueryStatement [0-37]
   Query [0-37]

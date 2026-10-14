@@ -2,7 +2,9 @@ package testfile
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -52,4 +54,23 @@ func SaveMetadata(testPath string, meta *Metadata) error {
 		return err
 	}
 	return os.WriteFile(MetadataPath(testPath), append(data, '\n'), 0o644)
+}
+
+// FindFiles returns the .test files under dir, recursively, in lexical
+// order. A missing dir yields no files.
+func FindFiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) && path == dir {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".test") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
 }

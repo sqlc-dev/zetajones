@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/bit_functions
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/bit_functions#bit_count
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 [mode=expression]
@@ -118,12 +118,6 @@ FunctionCall [0-33]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/bit_functions#bit_reverse
 SELECT BIT_REVERSE(100, true) AS results
-
-/*---------------------+
- | Results             |
- +---------------------+
- | 1369094286720630784 |
- +---------------------*/
 --
 QueryStatement [0-40]
   Query [0-40]
@@ -140,12 +134,6 @@ QueryStatement [0-40]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/bit_functions#bit_reverse
 SELECT BIT_REVERSE(100, false) AS results
-
-/*---------------------+
- | Results             |
- +---------------------+
- | 2738188573441261568 |
- +---------------------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -162,12 +150,6 @@ QueryStatement [0-41]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/bit_functions#bit_reverse
 SELECT BIT_REVERSE(-100, true) AS results
-
-/*----------------------+
- | Results              |
- +----------------------+
- | -7133701809754865665 |
- +----------------------*/
 --
 QueryStatement [0-41]
   Query [0-41]
@@ -185,12 +167,6 @@ QueryStatement [0-41]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/bit_functions#bit_reverse
 SELECT BIT_REVERSE(-100, false) AS results
-
-/*---------------------+
- | Results             |
- +---------------------+
- | 4179340454199820287 |
- +---------------------*/
 --
 QueryStatement [0-42]
   Query [0-42]

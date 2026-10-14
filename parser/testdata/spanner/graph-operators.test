@@ -5,6 +5,176 @@
 [default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
+GRAPH FinGraph
+MATCH
+  p=(src:Account)-[t1:Transfers]->(mid:Account),
+  q = (mid)-[t2:Transfers]->(dst:Account)
+LET full_path = p || q
+RETURN
+  JSON_QUERY(TO_JSON(full_path)[0], '$.labels') AS element_a,
+  JSON_QUERY(TO_JSON(full_path)[1], '$.labels') AS element_b,
+  JSON_QUERY(TO_JSON(full_path)[2], '$.labels') AS element_c,
+  JSON_QUERY(TO_JSON(full_path)[3], '$.labels') AS element_d,
+  JSON_QUERY(TO_JSON(full_path)[4], '$.labels') AS element_e,
+  JSON_QUERY(TO_JSON(full_path)[5], '$.labels') AS element_f
+--
+QueryStatement [0-512]
+  Query [0-512]
+    GqlQuery [0-512]
+      GraphTableQuery [0-512]
+        PathExpression [6-14]
+          Identifier(FinGraph) [6-14]
+        GqlOperatorList [15-512]
+          GqlOperatorList [15-512]
+            GqlMatch [15-111]
+              GraphPattern [23-111]
+                GraphPathPattern [23-68]
+                  Identifier(p) [23-24]
+                  GraphNodePattern [25-38]
+                    GraphElementPatternFiller [26-37]
+                      Identifier(src) [26-29]
+                      GraphLabelFilter [29-37]
+                        GraphElementLabel [30-37]
+                          Identifier(Account) [30-37]
+                  GraphEdgePattern [38-55]
+                    GraphElementPatternFiller [40-52]
+                      Identifier(t1) [40-42]
+                      GraphLabelFilter [42-52]
+                        GraphElementLabel [43-52]
+                          Identifier(Transfers) [43-52]
+                  GraphNodePattern [55-68]
+                    GraphElementPatternFiller [56-67]
+                      Identifier(mid) [56-59]
+                      GraphLabelFilter [59-67]
+                        GraphElementLabel [60-67]
+                          Identifier(Account) [60-67]
+                GraphPathPattern [72-111]
+                  Identifier(q) [72-73]
+                  GraphNodePattern [76-81]
+                    GraphElementPatternFiller [77-80]
+                      Identifier(mid) [77-80]
+                  GraphEdgePattern [81-98]
+                    GraphElementPatternFiller [83-95]
+                      Identifier(t2) [83-85]
+                      GraphLabelFilter [85-95]
+                        GraphElementLabel [86-95]
+                          Identifier(Transfers) [86-95]
+                  GraphNodePattern [98-111]
+                    GraphElementPatternFiller [99-110]
+                      Identifier(dst) [99-102]
+                      GraphLabelFilter [102-110]
+                        GraphElementLabel [103-110]
+                          Identifier(Account) [103-110]
+            GqlLet [112-134]
+              GqlLetVariableDefinitionList [116-134]
+                GqlLetVariableDefinition [116-134]
+                  Identifier(full_path) [116-125]
+                  BinaryExpression(||) [128-134]
+                    PathExpression [128-129]
+                      Identifier(p) [128-129]
+                    PathExpression [133-134]
+                      Identifier(q) [133-134]
+            GqlReturn [135-512]
+              Select [144-512]
+                SelectList [144-512]
+                  SelectColumn [144-202]
+                    FunctionCall [144-189]
+                      PathExpression [144-154]
+                        Identifier(JSON_QUERY) [144-154]
+                      ArrayElement [155-176]
+                        FunctionCall [155-173]
+                          PathExpression [155-162]
+                            Identifier(TO_JSON) [155-162]
+                          PathExpression [163-172]
+                            Identifier(full_path) [163-172]
+                        Location [173-174]
+                        IntLiteral(0) [174-175]
+                      StringLiteral [178-188]
+                        StringLiteralComponent('$.labels') [178-188]
+                    Alias [190-202]
+                      Identifier(element_a) [193-202]
+                  SelectColumn [206-264]
+                    FunctionCall [206-251]
+                      PathExpression [206-216]
+                        Identifier(JSON_QUERY) [206-216]
+                      ArrayElement [217-238]
+                        FunctionCall [217-235]
+                          PathExpression [217-224]
+                            Identifier(TO_JSON) [217-224]
+                          PathExpression [225-234]
+                            Identifier(full_path) [225-234]
+                        Location [235-236]
+                        IntLiteral(1) [236-237]
+                      StringLiteral [240-250]
+                        StringLiteralComponent('$.labels') [240-250]
+                    Alias [252-264]
+                      Identifier(element_b) [255-264]
+                  SelectColumn [268-326]
+                    FunctionCall [268-313]
+                      PathExpression [268-278]
+                        Identifier(JSON_QUERY) [268-278]
+                      ArrayElement [279-300]
+                        FunctionCall [279-297]
+                          PathExpression [279-286]
+                            Identifier(TO_JSON) [279-286]
+                          PathExpression [287-296]
+                            Identifier(full_path) [287-296]
+                        Location [297-298]
+                        IntLiteral(2) [298-299]
+                      StringLiteral [302-312]
+                        StringLiteralComponent('$.labels') [302-312]
+                    Alias [314-326]
+                      Identifier(element_c) [317-326]
+                  SelectColumn [330-388]
+                    FunctionCall [330-375]
+                      PathExpression [330-340]
+                        Identifier(JSON_QUERY) [330-340]
+                      ArrayElement [341-362]
+                        FunctionCall [341-359]
+                          PathExpression [341-348]
+                            Identifier(TO_JSON) [341-348]
+                          PathExpression [349-358]
+                            Identifier(full_path) [349-358]
+                        Location [359-360]
+                        IntLiteral(3) [360-361]
+                      StringLiteral [364-374]
+                        StringLiteralComponent('$.labels') [364-374]
+                    Alias [376-388]
+                      Identifier(element_d) [379-388]
+                  SelectColumn [392-450]
+                    FunctionCall [392-437]
+                      PathExpression [392-402]
+                        Identifier(JSON_QUERY) [392-402]
+                      ArrayElement [403-424]
+                        FunctionCall [403-421]
+                          PathExpression [403-410]
+                            Identifier(TO_JSON) [403-410]
+                          PathExpression [411-420]
+                            Identifier(full_path) [411-420]
+                        Location [421-422]
+                        IntLiteral(4) [422-423]
+                      StringLiteral [426-436]
+                        StringLiteralComponent('$.labels') [426-436]
+                    Alias [438-450]
+                      Identifier(element_e) [441-450]
+                  SelectColumn [454-512]
+                    FunctionCall [454-499]
+                      PathExpression [454-464]
+                        Identifier(JSON_QUERY) [454-464]
+                      ArrayElement [465-486]
+                        FunctionCall [465-483]
+                          PathExpression [465-472]
+                            Identifier(TO_JSON) [465-472]
+                          PathExpression [473-482]
+                            Identifier(full_path) [473-482]
+                        Location [483-484]
+                        IntLiteral(5) [484-485]
+                      StringLiteral [488-498]
+                        StringLiteralComponent('$.labels') [488-498]
+                    Alias [500-512]
+                      Identifier(element_f) [503-512]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/graph-operators#graph_concatenation_operator
 -- Error: `mid1` and `mid2` aren't equal.
 GRAPH FinGraph
 MATCH
@@ -92,14 +262,6 @@ MATCH
 WHERE a1.id < a4.id
 RETURN
   ALL_DIFFERENT(t1, t2, t3) AS results
-
-/*---------+
- | results |
- +---------+
- | FALSE   |
- | TRUE    |
- | TRUE    |
- +---------*/
 --
 QueryStatement [0-191]
   Query [0-191]
@@ -183,16 +345,6 @@ GRAPH FinGraph
 MATCH (a:Account)-[transfer:Transfers]-(b:Account)
 WHERE a IS DESTINATION of transfer
 RETURN a.id AS a_id, b.id AS b_id
-
-/*-------------+
- | a_id | b_id |
- +-------------+
- | 16   | 7    |
- | 16   | 7    |
- | 20   | 16   |
- | 7    | 20   |
- | 16   | 20   |
- +-------------*/
 --
 QueryStatement [0-134]
   Query [0-134]
@@ -250,16 +402,6 @@ GRAPH FinGraph
 MATCH (a:Account)-[transfer:Transfers]-(b:Account)
 WHERE b IS DESTINATION of transfer
 RETURN a.id AS a_id, b.id AS b_id
-
-/*-------------+
- | a_id | b_id |
- +-------------+
- | 7    | 16   |
- | 7    | 16   |
- | 16   | 20   |
- | 20   | 7    |
- | 20   | 16   |
- +-------------*/
 --
 QueryStatement [0-134]
   Query [0-134]
@@ -317,17 +459,6 @@ GRAPH FinGraph
 MATCH (a)
 WHERE a IS LABELED Account | Person
 RETURN a.id AS a_id, LABELS(a) AS labels
-
-/*----------------+
- | a_id | labels  |
- +----------------+
- | 1    | Person  |
- | 2    | Person  |
- | 3    | Person  |
- | 7    | Account |
- | 16   | Account |
- | 20   | Account |
- +----------------*/
 --
 QueryStatement [0-101]
   Query [0-101]
@@ -376,24 +507,6 @@ MATCH (a)-[e]-(b:Account)
 WHERE e IS LABELED Transfers | Owns
 RETURN a.Id as a_id, Labels(e) AS labels, b.Id as b_id
 ORDER BY a_id, b_id
-
-/*------+-----------------------+------+
- | a_id | labels                | b_id |
- +------+-----------------------+------+
- |    1 | [owns]                |    7 |
- |    2 | [owns]                |   20 |
- |    3 | [owns]                |   16 |
- |    7 | [transfers]           |   16 |
- |    7 | [transfers]           |   16 |
- |    7 | [transfers]           |   20 |
- |   16 | [transfers]           |    7 |
- |   16 | [transfers]           |    7 |
- |   16 | [transfers]           |   20 |
- |   16 | [transfers]           |   20 |
- |   20 | [transfers]           |    7 |
- |   20 | [transfers]           |   16 |
- |   20 | [transfers]           |   16 |
- +------+-----------------------+------*/
 --
 QueryStatement [0-151]
   Query [0-151]
@@ -464,12 +577,6 @@ GRAPH FinGraph
 MATCH (a:Account {Id: 7})
 OPTIONAL MATCH (a)-[:OWNS]->(b)
 RETURN a.Id AS a_id, b.Id AS b_id, b IS LABELED Account AS b_is_account
-
-/*------+-----------------------+
- | a_id | b_id   | b_is_account |
- +------+-----------------------+
- | 7    | NULL   | NULL         |
- +------+-----------------------+*/
 --
 QueryStatement [0-144]
   Query [0-144]
@@ -535,16 +642,6 @@ GRAPH FinGraph
 MATCH (a:Account)-[transfer:Transfers]-(b:Account)
 WHERE a IS SOURCE of transfer
 RETURN a.id AS a_id, b.id AS b_id
-
-/*-------------+
- | a_id | b_id |
- +-------------+
- | 20   | 7    |
- | 7    | 16   |
- | 7    | 16   |
- | 20   | 16   |
- | 16   | 20   |
- +-------------*/
 --
 QueryStatement [0-129]
   Query [0-129]
@@ -602,16 +699,6 @@ GRAPH FinGraph
 MATCH (a:Account)-[transfer:Transfers]-(b:Account)
 WHERE b IS SOURCE of transfer
 RETURN a.id AS a_id, b.id AS b_id
-
-/*-------------+
- | a_id | b_id |
- +-------------+
- | 7    | 20   |
- | 16   | 7    |
- | 16   | 7    |
- | 16   | 20   |
- | 20   | 16   |
- +-------------*/
 --
 QueryStatement [0-129]
   Query [0-129]
@@ -680,14 +767,6 @@ FunctionCall [0-42]
 GRAPH FinGraph
 MATCH (n:Person|Account WHERE PROPERTY_EXISTS(n, name))
 RETURN n.name
-
-/*------+
- | name |
- +------+
- | Alex |
- | Dana |
- | Lee  |
- +------*/
 --
 QueryStatement [0-84]
   Query [0-84]
@@ -730,16 +809,6 @@ GRAPH FinGraph
 MATCH (src:Account)<-[transfer:Transfers]-(dest:Account)
 WHERE NOT SAME(src, dest)
 RETURN src.id AS source_id, dest.id AS destination_id
-
-/*----------------------------+
- | source_id | destination_id |
- +----------------------------+
- | 7         | 20             |
- | 16        | 7              |
- | 16        | 7              |
- | 16        | 20             |
- | 20        | 16             |
- +----------------------------*/
 --
 QueryStatement [0-151]
   Query [0-151]

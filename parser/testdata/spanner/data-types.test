@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#using_array_literals
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 SELECT [1, 2, 3] AS numbers
@@ -210,36 +210,6 @@ QueryStatement [0-91]
               Identifier(WEEK) [68-72]
           Alias [78-91]
             Identifier(date_array) [81-91]
-==
-# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#graph_element_type
-GRAPH FinGraph
-MATCH (n:Person)
-RETURN n.name
---
-QueryStatement [0-45]
-  Query [0-45]
-    GqlQuery [0-45]
-      GraphTableQuery [0-45]
-        PathExpression [6-14]
-          Identifier(FinGraph) [6-14]
-        GqlOperatorList [15-45]
-          GqlOperatorList [15-45]
-            GqlMatch [15-31]
-              GraphPattern [21-31]
-                GraphPathPattern [21-31]
-                  GraphNodePattern [21-31]
-                    GraphElementPatternFiller [22-30]
-                      Identifier(n) [22-23]
-                      GraphLabelFilter [23-30]
-                        GraphElementLabel [24-30]
-                          Identifier(Person) [24-30]
-            GqlReturn [32-45]
-              Select [39-45]
-                SelectList [39-45]
-                  SelectColumn [39-45]
-                    PathExpression [39-45]
-                      Identifier(n) [39-40]
-                      Identifier(name) [41-45]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#single_datetime_part_interval
 [mode=expression]
@@ -876,6 +846,42 @@ QueryStatement [0-67]
                 StringLiteralComponent('2008-12-25 15:30:00-08:00') [29-56]
           Alias [58-67]
             Identifier(millis) [61-67]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#utc
+SELECT TIMESTAMP '2014-09-27T12:30:00.45Z'
+--
+QueryStatement [0-42]
+  Query [0-42]
+    Select [0-42]
+      SelectList [7-42]
+        SelectColumn [7-42]
+          DateOrTimeLiteral(TYPE_TIMESTAMP) [7-42]
+            StringLiteral [17-42]
+              StringLiteralComponent('2014-09-27T12:30:00.45Z') [17-42]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#utc
+SELECT TIMESTAMP '2014-09-27 12:30:00.45z'
+--
+QueryStatement [0-42]
+  Query [0-42]
+    Select [0-42]
+      SelectList [7-42]
+        SelectColumn [7-42]
+          DateOrTimeLiteral(TYPE_TIMESTAMP) [7-42]
+            StringLiteral [17-42]
+              StringLiteralComponent('2014-09-27 12:30:00.45z') [17-42]
+==
+# https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#utc
+SELECT TIMESTAMP '2014-09-27T12:30:00.45 Etc/UTC'
+--
+QueryStatement [0-49]
+  Query [0-49]
+    Select [0-49]
+      SelectList [7-49]
+        SelectColumn [7-49]
+          DateOrTimeLiteral(TYPE_TIMESTAMP) [7-49]
+            StringLiteral [17-49]
+              StringLiteralComponent('2014-09-27T12:30:00.45 Etc/UTC') [17-49]
 ==
 # https://docs.cloud.google.com/spanner/docs/reference/standard-sql/data-types#time_zone_name
 [mode=expression]
