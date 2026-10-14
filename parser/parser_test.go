@@ -178,6 +178,13 @@ func TestParser(t *testing.T) {
 		t.Fatal(err)
 	}
 	files = append(files, spanner...)
+	// Hand-written cases for zetajones extensions such as SPANNER_DDL, which
+	// have no reference output; run as "extensions/...".
+	extensions, err := testfile.FindFiles(filepath.Join("testdata", "extensions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, extensions...)
 
 	for _, path := range files {
 		name, _ := filepath.Rel("testdata", path)

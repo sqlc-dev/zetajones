@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/introspection/column-operations-statistics
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/introspection/column-operations-statistics#query_the_table_columns_with_the_most_write_operations_for_the_most_recent_interval
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 SELECT interval_end,

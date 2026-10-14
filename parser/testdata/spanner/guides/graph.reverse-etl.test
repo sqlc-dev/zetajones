@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/graph/reverse-etl
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/graph/reverse-etl#insert-data
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 CREATE TABLE Person (
@@ -226,6 +226,24 @@ AlterTableStatement [0-188]
           ColumnAttributeList [182-188]
             HiddenColumnAttribute [182-188]
 ==
+# https://docs.cloud.google.com/spanner/docs/graph/reverse-etl#perform_a_logical_or_soft_delete_in_the_source
+ALTER TABLE PersonOwnAccount
+  ADD ROW DELETION POLICY (OLDER_THAN(expired_ts_generated, INTERVAL 0 DAY))
+--
+AlterTableStatement [0-105]
+  PathExpression [12-28]
+    Identifier(PersonOwnAccount) [12-28]
+  AlterActionList [31-105]
+    AddTtlAction [31-105]
+      FunctionCall [56-104]
+        PathExpression [56-66]
+          Identifier(OLDER_THAN) [56-66]
+        PathExpression [67-87]
+          Identifier(expired_ts_generated) [67-87]
+        IntervalExpr [89-103]
+          IntLiteral(0) [98-99]
+          Identifier(DAY) [100-103]
+==
 # https://docs.cloud.google.com/spanner/docs/graph/reverse-etl#bq-change-history
 ALTER TABLE PersonOwnAccount ADD COLUMN expired_ts TIMESTAMP
 --
@@ -239,3 +257,21 @@ AlterTableStatement [0-60]
         SimpleColumnSchema [51-60]
           PathExpression [51-60]
             Identifier(TIMESTAMP) [51-60]
+==
+# https://docs.cloud.google.com/spanner/docs/graph/reverse-etl#bq-change-history
+ALTER TABLE PersonOwnAccount
+  ADD ROW DELETION POLICY (OLDER_THAN(expired_ts, INTERVAL 1 DAY))
+--
+AlterTableStatement [0-95]
+  PathExpression [12-28]
+    Identifier(PersonOwnAccount) [12-28]
+  AlterActionList [31-95]
+    AddTtlAction [31-95]
+      FunctionCall [56-94]
+        PathExpression [56-66]
+          Identifier(OLDER_THAN) [56-66]
+        PathExpression [67-77]
+          Identifier(expired_ts) [67-77]
+        IntervalExpr [79-93]
+          IntLiteral(1) [88-89]
+          Identifier(DAY) [90-93]

@@ -3,30 +3,9 @@
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 #
 # Spanner syntax the reference parser rejects with
-# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
+# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
 # (classified "spanner" in cmd/spanner-corpus/triage.txt). There is no
 # golden parse tree for these.
-
-# https://docs.cloud.google.com/spanner/docs/create-manage-locality-groups#create-locality-group
-# id 285931116d26: locality groups (create-manage-locality-groups)
-# execute_query: INVALID_ARGUMENT: CREATE LOCALITY GROUP is not supported [at 1:8]
-CREATE LOCALITY GROUP separate_storage;
-
-# https://docs.cloud.google.com/spanner/docs/create-manage-locality-groups#create-locality-group
-# id 999a3d5dfef6: locality groups (create-manage-locality-groups)
-# execute_query: INVALID_ARGUMENT: CREATE LOCALITY GROUP is not supported [at 1:8]
-CREATE LOCALITY GROUP ssd_only OPTIONS (storage='ssd');
-
-# https://docs.cloud.google.com/spanner/docs/create-manage-locality-groups#create-locality-group
-# id 2a925ceede24: locality groups (create-manage-locality-groups)
-# execute_query: INVALID_ARGUMENT: CREATE LOCALITY GROUP is not supported [at 1:8]
-CREATE LOCALITY GROUP hdd_only OPTIONS (storage='hdd');
-
-# https://docs.cloud.google.com/spanner/docs/create-manage-locality-groups#create-age-based-policy
-# id 01a0dff9e706: locality groups (create-manage-locality-groups)
-# execute_query: INVALID_ARGUMENT: CREATE LOCALITY GROUP is not supported [at 1:8]
-CREATE LOCALITY GROUP spill_to_hdd
-OPTIONS (storage = 'ssd', ssd_to_hdd_spill_timespan = '10d');
 
 # https://docs.cloud.google.com/spanner/docs/create-manage-locality-groups#set_a_database-level_locality_group
 # id 32396e1bf247: locality groups (create-manage-locality-groups)

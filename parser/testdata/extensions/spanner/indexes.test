@@ -1,0 +1,120 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Spanner search and vector index clauses, and ALTER INDEX stored columns.
+# ORDER BY and WHERE reuse OrderBy and WhereClause; ", INTERLEAVE IN" reuses
+# SpannerInterleaveClause, which follows OPTIONS in the tree as in the
+# reference.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+CREATE SEARCH INDEX i ON t(a_tokens) STORING (b) PARTITION BY c ORDER BY d DESC WHERE b IS NOT NULL OPTIONS (sort_order_sharding = true)
+--
+CreateIndexStatement(SEARCH) [0-136] [CREATE SEARCH...arding = true)]
+  PathExpression [20-21] [i]
+    Identifier(i) [20-21] [i]
+  PathExpression [25-26] [t]
+    Identifier(t) [25-26] [t]
+  IndexItemList [26-36] [(a_tokens)]
+    OrderingExpression(ASC) [27-35] [a_tokens]
+      PathExpression [27-35] [a_tokens]
+        Identifier(a_tokens) [27-35] [a_tokens]
+  IndexStoringExpressionList [45-48] [(b)]
+    PathExpression [46-47] [b]
+      Identifier(b) [46-47] [b]
+  PartitionBy [49-63] [PARTITION BY c]
+    PathExpression [62-63] [c]
+      Identifier(c) [62-63] [c]
+  OrderBy [64-79] [ORDER BY d DESC]
+    OrderingExpression(DESC) [73-79] [d DESC]
+      PathExpression [73-74] [d]
+        Identifier(d) [73-74] [d]
+  WhereClause [80-99] [WHERE b IS NOT NULL]
+    BinaryExpression(IS NOT) [86-99] [b IS NOT NULL]
+      PathExpression [86-87] [b]
+        Identifier(b) [86-87] [b]
+      NullLiteral(NULL) [95-99] [NULL]
+  OptionsList [108-136] [(sort_order_sharding = true)]
+    OptionsEntry [109-135] [sort_order_sharding = true]
+      Identifier(sort_order_sharding) [109-128] [sort_order_sharding]
+      BooleanLiteral(true) [131-135] [true]
+==
+CREATE SEARCH INDEX i ON t(a_tokens) PARTITION BY c, INTERLEAVE IN p OPTIONS (sort_order_sharding = true)
+--
+CreateIndexStatement(SEARCH) [0-105] [CREATE SEARCH...arding = true)]
+  PathExpression [20-21] [i]
+    Identifier(i) [20-21] [i]
+  PathExpression [25-26] [t]
+    Identifier(t) [25-26] [t]
+  IndexItemList [26-36] [(a_tokens)]
+    OrderingExpression(ASC) [27-35] [a_tokens]
+      PathExpression [27-35] [a_tokens]
+        Identifier(a_tokens) [27-35] [a_tokens]
+  PartitionBy [37-51] [PARTITION BY c]
+    PathExpression [50-51] [c]
+      Identifier(c) [50-51] [c]
+  OptionsList [77-105] [(sort_order_sharding = true)]
+    OptionsEntry [78-104] [sort_order_sharding = true]
+      Identifier(sort_order_sharding) [78-97] [sort_order_sharding]
+      BooleanLiteral(true) [100-104] [true]
+  SpannerInterleaveClause [51-68] [, INTERLEAVE IN p]
+    PathExpression [67-68] [p]
+      Identifier(p) [67-68] [p]
+==
+CREATE VECTOR INDEX i ON t(e) STORING (b) WHERE e IS NOT NULL OPTIONS (distance_type = "COSINE")
+--
+CreateIndexStatement(VECTOR) [0-96] [CREATE VECTOR..."COSINE")]
+  PathExpression [20-21] [i]
+    Identifier(i) [20-21] [i]
+  PathExpression [25-26] [t]
+    Identifier(t) [25-26] [t]
+  IndexItemList [26-29] [(e)]
+    OrderingExpression(ASC) [27-28] [e]
+      PathExpression [27-28] [e]
+        Identifier(e) [27-28] [e]
+  IndexStoringExpressionList [38-41] [(b)]
+    PathExpression [39-40] [b]
+      Identifier(b) [39-40] [b]
+  WhereClause [42-61] [WHERE e IS NOT NULL]
+    BinaryExpression(IS NOT) [48-61] [e IS NOT NULL]
+      PathExpression [48-49] [e]
+        Identifier(e) [48-49] [e]
+      NullLiteral(NULL) [57-61] [NULL]
+  OptionsList [70-96] [(distance_type = "COSINE")]
+    OptionsEntry [71-95] [distance_type = "COSINE"]
+      Identifier(distance_type) [71-84] [distance_type]
+      StringLiteral [87-95] ["COSINE"]
+        StringLiteralComponent("COSINE") [87-95] ["COSINE"]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE VECTOR INDEX i ON t(e) WHERE e IS NOT NULL OPTIONS (distance_type = "COSINE")
+--
+ERROR: Syntax error: Expected end of input but got keyword WHERE [at 1:31]
+CREATE VECTOR INDEX i ON t(e) WHERE e IS NOT NULL OPTIONS (distance_type = "C...
+                              ^
+==
+ALTER INDEX i ADD STORED COLUMN c
+--
+AlterIndexStatement [0-33] [ALTER INDEX...STORED COLUMN c]
+  PathExpression [12-13] [i]
+    Identifier(i) [12-13] [i]
+  AlterActionList [14-33] [ADD STORED COLUMN c]
+    AddStoredColumnAction [14-33] [ADD STORED COLUMN c]
+      Identifier(c) [32-33] [c]
+==
+ALTER VECTOR INDEX i DROP STORED COLUMN c
+--
+AlterIndexStatement [0-41] [ALTER VECTOR...STORED COLUMN c]
+  PathExpression [19-20] [i]
+    Identifier(i) [19-20] [i]
+  AlterActionList [21-41] [DROP STORED COLUMN c]
+    DropStoredColumnAction [21-41] [DROP STORED COLUMN c]
+      Identifier(c) [40-41] [c]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+ALTER INDEX i ADD STORED COLUMN c
+--
+ERROR: Syntax error: Unexpected keyword STORED [at 1:19]
+ALTER INDEX i ADD STORED COLUMN c
+                  ^

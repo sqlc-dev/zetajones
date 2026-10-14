@@ -3,7 +3,7 @@
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 #
 # Spanner syntax the reference parser rejects with
-# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
+# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
 # (classified "spanner" in cmd/spanner-corpus/triage.txt). There is no
 # golden parse tree for these.
 

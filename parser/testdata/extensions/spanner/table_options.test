@@ -1,0 +1,229 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Comma-separated clauses after a Spanner table's PRIMARY KEY. ROW DELETION
+# POLICY and OPTIONS produce the same TtlClause and OptionsList the reference
+# produces when they follow PRIMARY KEY without a comma; INTERLEAVE IN without
+# PARENT is a SpannerInterleaveClause, as for indexes.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+CREATE TABLE t (a INT64) PRIMARY KEY (a), ROW DELETION POLICY (OLDER_THAN(a, INTERVAL 1 DAY))
+--
+CreateTableStatement [0-93] [CREATE TABLE...NTERVAL 1 DAY))]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-24] [(a INT64)]
+    ColumnDefinition [16-23] [a INT64]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-23] [INT64]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+  SpannerTableOptions [25-40] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [25-40] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [37-40] [(a)]
+        PrimaryKeyElement(ASC) [38-39] [a]
+          Identifier(a) [38-39] [a]
+  TtlClause [42-93] [ROW DELETION...NTERVAL 1 DAY))]
+    FunctionCall [63-92] [OLDER_THAN(a, INTERVAL 1 DAY)]
+      PathExpression [63-73] [OLDER_THAN]
+        Identifier(OLDER_THAN) [63-73] [OLDER_THAN]
+      PathExpression [74-75] [a]
+        Identifier(a) [74-75] [a]
+      IntervalExpr [77-91] [INTERVAL 1 DAY]
+        IntLiteral(1) [86-87] [1]
+        Identifier(DAY) [88-91] [DAY]
+==
+CREATE TABLE t (a INT64) PRIMARY KEY (a), OPTIONS (x = 1)
+--
+CreateTableStatement [0-57] [CREATE TABLE...OPTIONS (x = 1)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-24] [(a INT64)]
+    ColumnDefinition [16-23] [a INT64]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-23] [INT64]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+  SpannerTableOptions [25-40] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [25-40] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [37-40] [(a)]
+        PrimaryKeyElement(ASC) [38-39] [a]
+          Identifier(a) [38-39] [a]
+  OptionsList [50-57] [(x = 1)]
+    OptionsEntry [51-56] [x = 1]
+      Identifier(x) [51-52] [x]
+      IntLiteral(1) [55-56] [1]
+==
+CREATE TABLE t (a INT64) PRIMARY KEY (a), INTERLEAVE IN p
+--
+CreateTableStatement [0-57] [CREATE TABLE...INTERLEAVE IN p]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-24] [(a INT64)]
+    ColumnDefinition [16-23] [a INT64]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-23] [INT64]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+  SpannerTableOptions [25-57] [PRIMARY KEY...INTERLEAVE IN p]
+    PrimaryKey(ENFORCED) [25-40] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [37-40] [(a)]
+        PrimaryKeyElement(ASC) [38-39] [a]
+          Identifier(a) [38-39] [a]
+    SpannerInterleaveClause [40-57] [, INTERLEAVE IN p]
+      PathExpression [56-57] [p]
+        Identifier(p) [56-57] [p]
+==
+# All of them, in order.
+CREATE TABLE t (a INT64) PRIMARY KEY (a), INTERLEAVE IN PARENT p ON DELETE CASCADE, ROW DELETION POLICY (OLDER_THAN(a, INTERVAL 1 DAY)), OPTIONS (x = 1)
+--
+CreateTableStatement [0-152] [CREATE TABLE...OPTIONS (x = 1)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-24] [(a INT64)]
+    ColumnDefinition [16-23] [a INT64]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-23] [INT64]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+  SpannerTableOptions [25-82] [PRIMARY KEY...DELETE CASCADE]
+    PrimaryKey(ENFORCED) [25-40] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [37-40] [(a)]
+        PrimaryKeyElement(ASC) [38-39] [a]
+          Identifier(a) [38-39] [a]
+    SpannerInterleaveClause [40-82] [, INTERLEAVE...DELETE CASCADE]
+      PathExpression [63-64] [p]
+        Identifier(p) [63-64] [p]
+  TtlClause [84-135] [ROW DELETION...NTERVAL 1 DAY))]
+    FunctionCall [105-134] [OLDER_THAN(a, INTERVAL 1 DAY)]
+      PathExpression [105-115] [OLDER_THAN]
+        Identifier(OLDER_THAN) [105-115] [OLDER_THAN]
+      PathExpression [116-117] [a]
+        Identifier(a) [116-117] [a]
+      IntervalExpr [119-133] [INTERVAL 1 DAY]
+        IntLiteral(1) [128-129] [1]
+        Identifier(DAY) [130-133] [DAY]
+  OptionsList [145-152] [(x = 1)]
+    OptionsEntry [146-151] [x = 1]
+      Identifier(x) [146-147] [x]
+      IntLiteral(1) [150-151] [1]
+==
+# The reference form without a comma is unchanged.
+CREATE TABLE t (a INT64) PRIMARY KEY (a) ROW DELETION POLICY (x) OPTIONS (y = 1)
+--
+CreateTableStatement [0-80] [CREATE TABLE...OPTIONS (y = 1)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-24] [(a INT64)]
+    ColumnDefinition [16-23] [a INT64]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-23] [INT64]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+  SpannerTableOptions [25-40] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [25-40] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [37-40] [(a)]
+        PrimaryKeyElement(ASC) [38-39] [a]
+          Identifier(a) [38-39] [a]
+  TtlClause [41-64] [ROW DELETION POLICY (x)]
+    PathExpression [62-63] [x]
+      Identifier(x) [62-63] [x]
+  OptionsList [73-80] [(y = 1)]
+    OptionsEntry [74-79] [y = 1]
+      Identifier(y) [74-75] [y]
+      IntLiteral(1) [78-79] [1]
+==
+# Without SPANNER_DDL the comma forms are rejected.
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE TABLE t (a INT64) PRIMARY KEY (a), OPTIONS (x = 1)
+--
+ERROR: Syntax error: Expected end of input but got "," [at 1:41]
+CREATE TABLE t (a INT64) PRIMARY KEY (a), OPTIONS (x = 1)
+                                        ^
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE TABLE t (a INT64) PRIMARY KEY (a), INTERLEAVE IN p
+--
+ERROR: Syntax error: Expected end of input but got "," [at 1:41]
+CREATE TABLE t (a INT64) PRIMARY KEY (a), INTERLEAVE IN p
+                                        ^
+==
+# A table synonym is a table element.
+CREATE TABLE t (a INT64, SYNONYM (u)) PRIMARY KEY (a)
+--
+CreateTableStatement [0-53] [CREATE TABLE...PRIMARY KEY (a)]
+  PathExpression [13-14] [t]
+    Identifier(t) [13-14] [t]
+  TableElementList [15-37] [(a INT64, SYNONYM (u))]
+    ColumnDefinition [16-23] [a INT64]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-23] [INT64]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+    TableSynonym [25-36] [SYNONYM (u)]
+      Identifier(u) [34-35] [u]
+  SpannerTableOptions [38-53] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [38-53] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [50-53] [(a)]
+        PrimaryKeyElement(ASC) [51-52] [a]
+          Identifier(a) [51-52] [a]
+==
+# A queue is declared like a table.
+CREATE QUEUE q (a INT64 NOT NULL, b BYTES(MAX)) PRIMARY KEY (a), INTERLEAVE IN PARENT p ON DELETE CASCADE
+--
+CreateQueueStatement [0-105] [CREATE QUEUE...DELETE CASCADE]
+  PathExpression [13-14] [q]
+    Identifier(q) [13-14] [q]
+  TableElementList [15-47] [(a INT64 NOT...BYTES(MAX))]
+    ColumnDefinition [16-32] [a INT64 NOT NULL]
+      Identifier(a) [16-17] [a]
+      SimpleColumnSchema [18-32] [INT64 NOT NULL]
+        PathExpression [18-23] [INT64]
+          Identifier(INT64) [18-23] [INT64]
+        ColumnAttributeList [24-32] [NOT NULL]
+          NotNullColumnAttribute [24-32] [NOT NULL]
+    ColumnDefinition [34-46] [b BYTES(MAX)]
+      Identifier(b) [34-35] [b]
+      SimpleColumnSchema [36-46] [BYTES(MAX)]
+        PathExpression [36-41] [BYTES]
+          Identifier(BYTES) [36-41] [BYTES]
+        TypeParameterList [41-45] [(MAX]
+          MaxLiteral() [42-45] [MAX]
+  SpannerTableOptions [48-105] [PRIMARY KEY...DELETE CASCADE]
+    PrimaryKey(ENFORCED) [48-63] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [60-63] [(a)]
+        PrimaryKeyElement(ASC) [61-62] [a]
+          Identifier(a) [61-62] [a]
+    SpannerInterleaveClause [63-105] [, INTERLEAVE...DELETE CASCADE]
+      PathExpression [86-87] [p]
+        Identifier(p) [86-87] [p]
+==
+CREATE QUEUE IF NOT EXISTS q (a INT64) PRIMARY KEY (a), OPTIONS (x = 1)
+--
+CreateQueueStatement(is_if_not_exists) [0-71] [CREATE QUEUE...OPTIONS (x = 1)]
+  PathExpression [27-28] [q]
+    Identifier(q) [27-28] [q]
+  TableElementList [29-38] [(a INT64)]
+    ColumnDefinition [30-37] [a INT64]
+      Identifier(a) [30-31] [a]
+      SimpleColumnSchema [32-37] [INT64]
+        PathExpression [32-37] [INT64]
+          Identifier(INT64) [32-37] [INT64]
+  SpannerTableOptions [39-54] [PRIMARY KEY (a)]
+    PrimaryKey(ENFORCED) [39-54] [PRIMARY KEY (a)]
+      PrimaryKeyElementList [51-54] [(a)]
+        PrimaryKeyElement(ASC) [52-53] [a]
+          Identifier(a) [52-53] [a]
+  OptionsList [64-71] [(x = 1)]
+    OptionsEntry [65-70] [x = 1]
+      Identifier(x) [65-66] [x]
+      IntLiteral(1) [69-70] [1]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE QUEUE q (a INT64) PRIMARY KEY (a)
+--
+ERROR: QUEUE is not a supported object type [at 1:8]
+CREATE QUEUE q (a INT64) PRIMARY KEY (a)
+       ^

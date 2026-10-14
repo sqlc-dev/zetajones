@@ -11,11 +11,15 @@ import (
 // FuzzParse feeds arbitrary input through every parse mode. The parser must
 // never panic: invalid input is expected to produce an error, valid input a
 // tree. Both feature extremes are exercised (NONE and MAXIMUM with
-// reserve_graph_table) since feature gating selects different code paths.
+// reserve_graph_table), plus the Spanner DDL extensions, since feature gating
+// selects different code paths.
 func FuzzParse(f *testing.F) {
 	// Seed with the golden corpus so the fuzzer starts from inputs that reach
 	// deep into the grammar.
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.test"))
+	extensions, _ := testfile.FindFiles(filepath.Join("testdata", "extensions"))
+	// Extension cases first, so the seed cap does not drop them.
+	files = append(extensions, files...)
 	seeded := 0
 	for _, path := range files {
 		cases, err := testfile.ParseFile(path)
@@ -44,9 +48,10 @@ func FuzzParse(f *testing.F) {
 	}
 	var noneOpts parser.Options
 	noneOpts.Features = parser.ParseFeatureSet("NONE")
+	spannerOpts := parser.Options{Features: parser.ParseFeatureSet("MAXIMUM,+SPANNER_LEGACY_DDL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL")}
 
 	f.Fuzz(func(t *testing.T, sql string) {
-		for _, opts := range []parser.Options{noneOpts, maxOpts} {
+		for _, opts := range []parser.Options{noneOpts, maxOpts, spannerOpts} {
 			_, _ = parser.ParseStatementWithOptions(sql, opts)
 			_, _ = parser.ParseScriptWithOptions(sql, opts)
 			_, _ = parser.ParseExpressionWithOptions(sql, opts)

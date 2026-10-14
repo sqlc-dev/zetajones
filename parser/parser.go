@@ -303,6 +303,23 @@ const FeatureSpannerLegacyDDL Feature = "SPANNER_LEGACY_DDL"
 // enable it explicitly via language_features).
 const FeatureSQLGraph Feature = "SQL_GRAPH"
 
+// FeatureCreateLocalityGroup gates "CREATE LOCALITY GROUP path
+// [OPTIONS(...)]" (FEATURE_CREATE_LOCALITY_GROUP); see
+// create_locality_group_statement in googlesql.tm. It is not enabled by
+// MAXIMUM.
+const FeatureCreateLocalityGroup Feature = "CREATE_LOCALITY_GROUP"
+
+// FeatureSpannerDDL gates Cloud Spanner DDL that GoogleSQL's reference parser
+// does not accept: fine-grained access control GRANT/REVOKE ... TO/FROM ROLE,
+// change streams, proto bundles, queues, ALTER/DROP LOCALITY GROUP, Spanner
+// column and identity syntax, table synonyms, search and vector index clauses
+// and the comma-separated Spanner table options. It also accepts ROLE and
+// PLACEMENT as generic entity types and SYNONYM as a generic sub-entity type.
+// It is a zetajones extension, not a GoogleSQL LanguageFeature, is meant to be
+// used with SPANNER_LEGACY_DDL, and is not enabled by MAXIMUM. The node shapes
+// are described in ast/spanner.go.
+const FeatureSpannerDDL Feature = "SPANNER_DDL"
+
 // featureInMaximum records whether each gated feature is enabled by
 // language_features=MAXIMUM, i.e. whether it is ideally enabled and not in
 // development; see LanguageOptions::EnableMaximumLanguageFeatures and the
@@ -324,6 +341,8 @@ var featureInMaximum = map[Feature]bool{
 	FeatureRepeat:                               true,
 	FeatureForIn:                                true,
 	FeatureEnableAlterArrayOptions:              true,
+	FeatureCreateLocalityGroup:                  false, // in_development
+	FeatureSpannerDDL:                           false, // zetajones extension
 }
 
 // FeatureSet is a set of enabled language features. The zero value has no
@@ -423,7 +442,18 @@ func newParser(sql string, opts Options, eofImage string) (*parser, error) {
 			toks[n-1].Image = eofImage
 		}
 	}
-	return &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}, nil
+	p := &parser{sql: sql, toks: toks, features: opts.Features, entityTypes: stringSet(opts.SupportedGenericEntityTypes), subEntityTypes: stringSet(opts.SupportedGenericSubEntityTypes), macroMode: opts.MacroExpansionMode, reserveGraphTable: opts.ReserveGraphTable}
+	if p.spanner() {
+		// Spanner roles and placements are plain named objects, and table
+		// synonyms plain named sub-objects; see FeatureSpannerDDL.
+		for _, t := range spannerEntityTypes {
+			p.entityTypes[t] = true
+		}
+		for _, t := range spannerSubEntityTypes {
+			p.subEntityTypes[t] = true
+		}
+	}
+	return p, nil
 }
 
 // trailing semicolon. All language features are enabled.
@@ -1533,12 +1563,25 @@ func (p *parser) parseRenameStatement() (ast.Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.RenameStatement{
-		Span:       span(renameTok.Pos, p.prevEnd()),
-		Identifier: ident,
-		OldName:    oldName,
-		NewName:    newName,
-	}, nil
+	stmt := &ast.RenameStatement{Identifier: ident, OldName: oldName, NewName: newName}
+	// Spanner "RENAME TABLE a TO b, c TO d, ...".
+	for p.spanner() && strings.EqualFold(ident.Name, "TABLE") && p.peek().Kind == token.COMMA {
+		p.advance() // ,
+		from, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("TO"); err != nil {
+			return nil, err
+		}
+		to, err := p.parsePathExpression()
+		if err != nil {
+			return nil, err
+		}
+		stmt.MoreRenames = append(stmt.MoreRenames, ast.RenamePair{OldName: from, NewName: to})
+	}
+	stmt.Span = span(renameTok.Pos, p.prevEnd())
+	return stmt, nil
 }
 
 // parseModuleStatement parses "MODULE path_expression [OPTIONS(...)]"; see
@@ -2888,6 +2931,17 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	if p.peek().Kind == token.QUOTED_IDENT {
 		return nil, p.errorf(p.peek().Pos, "%s is not a supported object type", p.peek().Image)
 	}
+	// CREATE LOCALITY GROUP path [OPTIONS(...)]; see
+	// create_locality_group_statement in googlesql.tm.
+	if !isOrReplace && scope == "" && isKeyword(p.peek(), "LOCALITY") && isKeyword(p.peekAt(1), "GROUP") {
+		return p.parseCreateLocalityGroupStatement(createTok)
+	}
+	// Spanner-only CREATE CHANGE STREAM / PROTO BUNDLE / QUEUE.
+	if p.spanner() && !isOrReplace && scope == "" {
+		if stmt, ok, err := p.parseSpannerCreateStatement(createTok); ok {
+			return stmt, err
+		}
+	}
 	// CREATE [OR REPLACE] generic_entity_type [IF NOT EXISTS] path ...; see
 	// create_entity_statement in googlesql.tm. A generic entity type is a bare
 	// identifier or the PROJECT keyword, and takes no scope modifier. When the
@@ -2937,6 +2991,16 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		}
 		stmt.SpannerOptions = opts
 		stmt.Stop = opts.End()
+		// Spanner also accepts ", INTERLEAVE IN path", ", ROW DELETION POLICY
+		// (...)" and ", OPTIONS (...)" after the primary key.
+		if p.spanner() {
+			ttl, options, err := p.parseSpannerTableTrailers(opts)
+			if err != nil {
+				return nil, err
+			}
+			stmt.Ttl, stmt.Options = ttl, options
+			stmt.Stop = p.prevEnd()
+		}
 	}
 
 	// opt_like_path_expression: "LIKE table_name".
@@ -2981,6 +3045,16 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 		stmt.Stop = cb.End()
 	}
 
+	// opt_ttl_clause: "ROW DELETION POLICY (expression)".
+	if stmt.Ttl == nil && isKeyword(p.peek(), "ROW") && isKeyword(p.peekAt(1), "DELETION") {
+		ttl, err := p.parseTtlClause()
+		if err != nil {
+			return nil, err
+		}
+		stmt.Ttl = ttl
+		stmt.Stop = ttl.End()
+	}
+
 	// opt_with_connection_clause: "WITH CONNECTION connection".
 	if isKeyword(p.peek(), "WITH") {
 		wc, err := p.parseWithConnectionClause()
@@ -2992,7 +3066,7 @@ func (p *parser) parseCreateStatement() (ast.Statement, error) {
 	}
 
 	// opt_options_list: "OPTIONS(...)".
-	if isKeyword(p.peek(), "OPTIONS") {
+	if stmt.Options == nil && isKeyword(p.peek(), "OPTIONS") {
 		p.advance()
 		opts, err := p.parseOptionsList()
 		if err != nil {
@@ -3425,6 +3499,9 @@ func (p *parser) parseTableElementList() (*ast.TableElementList, error) {
 // parseTableElement parses a single column definition or table constraint; see
 // table_element in googlesql.tm.
 func (p *parser) parseTableElement() (ast.Node, error) {
+	if p.spanner() && isKeyword(p.peek(), "SYNONYM") && p.peekAt(1).Kind == token.LPAREN {
+		return p.parseTableSynonym()
+	}
 	if isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY") {
 		return p.parsePrimaryKey()
 	}
@@ -3547,6 +3624,15 @@ func (p *parser) parseTableColumnSchema() (ast.Node, error) {
 		collate = c
 		end = c.End()
 	}
+	// Spanner accepts column attributes (in practice NOT NULL) before the
+	// DEFAULT or generated clause too. They join the attribute list after it,
+	// as in spanner_alter_column_action.
+	var preAttrs *ast.ColumnAttributeList
+	if p.spanner() {
+		if preAttrs = p.tryParseColumnAttributes(); preAttrs != nil {
+			end = preAttrs.End()
+		}
+	}
 	// opt_column_info: generated_column_info or default_column_info.
 	genOrDefault, giEnd, err := p.parseOptColumnInfo()
 	if err != nil {
@@ -3555,14 +3641,29 @@ func (p *parser) parseTableColumnSchema() (ast.Node, error) {
 	if genOrDefault != nil {
 		end = giEnd
 	}
+	// Spanner "ON UPDATE (expression)".
+	var onUpdate *ast.ColumnOnUpdateClause
+	if p.spanner() && isKeyword(p.peek(), "ON") && isKeyword(p.peekAt(1), "UPDATE") {
+		if onUpdate, err = p.parseColumnOnUpdate(); err != nil {
+			return nil, err
+		}
+		end = onUpdate.End()
+	}
 	// column_attributes (from table_column_definition): NOT NULL, PRIMARY KEY.
 	attrs := p.tryParseColumnAttributes()
 	if attrs != nil {
 		end = attrs.End()
 	}
+	if preAttrs != nil {
+		if attrs != nil {
+			preAttrs.Attributes = append(preAttrs.Attributes, attrs.Attributes...)
+			preAttrs.Stop = attrs.Stop
+		}
+		attrs = preAttrs
+	}
 	switch s := schema.(type) {
 	case *ast.SimpleColumnSchema:
-		s.Collate, s.DefaultExpression, s.Attributes, s.Stop = collate, genOrDefault, attrs, end
+		s.Collate, s.DefaultExpression, s.OnUpdate, s.Attributes, s.Stop = collate, genOrDefault, onUpdate, attrs, end
 	case *ast.ArrayColumnSchema:
 		s.Collate, s.Attributes, s.Stop = collate, attrs, end
 	case *ast.StructColumnSchema:
@@ -3875,16 +3976,38 @@ func (p *parser) parseStructColumnField() (*ast.StructColumnField, error) {
 // schema; see column_attributes in googlesql.tm. NOT NULL, PRIMARY KEY and
 // HIDDEN are implemented. It returns nil when no attribute is present.
 func (p *parser) tryParseColumnAttributes() *ast.ColumnAttributeList {
+	// Spanner adds the PLACEMENT KEY and AUTO_INCREMENT attributes.
+	spannerAttr := func() bool {
+		return p.spanner() && ((isKeyword(p.peek(), "PLACEMENT") && isKeyword(p.peekAt(1), "KEY")) ||
+			isKeyword(p.peek(), "AUTO_INCREMENT"))
+	}
 	startsAttr := func() bool {
 		return (isKeyword(p.peek(), "NOT") && isKeyword(p.peekAt(1), "NULL")) ||
 			(isKeyword(p.peek(), "PRIMARY") && isKeyword(p.peekAt(1), "KEY")) ||
-			isKeyword(p.peek(), "HIDDEN")
+			isKeyword(p.peek(), "HIDDEN") || spannerAttr()
 	}
 	if !startsAttr() {
 		return nil
 	}
 	list := &ast.ColumnAttributeList{}
 	for startsAttr() {
+		if spannerAttr() {
+			first := p.advance()
+			last := first
+			var attr ast.Node
+			if isKeyword(first, "PLACEMENT") {
+				last = p.advance() // KEY
+				attr = &ast.PlacementKeyColumnAttribute{Span: span(first.Pos, last.End)}
+			} else {
+				attr = &ast.AutoIncrementColumnAttribute{Span: span(first.Pos, last.End)}
+			}
+			if len(list.Attributes) == 0 {
+				list.Start = first.Pos
+			}
+			list.Stop = last.End
+			list.Attributes = append(list.Attributes, attr)
+			continue
+		}
 		if isKeyword(p.peek(), "HIDDEN") {
 			hiddenTok := p.advance() // HIDDEN
 			if len(list.Attributes) == 0 {
@@ -4782,6 +4905,9 @@ func (p *parser) parseCreateIndexStatement(createTok token.Token, isOrReplace bo
 		stmt.Storing = storing
 		stmt.Stop = storing.End()
 	}
+	if p.spanner() {
+		return p.parseSpannerIndexSuffix(stmt)
+	}
 	// Optional suffix: PARTITION BY [OPTIONS] or OPTIONS.
 	if isKeyword(p.peek(), "PARTITION") {
 		pb, err := p.parseIndexPartitionBy()
@@ -4980,7 +5106,8 @@ func (p *parser) parseIndexPartitionBy() (*ast.PartitionBy, error) {
 		}
 		pb.Expressions = append(pb.Expressions, expr)
 		pb.Stop = p.extEnd(expr)
-		if p.peek().Kind == token.COMMA {
+		// Under Spanner, ", INTERLEAVE IN" ends the list.
+		if p.peek().Kind == token.COMMA && !(p.spanner() && isKeyword(p.peekAt(1), "INTERLEAVE")) {
 			p.advance()
 			continue
 		}
@@ -6331,6 +6458,16 @@ func (p *parser) parseDropStatement() (ast.Statement, error) {
 	dashedName := false
 
 	switch {
+	case p.spanner() && isKeyword(kindTok, "CHANGE") && isKeyword(second, "STREAM"):
+		consumeSecond()
+		objectKind = "CHANGE STREAM"
+		parsesDropMode = false
+	case p.spanner() && isKeyword(kindTok, "LOCALITY") && isKeyword(second, "GROUP"):
+		consumeSecond()
+		objectKind = "LOCALITY GROUP"
+		parsesDropMode = false
+	case p.spanner() && isKeyword(kindTok, "PROTO") && isKeyword(second, "BUNDLE"):
+		return p.parseDropProtoBundleStatement(dropTok)
 	case isKeyword(kindTok, "ROW"):
 		// DROP ROW ACCESS POLICY ...; see drop_statement in googlesql.tm. Only
 		// the unquoted keyword ROW triggers this; a quoted `row` object type
@@ -6557,11 +6694,13 @@ func (p *parser) parseDropIndexStatement(dropTok token.Token) (ast.Statement, er
 // googlesql.tm. The ALTER keyword is already consumed; the parser is at
 // SEARCH or VECTOR.
 func (p *parser) parseAlterIndexStatement(alterTok token.Token) (ast.Statement, error) {
-	kindTok := p.advance() // SEARCH or VECTOR
-	if _, err := p.expectKeyword("INDEX"); err != nil {
-		return nil, err
+	kindTok := p.advance() // SEARCH, VECTOR, or (Spanner) INDEX
+	if !isKeyword(kindTok, "INDEX") {
+		if _, err := p.expectKeyword("INDEX"); err != nil {
+			return nil, err
+		}
 	}
-	stmt := &ast.AlterIndexStatement{Vector: isKeyword(kindTok, "VECTOR"), IsIfExists: p.tryParseIfExists()}
+	stmt := &ast.AlterIndexStatement{Vector: isKeyword(kindTok, "VECTOR"), Plain: isKeyword(kindTok, "INDEX"), IsIfExists: p.tryParseIfExists()}
 	var err error
 	if stmt.Name, err = p.parsePathExpression(); err != nil {
 		return nil, err
@@ -6595,6 +6734,22 @@ func (p *parser) parseAlterIndexStatement(alterTok token.Token) (ast.Statement, 
 // ALTER COLUMN [IF EXISTS] c SET OPTIONS (...), or REBUILD.
 func (p *parser) parseAlterIndexAction() (ast.Node, error) {
 	tok := p.peek()
+	// Spanner "ADD STORED COLUMN c" / "DROP STORED COLUMN c".
+	if p.spanner() && (isKeyword(tok, "ADD") || isKeyword(tok, "DROP")) && isKeyword(p.peekAt(1), "STORED") {
+		p.advance() // ADD or DROP
+		p.advance() // STORED
+		if _, err := p.expectKeyword("COLUMN"); err != nil {
+			return nil, err
+		}
+		col, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		if isKeyword(tok, "ADD") {
+			return &ast.AddStoredColumnAction{Span: span(tok.Pos, col.End()), Column: col}, nil
+		}
+		return &ast.DropStoredColumnAction{Span: span(tok.Pos, col.End()), Column: col}, nil
+	}
 	switch {
 	case isKeyword(tok, "REBUILD"):
 		p.advance()
@@ -6711,12 +6866,38 @@ func (p *parser) parseDropAllRowAccessPoliciesStatement(dropTok token.Token) (as
 // "materialized view"), then the grantee list.
 func (p *parser) parseGrantOrRevokeStatement(isRevoke bool) (ast.Statement, error) {
 	startTok := p.advance() // GRANT or REVOKE
+	// Spanner "GRANT ROLE role, ... TO ROLE grantee, ...".
+	if p.startsSpannerRoleList() {
+		return p.parseGrantRoleStatement(startTok, isRevoke)
+	}
 	privs, err := p.parsePrivileges()
 	if err != nil {
 		return nil, err
 	}
 	if _, err := p.expectKeyword("ON"); err != nil {
 		return nil, err
+	}
+	term := "TO"
+	if isRevoke {
+		term = "FROM"
+	}
+	// Spanner "ON ALL TABLES IN SCHEMA schema, ... TO ROLE role, ...".
+	if p.spanner() && isKeyword(p.peek(), "ALL") {
+		kind, objects, err := p.parseGrantOnAllInSchema()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword(term); err != nil {
+			return nil, err
+		}
+		if _, err := p.expectKeyword("ROLE"); err != nil {
+			return nil, err
+		}
+		roles, err := p.parseIdentifierList()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.GrantToRoleStatement{Span: span(startTok.Pos, roles.End()), IsRevoke: isRevoke, Privileges: privs, ObjectTypes: []*ast.Identifier{kind}, AllInSchema: true, Objects: objects, Roles: roles}, nil
 	}
 
 	// The object name is preceded by up to two object-type identifiers. An
@@ -6727,14 +6908,38 @@ func (p *parser) parseGrantOrRevokeStatement(isRevoke bool) (ast.Statement, erro
 	var objectTypes []*ast.Identifier
 	for {
 		tok := p.peek()
-		if !beginsObjectIdentifier(tok) {
+		if !p.grantObjectToken(tok) {
 			return nil, p.errorf(tok.Pos, "Syntax error: Unexpected %s", describeToken(tok))
 		}
-		if len(objectTypes) < 2 && beginsObjectIdentifier(p.peekAt(1)) {
+		if len(objectTypes) < 2 && p.grantObjectToken(p.peekAt(1)) {
 			objectTypes = append(objectTypes, p.parseIdentifierToken(p.advance()))
 			continue
 		}
 		break
+	}
+	// Spanner accepts several objects ("ON TABLE a, b") and grants them TO
+	// ROLE; see GrantToRoleStatement.
+	if p.spanner() {
+		save := p.pos
+		objects, err := p.parseGrantObjectList()
+		if err != nil {
+			return nil, err
+		}
+		if isKeyword(p.peek(), term) && isKeyword(p.peekAt(1), "ROLE") && beginsObjectIdentifier(p.peekAt(2)) {
+			p.advance() // TO / FROM
+			p.advance() // ROLE
+			roles, err := p.parseIdentifierList()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.GrantToRoleStatement{Span: span(startTok.Pos, roles.End()), IsRevoke: isRevoke, Privileges: privs, ObjectTypes: objectTypes, Objects: objects, Roles: roles}, nil
+		}
+		if len(objects.Paths) > 1 {
+			return nil, p.errorf(p.peek().Pos, "Syntax error: Expected keyword %s ROLE but got %s", term, describeToken(p.peek()))
+		}
+		// A single object granted to string or parameter grantees is the
+		// GoogleSQL GRANT/REVOKE, continued below.
+		p.pos = save
 	}
 	path, err := p.parsePathExpression()
 	if err != nil {
@@ -6745,10 +6950,6 @@ func (p *parser) parseGrantOrRevokeStatement(isRevoke bool) (ast.Statement, erro
 	// with ".", so the error's expected-token set includes "."; the terminator
 	// keyword is only listed when there were no leading object-type identifiers,
 	// matching the reference's LALR state.
-	term := "TO"
-	if isRevoke {
-		term = "FROM"
-	}
 	if !isKeyword(p.peek(), term) {
 		expected := `"."`
 		if len(objectTypes) == 0 {
@@ -6946,6 +7147,14 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 	consumeSecond := func() { p.advance(); p.advance() }
 	second := p.peekAt(1)
 	switch {
+	case p.spanner() && isKeyword(kindTok, "CHANGE") && isKeyword(second, "STREAM"):
+		return p.parseAlterChangeStreamStatement(alterTok)
+	case p.spanner() && isKeyword(kindTok, "LOCALITY") && isKeyword(second, "GROUP"):
+		return p.parseAlterLocalityGroupStatement(alterTok)
+	case p.spanner() && isKeyword(kindTok, "PROTO") && isKeyword(second, "BUNDLE"):
+		return p.parseAlterProtoBundleStatement(alterTok)
+	case p.spanner() && isKeyword(kindTok, "INDEX"):
+		return p.parseAlterIndexStatement(alterTok)
 	case isKeyword(kindTok, "ROW"):
 		return p.parseAlterRowAccessPolicyStatement(alterTok)
 	case isKeyword(kindTok, "ALL"):
@@ -7031,9 +7240,10 @@ func (p *parser) parseAlterStatement() (ast.Statement, error) {
 	}
 	var path *ast.PathExpression
 	var err error
-	if nodeName == "AlterTableStatement" {
+	if nodeName == "AlterTableStatement" || (p.spanner() && nodeName == "AlterDatabaseStatement") {
 		// Only ALTER TABLE uses a maybe-dashed table name; see
-		// alter_statement in googlesql.tm.
+		// alter_statement in googlesql.tm. Spanner database ids may contain
+		// dashes too.
 		path, err = p.parseMaybeDashedPathExpression()
 	} else {
 		path, err = p.parsePathExpression()
@@ -7968,6 +8178,9 @@ func (p *parser) parseAlterColumnAction() (ast.Node, error) {
 		return nil, err
 	}
 	next := p.peek()
+	if p.spanner() && isKeyword(next, "ALTER") && isKeyword(p.peekAt(1), "IDENTITY") {
+		return p.parseAlterColumnIdentityAction(alterTok, name)
+	}
 	// spanner_alter_column_action: "ALTER" "COLUMN" opt_if_exists identifier
 	// column_schema_inner ...; when the token after the column name is neither
 	// SET nor DROP, this is the Spanner form (an inline column redefinition).
@@ -8075,6 +8288,12 @@ func (p *parser) parseSpannerAlterColumnAction(alterTok token.Token, ifPos int, 
 		if _, err := p.expect(token.RPAREN, `")"`); err != nil {
 			return nil, err
 		}
+		// Spanner also accepts a non-stored generated column here.
+		if p.spanner() && !isKeyword(p.peek(), "STORED") {
+			genOrDefault = &ast.GeneratedColumnInfo{Span: span(asTok.Pos, p.prevEnd()), GeneratedMode: "ALWAYS", Expression: expr}
+			end = p.prevEnd()
+			break
+		}
 		storedTok, err := p.expectKeyword("STORED")
 		if err != nil {
 			return nil, err
@@ -8167,6 +8386,19 @@ func (p *parser) parseIdentityColumnInfo() (*ast.IdentityColumnInfo, error) {
 	identityTok, err := p.expectKeyword("IDENTITY")
 	if err != nil {
 		return nil, err
+	}
+	// Spanner allows a bare IDENTITY and its own option syntax.
+	if p.spanner() {
+		info := &ast.IdentityColumnInfo{Span: span(identityTok.Pos, identityTok.End)}
+		if p.peek().Kind != token.LPAREN {
+			return info, nil
+		}
+		p.advance() // (
+		if err := p.parseSpannerIdentityOptions(info); err != nil {
+			return nil, err
+		}
+		info.Stop = p.advance().End // )
+		return info, nil
 	}
 	if _, err := p.expect(token.LPAREN, `"("`); err != nil {
 		return nil, err
@@ -8309,6 +8541,10 @@ func (p *parser) parseOptionsList() (*ast.OptionsList, error) {
 				break
 			}
 			p.advance()
+			// Spanner accepts a trailing comma.
+			if p.spanner() && p.peek().Kind == token.RPAREN {
+				break
+			}
 		}
 	}
 	rparen, err := p.expect(token.RPAREN, `")"`)
@@ -15395,6 +15631,19 @@ func (p *parser) parseTypeParameterList() (*ast.TypeParameterList, error) {
 // in googlesql.tm.
 func (p *parser) parseTypeParameter() (ast.Node, error) {
 	tok := p.peek()
+	// Spanner named type parameters, e.g. ARRAY<FLOAT32>(vector_length=>128).
+	if p.spanner() && isIdentToken(tok) && p.peekAt(1).Kind == token.LAMBDA {
+		name, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		p.advance() // =>
+		value, err := p.parseTypeParameter()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.NamedArgument{Span: span(name.Pos(), value.End()), Name: name, Value: value}, nil
+	}
 	switch tok.Kind {
 	case token.INT:
 		p.advance()

@@ -41,6 +41,26 @@ func main() {
 Every AST node records the byte offsets of the source text it was parsed
 from, matching the reference implementation's parse locations exactly.
 
+## Spanner DDL
+
+Cloud Spanner accepts DDL that the GoogleSQL reference parser does not:
+fine-grained access control (`GRANT ... TO ROLE`), change streams, proto
+bundles, queues, locality groups, row deletion policies after `PRIMARY KEY`,
+identity columns, table synonyms, search and vector index clauses, and more.
+zetajones parses it under the `SPANNER_DDL` feature, which is on by default in
+`ParseStatement` and friends (they enable every feature) and can be enabled
+explicitly:
+
+```go
+opts := parser.Options{
+	Features: parser.ParseFeatureSet("MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL"),
+}
+stmt, err := parser.ParseStatementWithOptions(`GRANT SELECT ON TABLE t TO ROLE r`, opts)
+```
+
+Where Spanner syntax has a GoogleSQL equivalent, the reference nodes are
+reused; the remaining nodes are defined in `ast/spanner.go`.
+
 ## How it is tested
 
 The test corpus in `parser/testdata/` is vendored directly from

@@ -1,0 +1,136 @@
+# Hand-written expected parse trees for Cloud Spanner DDL that GoogleSQL's
+# reference parser rejects, enabled by zetajones's SPANNER_DDL feature. These
+# are not vendored and not generated: there is no reference output, so each
+# tree was reviewed by hand. See "Spanner Extensions" in CLAUDE.md and the
+# node shapes in ast/spanner.go.
+#
+# Roles and placements are generic entities, and table synonyms generic
+# sub-entities: SPANNER_DDL adds ROLE and PLACEMENT to the supported generic
+# entity types and SYNONYM to the sub-entity types.
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL]
+CREATE ROLE r
+--
+CreateEntityStatement [0-13] [CREATE ROLE r]
+  Identifier(ROLE) [7-11] [ROLE]
+  PathExpression [12-13] [r]
+    Identifier(r) [12-13] [r]
+==
+DROP ROLE r
+--
+DropEntityStatement [0-11] [DROP ROLE r]
+  Identifier(ROLE) [5-9] [ROLE]
+  PathExpression [10-11] [r]
+    Identifier(r) [10-11] [r]
+==
+CREATE PLACEMENT p OPTIONS (instance_partition = "europe-partition")
+--
+CreateEntityStatement [0-68] [CREATE PLACEMENT...partition")]
+  Identifier(PLACEMENT) [7-16] [PLACEMENT]
+  PathExpression [17-18] [p]
+    Identifier(p) [17-18] [p]
+  OptionsList [27-68] [(instance_partiti...artition")]
+    OptionsEntry [28-67] [instance_partitio...partition"]
+      Identifier(instance_partition) [28-46] [instance_partition]
+      StringLiteral [49-67] ["europe-partition"]
+        StringLiteralComponent("europe-partition") [49-67] ["europe-partition"]
+==
+DROP PLACEMENT p
+--
+DropEntityStatement [0-16] [DROP PLACEMENT p]
+  Identifier(PLACEMENT) [5-14] [PLACEMENT]
+  PathExpression [15-16] [p]
+    Identifier(p) [15-16] [p]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+CREATE ROLE r
+--
+ERROR: ROLE is not a supported object type [at 1:8]
+CREATE ROLE r
+       ^
+==
+ALTER TABLE t ADD SYNONYM s
+--
+AlterTableStatement [0-27] [ALTER TABLE t ADD SYNONYM s]
+  PathExpression [12-13] [t]
+    Identifier(t) [12-13] [t]
+  AlterActionList [14-27] [ADD SYNONYM s]
+    AddSubEntityAction [14-27] [ADD SYNONYM s]
+      Identifier(SYNONYM) [18-25] [SYNONYM]
+      Identifier(s) [26-27] [s]
+==
+ALTER TABLE t DROP SYNONYM s
+--
+AlterTableStatement [0-28] [ALTER TABLE t DROP SYNONYM s]
+  PathExpression [12-13] [t]
+    Identifier(t) [12-13] [t]
+  AlterActionList [14-28] [DROP SYNONYM s]
+    DropSubEntityAction [14-28] [DROP SYNONYM s]
+      Identifier(SYNONYM) [19-26] [SYNONYM]
+      Identifier(s) [27-28] [s]
+==
+ALTER TABLE t RENAME TO u, ADD SYNONYM t
+--
+AlterTableStatement [0-40] [ALTER TABLE...SYNONYM t]
+  PathExpression [12-13] [t]
+    Identifier(t) [12-13] [t]
+  AlterActionList [14-40] [RENAME TO u, ADD SYNONYM t]
+    RenameToClause [14-25] [RENAME TO u]
+      PathExpression [24-25] [u]
+        Identifier(u) [24-25] [u]
+    AddSubEntityAction [27-40] [ADD SYNONYM t]
+      Identifier(SYNONYM) [31-38] [SYNONYM]
+      Identifier(t) [39-40] [t]
+==
+# Several renames: further pairs follow the first in RenameStatement.
+RENAME TABLE a TO b, c TO d
+--
+RenameStatement [0-27] [RENAME TABLE a TO b, c TO d]
+  Identifier(TABLE) [7-12] [TABLE]
+  PathExpression [13-14] [a]
+    Identifier(a) [13-14] [a]
+  PathExpression [18-19] [b]
+    Identifier(b) [18-19] [b]
+  PathExpression [21-22] [c]
+    Identifier(c) [21-22] [c]
+  PathExpression [26-27] [d]
+    Identifier(d) [26-27] [d]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+RENAME TABLE a TO b, c TO d
+--
+ERROR: Syntax error: Expected end of input but got "," [at 1:20]
+RENAME TABLE a TO b, c TO d
+                   ^
+==
+# Database ids may contain dashes.
+ALTER DATABASE example-db SET OPTIONS (x = 1)
+--
+AlterDatabaseStatement [0-45] [ALTER DATABASE...TIONS (x = 1)]
+  PathExpression [15-25] [example-db]
+    Identifier(`example-db`) [15-25] [example-db]
+  AlterActionList [26-45] [SET OPTIONS (x = 1)]
+    SetOptionsAction [26-45] [SET OPTIONS (x = 1)]
+      OptionsList [38-45] [(x = 1)]
+        OptionsEntry [39-44] [x = 1]
+          Identifier(x) [39-40] [x]
+          IntLiteral(1) [43-44] [1]
+==
+# OPTIONS lists may end in a comma.
+ALTER DATABASE db SET OPTIONS (x = 1,)
+--
+AlterDatabaseStatement [0-38] [ALTER DATABASE...IONS (x = 1,)]
+  PathExpression [15-17] [db]
+    Identifier(db) [15-17] [db]
+  AlterActionList [18-38] [SET OPTIONS (x = 1,)]
+    SetOptionsAction [18-38] [SET OPTIONS (x = 1,)]
+      OptionsList [30-38] [(x = 1,)]
+        OptionsEntry [31-36] [x = 1]
+          Identifier(x) [31-32] [x]
+          IntLiteral(1) [35-36] [1]
+==
+[language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP]
+ALTER DATABASE db SET OPTIONS (x = 1,)
+--
+ERROR: Syntax error: Unexpected ")" [at 1:38]
+ALTER DATABASE db SET OPTIONS (x = 1,)
+                                     ^

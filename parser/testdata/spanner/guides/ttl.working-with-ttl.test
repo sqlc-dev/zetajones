@@ -2,7 +2,7 @@
 # Source: https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 # https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl#verify_your_conditions
-[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
+[default language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE]
 [default no_show_parse_location_text]
 [default reserve_graph_table]
 SELECT COUNT(*)
@@ -213,6 +213,16 @@ CreateTableStatement [0-123]
         PrimaryKeyElement(ASC) [112-122]
           Identifier(CustomerID) [112-122]
 ==
+# https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl#delete
+ALTER TABLE MyTable
+DROP ROW DELETION POLICY
+--
+AlterTableStatement [0-44]
+  PathExpression [12-19]
+    Identifier(MyTable) [12-19]
+  AlterActionList [20-44]
+    DropTtlAction [20-44]
+==
 # https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl#view
 SELECT TABLE_NAME, ROW_DELETION_POLICY_EXPRESSION
 FROM INFORMATION_SCHEMA.TABLES
@@ -238,3 +248,21 @@ QueryStatement [0-129]
           PathExpression [87-117]
             Identifier(ROW_DELETION_POLICY_EXPRESSION) [87-117]
           NullLiteral(NULL) [125-129]
+==
+# https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl#modify
+ALTER TABLE MyTable
+REPLACE ROW DELETION POLICY (OLDER_THAN(ModifiedAt, INTERVAL 7 DAY))
+--
+AlterTableStatement [0-88]
+  PathExpression [12-19]
+    Identifier(MyTable) [12-19]
+  AlterActionList [20-88]
+    ReplaceTtlAction [20-88]
+      FunctionCall [49-87]
+        PathExpression [49-59]
+          Identifier(OLDER_THAN) [49-59]
+        PathExpression [60-70]
+          Identifier(ModifiedAt) [60-70]
+        IntervalExpr [72-86]
+          IntLiteral(7) [81-82]
+          Identifier(DAY) [83-86]

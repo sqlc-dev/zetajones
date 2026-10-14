@@ -74,8 +74,9 @@ The parser tests run them alongside the vendored files, as subtests named
   or expression mode), with its output as the golden tree.
 - `<page>.spanner.sql` — Spanner-only syntax the reference parser rejects
   (e.g. `GRANT ... TO ROLE`, change streams, `CREATE PROTO BUNDLE`,
-  `vector_length`). No golden output: this is the backlog of syntax that
-  needs a design decision before zetajones can parse it.
+  `vector_length`), which zetajones parses under `SPANNER_DDL` (see Spanner
+  Extensions below). No golden output; `TestSpannerOnlySyntax` checks that
+  every statement parses with `SPANNER_DDL` and is rejected without it.
 - `<page>.rejected.sql` — rejected examples not yet triaged. Classify each by
   id in `cmd/spanner-corpus/triage.txt` as `spanner`, `typo` (broken in the
   docs) or `fragment`, then regenerate; this file should not exist after.
@@ -97,6 +98,26 @@ go test ./parser -check-parse
 examples that `pages.go` does not include yet. Do not hand-edit generated
 files; change `cmd/spanner-corpus` instead.
 
+## Spanner Extensions
+
+`SPANNER_DDL` is a zetajones-only feature (not a GoogleSQL LanguageFeature,
+not in `MAXIMUM`) gating the Spanner syntax in `*.spanner.sql`. It also makes
+ROLE and PLACEMENT generic entity types and SYNONYM a generic sub-entity type.
+Parsing lives in `parser/spanner.go` (plus small hooks in `parser.go`), the
+new nodes in `ast/spanner.go`, and their debug strings in
+`internal/dump/spanner.go`. Reuse a reference node whenever the Spanner syntax
+has a GoogleSQL equivalent, and check its shape against the reference output
+for that equivalent spelling (e.g. `, OPTIONS (...)` after `PRIMARY KEY` vs
+the reference's `OPTIONS (...)` without the comma).
+
+Expected trees for this syntax are hand-written in
+`parser/testdata/extensions/spanner/*.test` (same format; run by `TestParser`
+as `extensions/...`). There is no reference output, so draft a tree with
+`go run ./cmd/debug-parse -features MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SPANNER_DDL "<sql>"`,
+review it node by node, and include a case showing the error without
+`SPANNER_DDL`. When a Spanner example becomes reference syntax (a new feature
+flag or release), move it to the generated corpus instead.
+
 ## Alternation Groups
 
 Cases whose SQL or option lines contain `{{a|b|c}}` groups expand into the
@@ -113,7 +134,9 @@ ones that now pass and recording ones that still fail).
 ## Important Rules
 
 - **NEVER modify `.test` files** — they are vendored golden files from the
-  reference implementation. If output doesn't match, fix the Go code.
+  reference implementation. If output doesn't match, fix the Go code. (The
+  hand-written `parser/testdata/extensions/` files are the exception; see
+  Spanner Extensions.)
 - **NEVER hand-edit expected output into metadata** — metadata only marks
   what is not implemented yet.
 - The dump format must match ZetaSQL's `ASTNode::DebugString`

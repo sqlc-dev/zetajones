@@ -1511,7 +1511,14 @@ func nodeString(n ast.Node) string {
 		return "GraphPropertyNameAndValue"
 	case *ast.GraphPathMode:
 		return "GraphPathMode"
+	case *ast.TtlClause:
+		return "TtlClause"
+	case *ast.CreateLocalityGroupStatement:
+		return "CreateLocalityGroupStatement"
 	default:
+		if name, ok := spannerNodeString(n); ok {
+			return name
+		}
 		return fmt.Sprintf("UNKNOWN_NODE(%T)", n)
 	}
 }

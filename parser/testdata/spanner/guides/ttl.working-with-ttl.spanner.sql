@@ -3,7 +3,7 @@
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 #
 # Spanner syntax the reference parser rejects with
-# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
+# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
 # (classified "spanner" in cmd/spanner-corpus/triage.txt). There is no
 # golden parse tree for these.
 
@@ -39,15 +39,3 @@ CREATE TABLE Orders (
     TIMESTAMP_ADD(LastModifiedDate, INTERVAL 180 DAY))) STORED,
 ) PRIMARY KEY(OrderId),
 ROW DELETION POLICY (OLDER_THAN(ExpiredDate, INTERVAL 0 DAY));
-
-# https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl#delete
-# id ebe181a95224: row deletion policy (TTL) (ttl.working-with-ttl)
-# execute_query: INVALID_ARGUMENT: DROP ROW DELETION POLICY clause is not supported. [at 2:6]
-ALTER TABLE MyTable
-DROP ROW DELETION POLICY;
-
-# https://docs.cloud.google.com/spanner/docs/ttl/working-with-ttl#modify
-# id 1de829b56fcf: row deletion policy (TTL) (ttl.working-with-ttl)
-# execute_query: INVALID_ARGUMENT: REPLACE ROW DELETION POLICY clause is not supported. [at 2:9]
-ALTER TABLE MyTable
-REPLACE ROW DELETION POLICY (OLDER_THAN(ModifiedAt, INTERVAL 7 DAY));

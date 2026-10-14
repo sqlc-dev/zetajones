@@ -3,7 +3,7 @@
 # Examples from Google Cloud documentation, licensed under Apache 2.0.
 #
 # Spanner syntax the reference parser rejects with
-# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
+# --enabled_language_features=MAXIMUM,+SPANNER_LEGACY_DDL,+TTL,+CREATE_LOCALITY_GROUP,+SQL_GRAPH,+SQL_GRAPH_ADVANCED_QUERY,+SQL_GRAPH_BOUNDED_PATH_QUANTIFICATION,+SQL_GRAPH_PATH_TYPE,+SQL_GRAPH_PATH_MODE
 # (classified "spanner" in cmd/spanner-corpus/triage.txt). There is no
 # golden parse tree for these.
 
@@ -17,15 +17,3 @@ CREATE TABLE PersonOwnAccount (
   CONSTRAINT FK_Account FOREIGN KEY (account_id) REFERENCES Account (id) NOT ENFORCED
 ) PRIMARY KEY (id, account_id),
 INTERLEAVE IN Person;
-
-# https://docs.cloud.google.com/spanner/docs/graph/reverse-etl#perform_a_logical_or_soft_delete_in_the_source
-# id 27727b8671c2: row deletion policy (TTL) (graph.reverse-etl)
-# execute_query: INVALID_ARGUMENT: ADD ROW DELETION POLICY clause is not supported. [at 2:7]
-ALTER TABLE PersonOwnAccount
-  ADD ROW DELETION POLICY (OLDER_THAN(expired_ts_generated, INTERVAL 0 DAY));
-
-# https://docs.cloud.google.com/spanner/docs/graph/reverse-etl#bq-change-history
-# id c2e5bc718928: row deletion policy (TTL) (graph.reverse-etl)
-# execute_query: INVALID_ARGUMENT: ADD ROW DELETION POLICY clause is not supported. [at 2:7]
-ALTER TABLE PersonOwnAccount
-  ADD ROW DELETION POLICY (OLDER_THAN(expired_ts, INTERVAL 1 DAY));
