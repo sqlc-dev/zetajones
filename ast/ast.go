@@ -2931,6 +2931,23 @@ func (n *DropRowAccessPolicyStatement) Children() []Node {
 	return children(n.Name, n.Target)
 }
 
+// DropIndexStatement is a "DROP {SEARCH|VECTOR} INDEX [IF EXISTS] name
+// [ON table]" statement; see ASTDropSearchIndexStatement and
+// ASTDropVectorIndexStatement in googlesql/parser/parse_tree.h. Vector selects
+// the VECTOR form.
+type DropIndexStatement struct {
+	Span
+	Vector     bool            `json:"vector,omitempty"`
+	IsIfExists bool            `json:"is_if_exists,omitempty"`
+	Name       *PathExpression `json:"name"`
+	Table      *PathExpression `json:"table,omitempty"`
+}
+
+func (n *DropIndexStatement) statementNode() {}
+func (n *DropIndexStatement) Children() []Node {
+	return children(n.Name, n.Table)
+}
+
 // DropAllRowAccessPoliciesStatement is a
 // "DROP ALL ROW [ACCESS] POLICIES ON target" statement; see
 // ASTDropAllRowAccessPoliciesStatement in googlesql/parser/parse_tree.h.
@@ -3940,6 +3957,15 @@ type NotNullColumnAttribute struct {
 }
 
 func (n *NotNullColumnAttribute) Children() []Node { return nil }
+
+// HiddenColumnAttribute is the "HIDDEN" column attribute; see
+// ASTHiddenColumnAttribute in googlesql/parser/parse_tree.h. It has no
+// children.
+type HiddenColumnAttribute struct {
+	Span
+}
+
+func (n *HiddenColumnAttribute) Children() []Node { return nil }
 
 // PrimaryKeyColumnAttribute is the "PRIMARY KEY [ENFORCED|NOT ENFORCED]" column
 // attribute; see ASTPrimaryKeyColumnAttribute in
@@ -6002,3 +6028,200 @@ type GqlPageLimit struct {
 }
 
 func (n *GqlPageLimit) Children() []Node { return children(n.Value) }
+
+// CreatePropertyGraphStatement is a CREATE PROPERTY GRAPH statement; see
+// ASTCreatePropertyGraphStatement in googlesql/parser/parse_tree.h. Scope is
+// "", "TEMP", "PUBLIC", or "PRIVATE". EdgeTables and Options are optional.
+type CreatePropertyGraphStatement struct {
+	Span
+	Scope         string                 `json:"scope,omitempty"`
+	IsOrReplace   bool                   `json:"is_or_replace,omitempty"`
+	IsIfNotExists bool                   `json:"is_if_not_exists,omitempty"`
+	Name          *PathExpression        `json:"name"`
+	NodeTables    *GraphElementTableList `json:"node_tables"`
+	EdgeTables    *GraphElementTableList `json:"edge_tables,omitempty"`
+	Options       *OptionsList           `json:"options,omitempty"`
+}
+
+func (n *CreatePropertyGraphStatement) statementNode() {}
+func (n *CreatePropertyGraphStatement) Children() []Node {
+	return children(n.Name, n.NodeTables, n.EdgeTables, n.Options)
+}
+
+// GraphElementTableList is the parenthesized NODE TABLES or EDGE TABLES list
+// of a property graph; see ASTGraphElementTableList.
+type GraphElementTableList struct {
+	Span
+	Tables []*GraphElementTable `json:"tables"`
+}
+
+func (n *GraphElementTableList) Children() []Node {
+	out := make([]Node, 0, len(n.Tables))
+	for _, t := range n.Tables {
+		out = append(out, t)
+	}
+	return out
+}
+
+// GraphElementTable is one node or edge table definition; see
+// ASTGraphElementTable. Options holds the element-level default label
+// OPTIONS list, which the debug string shows last.
+type GraphElementTable struct {
+	Span
+	Name              *PathExpression                     `json:"name"`
+	Alias             *Alias                              `json:"alias,omitempty"`
+	Key               *ColumnList                         `json:"key,omitempty"`
+	Source            *GraphNodeTableReference            `json:"source,omitempty"`
+	Destination       *GraphNodeTableReference            `json:"destination,omitempty"`
+	LabelProperties   *GraphElementLabelAndPropertiesList `json:"label_properties"`
+	DynamicLabel      *GraphDynamicLabel                  `json:"dynamic_label,omitempty"`
+	DynamicProperties *GraphDynamicProperties             `json:"dynamic_properties,omitempty"`
+	Options           *OptionsList                        `json:"options,omitempty"`
+}
+
+func (n *GraphElementTable) Children() []Node {
+	return children(n.Name, n.Alias, n.Key, n.Source, n.Destination, n.LabelProperties,
+		n.DynamicLabel, n.DynamicProperties, n.Options)
+}
+
+// GraphNodeTableReference is an edge table's "SOURCE KEY (...) REFERENCES
+// node [(...)]" or "DESTINATION KEY ..." clause; see
+// ASTGraphNodeTableReference. Type is "SOURCE" or "DESTINATION".
+type GraphNodeTableReference struct {
+	Span
+	Type        string      `json:"type"`
+	NodeTable   *Identifier `json:"node_table"`
+	EdgeColumns *ColumnList `json:"edge_columns"`
+	NodeColumns *ColumnList `json:"node_columns,omitempty"`
+}
+
+func (n *GraphNodeTableReference) Children() []Node {
+	return children(n.NodeTable, n.EdgeColumns, n.NodeColumns)
+}
+
+// GraphElementLabelAndPropertiesList is an element table's labels and their
+// properties; see ASTGraphElementLabelAndPropertiesList.
+type GraphElementLabelAndPropertiesList struct {
+	Span
+	Items []*GraphElementLabelAndProperties `json:"items"`
+}
+
+func (n *GraphElementLabelAndPropertiesList) Children() []Node {
+	out := make([]Node, 0, len(n.Items))
+	for _, it := range n.Items {
+		out = append(out, it)
+	}
+	return out
+}
+
+// GraphElementLabelAndProperties is a "LABEL name [properties]" or "DEFAULT
+// LABEL [OPTIONS(...)] [properties]" clause; see
+// ASTGraphElementLabelAndProperties. Label is nil for the default label.
+type GraphElementLabelAndProperties struct {
+	Span
+	Label      *Identifier      `json:"label,omitempty"`
+	Options    *OptionsList     `json:"options,omitempty"`
+	Properties *GraphProperties `json:"properties"`
+}
+
+func (n *GraphElementLabelAndProperties) Children() []Node {
+	return children(n.Label, n.Options, n.Properties)
+}
+
+// GraphProperties is a label's properties: NO PROPERTIES, PROPERTIES [ARE]
+// ALL COLUMNS [EXCEPT (...)], or PROPERTIES (derived, ...); see
+// ASTGraphProperties. An omitted clause means all columns.
+type GraphProperties struct {
+	Span
+	NoProperties      bool                      `json:"no_properties,omitempty"`
+	DerivedProperties *GraphDerivedPropertyList `json:"derived_properties,omitempty"`
+	AllExceptColumns  *ColumnList               `json:"all_except_columns,omitempty"`
+}
+
+func (n *GraphProperties) Children() []Node {
+	return children(n.DerivedProperties, n.AllExceptColumns)
+}
+
+// GraphDerivedPropertyList is the list inside PROPERTIES (...); see
+// ASTGraphDerivedPropertyList.
+type GraphDerivedPropertyList struct {
+	Span
+	Properties []*GraphDerivedProperty `json:"properties"`
+}
+
+func (n *GraphDerivedPropertyList) Children() []Node {
+	out := make([]Node, 0, len(n.Properties))
+	for _, d := range n.Properties {
+		out = append(out, d)
+	}
+	return out
+}
+
+// GraphDerivedProperty is "expression [AS alias] [OPTIONS(...)]"; see
+// ASTGraphDerivedProperty.
+type GraphDerivedProperty struct {
+	Span
+	Expression Node         `json:"expression"`
+	Alias      *Alias       `json:"alias,omitempty"`
+	Options    *OptionsList `json:"options,omitempty"`
+}
+
+func (n *GraphDerivedProperty) Children() []Node {
+	return children(n.Expression, n.Alias, n.Options)
+}
+
+// GraphDynamicLabel is the expression of a DYNAMIC LABEL (...) clause; see
+// ASTGraphDynamicLabel.
+type GraphDynamicLabel struct {
+	Span
+	Expression Node `json:"expression"`
+}
+
+func (n *GraphDynamicLabel) Children() []Node { return children(n.Expression) }
+
+// GraphDynamicProperties is the expression of a DYNAMIC PROPERTIES (...)
+// clause; see ASTGraphDynamicProperties.
+type GraphDynamicProperties struct {
+	Span
+	Expression Node `json:"expression"`
+}
+
+func (n *GraphDynamicProperties) Children() []Node { return children(n.Expression) }
+
+// AlterIndexStatement is "ALTER {SEARCH|VECTOR} INDEX [IF EXISTS] name [ON
+// table] actions"; see ASTAlterIndexStatement in
+// googlesql/parser/parse_tree.h. Vector selects the VECTOR form (not shown in
+// the debug string).
+type AlterIndexStatement struct {
+	Span
+	Vector     bool             `json:"vector,omitempty"`
+	IsIfExists bool             `json:"is_if_exists,omitempty"`
+	Name       *PathExpression  `json:"name"`
+	Table      *PathExpression  `json:"table,omitempty"`
+	Actions    *AlterActionList `json:"actions"`
+}
+
+func (n *AlterIndexStatement) statementNode() {}
+func (n *AlterIndexStatement) Children() []Node {
+	return children(n.Name, n.Table, n.Actions)
+}
+
+// AddColumnIdentifierAction is an ALTER INDEX "ADD COLUMN [IF NOT EXISTS]
+// identifier [OPTIONS(...)]" action; see ASTAddColumnIdentifierAction.
+type AddColumnIdentifierAction struct {
+	Span
+	IsIfNotExists bool         `json:"is_if_not_exists,omitempty"`
+	Column        *Identifier  `json:"column"`
+	Options       *OptionsList `json:"options,omitempty"`
+}
+
+func (n *AddColumnIdentifierAction) Children() []Node {
+	return children(n.Column, n.Options)
+}
+
+// RebuildAction is the ALTER INDEX "REBUILD" action; see ASTRebuildAction.
+type RebuildAction struct {
+	Span
+}
+
+func (n *RebuildAction) Children() []Node { return nil }
